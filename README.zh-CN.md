@@ -79,6 +79,41 @@ Rubber Band 仅在升降调时需要；Whisper/MMS 和外部 MSST 属于可选�
 python scripts/check_karaoke_environment.py --target D:\path\to\StrangeUtaGame
 ```
 
+## 脚本来源与依赖边界
+
+仓库中的 19 个生产脚本都是后来为这套制作流程编写的集成脚本。它们在脱敏打包前是
+生产工作树中的未跟踪新增文件，并不是从 StrangeUtaGame 上游 Git 历史中取出的原有
+脚本。下表中的“直接依赖”表示导入了另行获取的 StrangeUtaGame 应用中由 Git 正式
+跟踪的模块；“传递依赖”表示导入或执行了会加载这些上游模块的其他集成脚本。
+
+| 脚本 | 依赖边界 | 具体依赖或用途 |
+|---|---|---|
+| `karaoke_timing.py` | 直接依赖上游模块 | 导入领域实体、导出器和 `SugProjectParser`。 |
+| `karaoke_review_preview.py` | 直接依赖上游模块 | 导入 `Character`、`Sentence` 和 `SugProjectParser`。 |
+| `convert_english_sug_word_tokens.py` | 直接依赖上游模块 | 导入 `SugProjectParser` 和 SUG 时间轴转换逻辑。 |
+| `sync_karaoke_editable_ruby.py` | 传递运行依赖 | 从上述 StrangeUtaGame 相关脚本导入上下文注音与专辑时间轴数据。 |
+| `audit_karaoke_asr_recognition.py` | 传递运行依赖 | 从 `karaoke_timing.py` 导入 LRC 工具；加载该模块时会加载 StrangeUtaGame。 |
+| `audit_karaoke_mms_alignment.py` | 传递运行依赖 | 导入 `karaoke_timing.py`，并读取 SUG JSON 时间轴证据。 |
+| `render_karaoke_direct_av1_album.py` | 传递运行依赖 | 使用 SUG 输入执行 `karaoke_review_preview.py`，重新生成 ASS。 |
+| `render_karaoke_direct_hevc444_album.py` | 传递运行依赖 | 委托给直接 AV1 渲染器，因此沿用其 SUG 预览流程。 |
+| `render_karaoke_direct_av1_420_album.py` | 传递运行依赖 | 导入注音同步器并执行 SUG 预览渲染器。 |
+| `finalize_karaoke_release.py` | SUG 成品/目录依赖 | 不导入应用代码，但会检查 `.sug` 文件和集成发布目录。 |
+| `karaoke_album.py` | 不导入上游代码 | 定义脱敏专辑清单和路径模型。 |
+| `karaoke_language.py` | 不导入上游代码 | 提供语言规范化和分词工具。 |
+| `build_karaoke_wide_artwork.py` | 不导入上游代码 | 使用 Pillow 生成画面素材。 |
+| `render_vinyl_karaoke.py` | 不导入上游代码 | 使用媒体与图像库生成黑胶画面层。 |
+| `inspect_karaoke_media.py` | 不导入上游代码 | 检查编码媒体和共享渲染元数据。 |
+| `transcode_karaoke_av1.py` | 不导入上游代码 | 使用 FFmpeg 元数据转码并验证媒体。 |
+| `prepare_karaoke_msst_vocals.py` | 不导入上游代码 | 为用户另行提供的 MSST 程序准备可选证据。 |
+| `package_karaoke_numbered_archives.py` | 不导入上游代码 | 根据清单路径生成编号归档。 |
+| `karaoke_release_snapshot.py` | 不导入上游代码 | 创建和恢复发布文件快照。 |
+
+辅助工具另行分类：`open_editable_project_with_audio_probe.py` 会动态导入应用的 GUI、
+持久化和音频加载模块；`install_strangeutagame_integration.py` 与
+`check_karaoke_environment.py` 不导入应用代码，但会明确操作现有的 StrangeUtaGame
+工作树。机器可读的权威清单位于
+[`integration/strangeutagame/dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json)。
+
 ## 私有项目数据
 
 复制 `examples/album.example.json` 到私有项目目录，替换全部占位信息，然后通过
@@ -109,6 +144,7 @@ uv run python scripts/karaoke_timing.py --manifest $env:KARAOKE_ALBUM_MANIFEST -
 ├── agents/
 ├── examples/
 ├── integration/strangeutagame/
+│   ├── dependency-manifest.json # 来源与依赖边界
 │   ├── requirements/
 │   └── scripts/                 # 19 个脱敏生产脚本
 ├── references/
@@ -126,7 +162,7 @@ python -m unittest discover -s scripts -p "test_*.py" -v
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-目前包含 20 项单元测试，覆盖：
+目前包含 21 项单元测试，覆盖：
 
 - 所有集成脚本的语法解析和直接入口导入方式回归。
 - 通用专辑清单和私有 override 示例格式。

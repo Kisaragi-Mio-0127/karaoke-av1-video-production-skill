@@ -66,6 +66,44 @@ Check the environment:
 python scripts/check_karaoke_environment.py --target D:\path\to\StrangeUtaGame
 ```
 
+## Script provenance and dependency boundary
+
+All 19 production scripts in this repository are later-developed integration
+scripts. They were untracked additions in the production working tree before
+sanitization and packaging; they are not files taken from StrangeUtaGame's
+upstream Git history. "Direct" below means importing tracked modules from the
+separately obtained StrangeUtaGame application. "Transitive" means importing or
+executing another bundled script that performs that import.
+
+| Script | Boundary | Exact dependency or role |
+|---|---|---|
+| `karaoke_timing.py` | Direct upstream import | Imports domain entities, exporters, and `SugProjectParser`. |
+| `karaoke_review_preview.py` | Direct upstream import | Imports `Character`, `Sentence`, and `SugProjectParser`. |
+| `convert_english_sug_word_tokens.py` | Direct upstream import | Imports `SugProjectParser` and SUG timing-domain conversion helpers. |
+| `sync_karaoke_editable_ruby.py` | Transitive runtime dependency | Imports contextual ruby and album timing data from the two StrangeUtaGame-backed scripts above. |
+| `audit_karaoke_asr_recognition.py` | Transitive runtime dependency | Imports LRC helpers from `karaoke_timing.py`; importing that module loads StrangeUtaGame. |
+| `audit_karaoke_mms_alignment.py` | Transitive runtime dependency | Imports `karaoke_timing.py` and reads SUG JSON timing evidence. |
+| `render_karaoke_direct_av1_album.py` | Transitive runtime dependency | Executes `karaoke_review_preview.py` against SUG input to regenerate ASS. |
+| `render_karaoke_direct_hevc444_album.py` | Transitive runtime dependency | Delegates to the direct AV1 renderer and therefore its SUG preview path. |
+| `render_karaoke_direct_av1_420_album.py` | Transitive runtime dependency | Imports the ruby synchronizer and executes the SUG preview renderer. |
+| `finalize_karaoke_release.py` | SUG artifact/layout dependency | Does not import the application, but verifies expected `.sug` files and integration release layout. |
+| `karaoke_album.py` | No upstream-code import | Defines the sanitized manifest and path model used by the workflow. |
+| `karaoke_language.py` | No upstream-code import | Provides language normalization and tokenization helpers. |
+| `build_karaoke_wide_artwork.py` | No upstream-code import | Builds artwork with Pillow. |
+| `render_vinyl_karaoke.py` | No upstream-code import | Builds the vinyl visual layer with media and image libraries. |
+| `inspect_karaoke_media.py` | No upstream-code import | Inspects encoded media and shared render metadata. |
+| `transcode_karaoke_av1.py` | No upstream-code import | Transcodes and verifies media with FFmpeg metadata. |
+| `prepare_karaoke_msst_vocals.py` | No upstream-code import | Prepares optional evidence for an externally supplied MSST runner. |
+| `package_karaoke_numbered_archives.py` | No upstream-code import | Packages numbered release archives from manifest paths. |
+| `karaoke_release_snapshot.py` | No upstream-code import | Creates and restores release-file snapshots. |
+
+Support tools have a separate boundary: `open_editable_project_with_audio_probe.py`
+dynamically imports the application's GUI, persistence, and audio-loading modules;
+`install_strangeutagame_integration.py` and `check_karaoke_environment.py` do not
+import application code but explicitly operate on an existing checkout. The
+authoritative machine-readable list is
+[`integration/strangeutagame/dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json).
+
 ## Repository layout
 
 ```text
@@ -76,6 +114,7 @@ python scripts/check_karaoke_environment.py --target D:\path\to\StrangeUtaGame
 ├── agents/
 ├── examples/
 ├── integration/strangeutagame/
+│   ├── dependency-manifest.json # provenance and dependency boundary
 │   ├── requirements/
 │   └── scripts/                 # 19 sanitized production scripts
 ├── references/

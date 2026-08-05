@@ -2,6 +2,10 @@
 
 Use this integration only with an authorized StrangeUtaGame checkout. The
 bundled files are a sanitized pipeline snapshot, not the full GUI application.
+They are later-developed integration scripts rather than files from the
+upstream Git history. See the README and
+`integration/strangeutagame/dependency-manifest.json` for the direct,
+transitive, artifact-layout, and no-upstream-import classifications.
 
 ## Install the scripts
 

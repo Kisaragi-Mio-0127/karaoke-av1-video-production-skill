@@ -1,0 +1,124 @@
+{
+  "schema_version": "strangeutagame-script-dependencies/v1",
+  "provenance": "later-developed integration scripts; not files from StrangeUtaGame upstream Git history",
+  "categories": {
+    "direct-upstream-import": "Imports strange_uta_game Python modules directly.",
+    "transitive-runtime": "Imports or executes another bundled script that imports strange_uta_game.",
+    "artifact-layout": "Does not import strange_uta_game, but expects StrangeUtaGame SUG artifacts or repository layout.",
+    "no-upstream-code-import": "Does not import strange_uta_game directly or transitively; installed with the integration for the shared manifest and release workflow."
+  },
+  "scripts": [
+    {
+      "path": "audit_karaoke_asr_recognition.py",
+      "category": "transitive-runtime",
+      "reason": "Imports LRC helpers from karaoke_timing.py, whose module initialization imports StrangeUtaGame."
+    },
+    {
+      "path": "audit_karaoke_mms_alignment.py",
+      "category": "transitive-runtime",
+      "reason": "Imports karaoke_timing.py and reads SUG JSON timing evidence."
+    },
+    {
+      "path": "build_karaoke_wide_artwork.py",
+      "category": "no-upstream-code-import",
+      "reason": "Builds artwork with Pillow only."
+    },
+    {
+      "path": "convert_english_sug_word_tokens.py",
+      "category": "direct-upstream-import",
+      "reason": "Imports StrangeUtaGame SugProjectParser and timing-domain conversion helpers."
+    },
+    {
+      "path": "finalize_karaoke_release.py",
+      "category": "artifact-layout",
+      "reason": "Does not import StrangeUtaGame code, but verifies expected .sug files and the integration release layout."
+    },
+    {
+      "path": "inspect_karaoke_media.py",
+      "category": "no-upstream-code-import",
+      "reason": "Inspects media and shared manifest/render metadata without importing StrangeUtaGame."
+    },
+    {
+      "path": "karaoke_album.py",
+      "category": "no-upstream-code-import",
+      "reason": "Defines the sanitized album manifest and path model."
+    },
+    {
+      "path": "karaoke_language.py",
+      "category": "no-upstream-code-import",
+      "reason": "Provides language normalization and tokenization helpers."
+    },
+    {
+      "path": "karaoke_release_snapshot.py",
+      "category": "no-upstream-code-import",
+      "reason": "Creates and restores release-file snapshots."
+    },
+    {
+      "path": "karaoke_review_preview.py",
+      "category": "direct-upstream-import",
+      "reason": "Imports StrangeUtaGame Character, Sentence, and SugProjectParser."
+    },
+    {
+      "path": "karaoke_timing.py",
+      "category": "direct-upstream-import",
+      "reason": "Imports StrangeUtaGame domain entities, exporters, and SugProjectParser."
+    },
+    {
+      "path": "package_karaoke_numbered_archives.py",
+      "category": "no-upstream-code-import",
+      "reason": "Packages numbered release archives from shared manifest paths."
+    },
+    {
+      "path": "prepare_karaoke_msst_vocals.py",
+      "category": "no-upstream-code-import",
+      "reason": "Prepares optional external MSST evidence without importing StrangeUtaGame."
+    },
+    {
+      "path": "render_karaoke_direct_av1_420_album.py",
+      "category": "transitive-runtime",
+      "reason": "Imports the ruby synchronizer and executes the StrangeUtaGame-backed preview renderer."
+    },
+    {
+      "path": "render_karaoke_direct_av1_album.py",
+      "category": "transitive-runtime",
+      "reason": "Executes karaoke_review_preview.py against SUG input to regenerate ASS before encoding."
+    },
+    {
+      "path": "render_karaoke_direct_hevc444_album.py",
+      "category": "transitive-runtime",
+      "reason": "Delegates to render_karaoke_direct_av1_album.py, which executes the SUG preview renderer."
+    },
+    {
+      "path": "render_vinyl_karaoke.py",
+      "category": "no-upstream-code-import",
+      "reason": "Builds the vinyl visual layer with media and image libraries."
+    },
+    {
+      "path": "sync_karaoke_editable_ruby.py",
+      "category": "transitive-runtime",
+      "reason": "Imports contextual ruby and album timing data from StrangeUtaGame-backed scripts."
+    },
+    {
+      "path": "transcode_karaoke_av1.py",
+      "category": "no-upstream-code-import",
+      "reason": "Transcodes and verifies media using FFmpeg metadata and the shared manifest."
+    }
+  ],
+  "support_tools": [
+    {
+      "path": "scripts/check_karaoke_environment.py",
+      "category": "integration-tool",
+      "reason": "Checks a StrangeUtaGame checkout and its project-local runtime."
+    },
+    {
+      "path": "scripts/install_strangeutagame_integration.py",
+      "category": "integration-tool",
+      "reason": "Copies this bundle into an existing compatible checkout with backup and rollback guards."
+    },
+    {
+      "path": "scripts/open_editable_project_with_audio_probe.py",
+      "category": "direct-upstream-import",
+      "reason": "Dynamically imports StrangeUtaGame GUI, persistence, and audio-loading modules."
+    }
+  ]
+}

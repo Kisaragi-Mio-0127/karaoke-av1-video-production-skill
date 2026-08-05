@@ -14,6 +14,7 @@ junit*.xml
 config.json
 album.json
 *manifest*.json
+!integration/strangeutagame/dependency-manifest.json
 *timing*override*.json
 *display*override*.json
 *ruby*override*.json

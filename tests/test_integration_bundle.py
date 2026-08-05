@@ -15,6 +15,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "integration" / "strangeutagame"
 SCRIPTS = BUNDLE / "scripts"
+DEPENDENCY_MANIFEST = BUNDLE / "dependency-manifest.json"
 
 
 def load_module(name: str, path: Path):
@@ -38,6 +39,40 @@ def make_fake_target(parent: Path) -> Path:
 
 
 class IntegrationBundleTests(unittest.TestCase):
+    def test_dependency_manifest_covers_bundle_and_direct_imports(self) -> None:
+        manifest = json.loads(DEPENDENCY_MANIFEST.read_text(encoding="utf-8"))
+        records = manifest["scripts"]
+        recorded_paths = {record["path"] for record in records}
+        bundled_paths = {path.name for path in SCRIPTS.glob("*.py")}
+        self.assertEqual(recorded_paths, bundled_paths)
+        self.assertTrue(
+            all(record.get("reason", "").strip() for record in records),
+            "every dependency record must explain its classification",
+        )
+
+        actual_direct_imports: set[str] = set()
+        for path in SCRIPTS.glob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            if any(
+                isinstance(node, ast.ImportFrom)
+                and bool(node.module)
+                and node.module.startswith("strange_uta_game")
+                for node in ast.walk(tree)
+            ):
+                actual_direct_imports.add(path.name)
+        recorded_direct_imports = {
+            record["path"]
+            for record in records
+            if record["category"] == "direct-upstream-import"
+        }
+        self.assertEqual(recorded_direct_imports, actual_direct_imports)
+
+        for readme_name in ("README.md", "README.zh-CN.md"):
+            readme = (ROOT / readme_name).read_text(encoding="utf-8")
+            for path in recorded_paths:
+                with self.subTest(readme=readme_name, script=path):
+                    self.assertIn(f"`{path}`", readme)
+
     def test_all_bundled_python_parses(self) -> None:
         files = sorted(SCRIPTS.glob("*.py"))
         self.assertGreaterEqual(len(files), 15)

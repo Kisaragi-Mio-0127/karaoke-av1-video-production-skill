@@ -145,7 +145,12 @@ environment, a short authorized preview, and the release gates in `SKILL.md`.
 ## License and rights
 
 The code is distributed under GPL-3.0-only; see `LICENSE`, `NOTICE.md`, and
-`THIRD_PARTY_NOTICES.md`. Users must
-hold the necessary rights for recordings, lyrics display/synchronization, cover
-art, fonts, models, and final distribution. FFmpeg build licensing depends on
-its compile configuration; see the [FFmpeg legal page](https://ffmpeg.org/legal.html).
+`THIRD_PARTY_NOTICES.md`. This repository is a later-developed integration for
+[karaoke-studio/StrangeUtaGame](https://github.com/karaoke-studio/StrangeUtaGame),
+which declares GPL-3.0 upstream. It is not a copy of the upstream application
+and does not redistribute that application; the integration was developed
+against StrangeUtaGame 1.2.6 at commit
+`d1b121a53c8b9167986933c21afa1d1c9d8a0355`. Users must hold the necessary
+rights for recordings, lyrics display/synchronization, cover art, fonts,
+models, and final distribution. FFmpeg build licensing depends on its compile
+configuration; see the [FFmpeg legal page](https://ffmpeg.org/legal.html).

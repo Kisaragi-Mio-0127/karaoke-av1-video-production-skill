@@ -180,5 +180,12 @@ python -m unittest discover -s tests -p "test_*.py" -v
 代码使用 GPL-3.0-only，具体说明见 `LICENSE`、`NOTICE.md` 和
 `THIRD_PARTY_NOTICES.md`。
 
+本仓库是后来为
+[karaoke-studio/StrangeUtaGame](https://github.com/karaoke-studio/StrangeUtaGame)
+编写的集成项目；该上游仓库声明使用 GPL-3.0。本仓库不是上游应用源码副本，也不重新
+分发该应用。集成开发基于 StrangeUtaGame 1.2.6、提交
+`d1b121a53c8b9167986933c21afa1d1c9d8a0355`，详细来源与依赖边界见
+`NOTICE.md` 和 `integration/strangeutagame/dependency-manifest.json`。
+
 使用者必须自行确认录音、歌词展示与同步、封面、字体、模型和最终成品分发权。
 FFmpeg 的实际许可证取决于具体构建选项，发布前应检查所使用构建的配置。

@@ -1,0 +1,15 @@
+# Overlay requirement source. The installer copies this file into the root of a
+# compatible StrangeUtaGame checkout, where the referenced files and -e . exist.
+# Reproducible Windows environment for StrangeUtaGame plus the karaoke pipeline.
+-r requirements.txt
+-r requirements-winrt.txt
+-e .
+
+# Karaoke timing, media inspection, and vinyl video rendering.
+imageio-ffmpeg==0.6.0
+mutagen==1.48.1
+pillow==12.3.0
+stable-ts==2.19.1
+openai-whisper==20250625
+torch==2.13.0
+torchaudio==2.11.0

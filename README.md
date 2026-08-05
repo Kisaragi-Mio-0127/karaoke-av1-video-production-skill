@@ -1,67 +1,109 @@
 # Karaoke AV1 Video Production Skill
 
-A Codex skill for producing, rebuilding, reviewing, and packaging karaoke or lyric videos with traceable subtitle timing and verified AV1 4:2:0 delivery.
+A Codex skill plus a sanitized StrangeUtaGame integration for producing,
+reviewing, rendering, validating, and packaging karaoke videos with editable
+timing provenance and AV1 4:2:0 release checks.
 
-## What it covers
+## Included
 
-- Semantic lyric segmentation, cue pairing, lane behavior, and held-syllable sweep review
-- Japanese ruby reading and lexical word-boundary verification
-- Editable-project, ASS/report, render, and packaged-artifact parity
-- Guarded StrangeUtaGame project opening with attached-audio evidence
-- Wide-layout typography, CJK fit, cover-derived highlight colours, and artwork continuity
-- AV1 4:2:0 encoding, probing, promotion, rollback, and archive checks
-- Rights, privacy, and generation-identity reporting gates
+- The complete workflow in `SKILL.md` and focused timing/release references.
+- Nineteen sanitized StrangeUtaGame production scripts covering timing,
+  Japanese ruby, ASR/MMS evidence, artwork, HEVC/AV1 rendering, inspection,
+  finalization, archives, and snapshots.
+- A guarded installer that copies the integration into a compatible
+  StrangeUtaGame checkout and backs up overwritten files.
+- A project/audio editor probe for manual timing review.
+- A reproducible Windows dependency lock, environment checker, generic manifest,
+  and private-override examples.
 
-The skill starts from authorized media, lyrics, subtitles, fonts, and audio. It does not perform lyric transcription, vocal separation, voice cloning, or music generation.
+No recordings, lyrics, album metadata, fonts, cover art, model files, API
+credentials, rendered media, or real project reports are included.
 
-## Install
-
-Clone the repository into the Codex skills directory:
-
-### Windows PowerShell
+## Install the Codex skill
 
 ```powershell
 git clone https://github.com/Kisaragi-Mio-0127/karaoke-av1-video-production-skill.git "$env:USERPROFILE\.codex\skills\karaoke-av1-video-production"
 ```
 
-### macOS or Linux
-
-```bash
-git clone https://github.com/Kisaragi-Mio-0127/karaoke-av1-video-production-skill.git ~/.codex/skills/karaoke-av1-video-production
-```
-
-Because the repository is private, GitHub authentication is required when cloning it.
-
-## Use
-
-Invoke the skill explicitly when needed:
+The repository is currently private, so GitHub authentication is required.
+Invoke it in Codex with:
 
 ```text
 $karaoke-av1-video-production
 ```
 
-The complete workflow is in [SKILL.md](SKILL.md). Detailed references are loaded only when their gates apply.
+## Install the production scripts
+
+The integration depends on the StrangeUtaGame application package; it is not a
+replacement for that application. From this repository:
+
+```powershell
+python scripts/install_strangeutagame_integration.py --target D:\path\to\StrangeUtaGame --dry-run
+python scripts/install_strangeutagame_integration.py --target D:\path\to\StrangeUtaGame
+```
+
+Then create the target repository's local environment:
+
+```powershell
+Set-Location D:\path\to\StrangeUtaGame
+winget install --id=astral-sh.uv -e
+uv python install 3.12
+uv venv --python 3.12
+uv pip install -r requirements-karaoke.skill.lock.txt
+```
+
+Install `ffmpeg`/`ffprobe` separately and provide a licensed CJK font. Rubber
+Band is optional unless pitch shifting is requested; Whisper/MMS and external
+MSST are optional evidence lanes. Full setup, official links, script routing,
+and manifest usage are in
+[`references/strangeutagame-integration.md`](references/strangeutagame-integration.md).
+
+Check the environment:
+
+```powershell
+python scripts/check_karaoke_environment.py --target D:\path\to\StrangeUtaGame
+```
 
 ## Repository layout
 
 ```text
 .
 ├── SKILL.md
+├── LICENSE
+├── NOTICE.md
 ├── agents/
-│   └── openai.yaml
+├── examples/
+├── integration/strangeutagame/
+│   ├── requirements/
+│   └── scripts/                 # 19 sanitized production scripts
 ├── references/
-│   ├── av1-420-commands.md
-│   ├── batch-release-gates.md
-│   └── subtitle-timing-quality.md
-└── scripts/
-    ├── open_editable_project_with_audio_probe.py
-    └── test_open_editable_project_with_audio_probe.py
+├── scripts/
+│   ├── check_karaoke_environment.py
+│   ├── install_strangeutagame_integration.py
+│   └── open_editable_project_with_audio_probe.py
+└── tests/
 ```
 
-## Script test
+## Tests
 
-```bash
+```powershell
 python -m unittest discover -s scripts -p "test_*.py" -v
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-The editor probe is designed for private local evidence. It does not contain fixed usernames, media paths, credentials, or song metadata. Runtime reports, editable projects, subtitles, media, caches, and generated artifacts are excluded by `.gitignore`.
+The repository tests parse every bundled script, load the generic manifest,
+exercise installer conflict/backup/rollback guards, verify private-override
+example shapes, require explicit network opt-in, and scan executable scripts
+for machine-specific paths, credential forms, non-generic manifest defaults,
+and fixed network cover defaults. They are packaging/safety tests, not a claim
+that a full media render completed without private fixtures. Before production,
+run the environment checker, all 19 command help smoke tests in the target
+environment, a short authorized preview, and the release gates in `SKILL.md`.
+
+## License and rights
+
+The code is distributed under GPL-3.0-only; see `LICENSE`, `NOTICE.md`, and
+`THIRD_PARTY_NOTICES.md`. Users must
+hold the necessary rights for recordings, lyrics display/synchronization, cover
+art, fonts, models, and final distribution. FFmpeg build licensing depends on
+its compile configuration; see the [FFmpeg legal page](https://ffmpeg.org/legal.html).

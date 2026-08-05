@@ -1,0 +1,28 @@
+{
+  "schema_version": "karaoke-album/v1",
+  "album": {
+    "title": "Example Karaoke Album",
+    "artist": "Example Artist",
+    "catalog_number": "EXAMPLE-001"
+  },
+  "paths": {
+    "audio_directory": "audio",
+    "font_package": "fonts",
+    "deliverable_directory": "../../deliverables/example-karaoke-album"
+  },
+  "tracks": [
+    {
+      "disc": 1,
+      "track_number": 1,
+      "song_id": "example-track-01",
+      "title": "Example Track",
+      "artist": "Example Artist",
+      "artifact_slug": "example-track-01",
+      "audio_file": "example-track.flac",
+      "audio_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "expected_duration_ms": 180000,
+      "expected_cues": null,
+      "language": "ja"
+    }
+  ]
+}

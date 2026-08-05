@@ -1,3 +1,5 @@
+[简体中文](README.zh-CN.md) | English
+
 # Karaoke AV1 Video Production Skill
 
 A Codex skill plus a sanitized StrangeUtaGame integration for producing,

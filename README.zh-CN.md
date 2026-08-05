@@ -27,7 +27,8 @@ Windows PowerShell：
 git clone https://github.com/Kisaragi-Mio-0127/karaoke-av1-video-production-skill.git "$env:USERPROFILE\.codex\skills\karaoke-av1-video-production"
 ```
 
-该仓库目前是私有仓库，克隆时需要完成 GitHub 身份验证。
+该仓库为公开仓库，克隆和阅读不需要 GitHub 身份验证；只有向自己拥有写入权限的
+仓库推送修改时才需要登录。
 
 在 Codex 中显式调用：
 

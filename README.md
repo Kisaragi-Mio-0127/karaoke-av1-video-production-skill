@@ -27,8 +27,9 @@ credentials, rendered media, or real project reports are included.
 git clone https://github.com/Kisaragi-Mio-0127/karaoke-av1-video-production-skill.git "$env:USERPROFILE\.codex\skills\karaoke-av1-video-production"
 ```
 
-The repository is currently private, so GitHub authentication is required.
-Invoke it in Codex with:
+This repository is public. Cloning and reading it do not require GitHub
+authentication; authentication is required only when pushing changes to a
+repository for which you have write access. Invoke the skill in Codex with:
 
 ```text
 $karaoke-av1-video-production

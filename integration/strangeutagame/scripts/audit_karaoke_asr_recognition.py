@@ -38,13 +38,14 @@ from scripts.karaoke_album import (  # noqa: E402
 )
 from scripts.karaoke_language import (  # noqa: E402
     DEFAULT_LANGUAGE,
+    SUPPORTED_LANGUAGES,
     is_chinese_character,
     language_identity,
     normalize_language,
 )
 
 SCHEMA_VERSION = "karaoke-asr-recognition-audit/v2"
-MATCHER_VERSION = "line-window-bounded/v1"
+MATCHER_VERSION = "line-window-bounded/v2"
 SUPPORTED_AUDIO_KINDS = frozenset({"mix", "stem"})
 DEFAULT_MODEL = "base"
 DEFAULT_CACHE_DIR = ROOT / ".cache" / "asr-recognition"
@@ -235,7 +236,9 @@ def normalize_token_text(text: Any, language: str = DEFAULT_LANGUAGE) -> str:
         for char in value
         if not char.isspace() and (is_chinese_character(char) or char.isalnum())
     )
-    return _simplify_chinese(comparable)
+    # Simplifying Han glyphs is a Chinese comparison policy. Applying it to
+    # Japanese would silently rewrite kanji and could create false evidence.
+    return _simplify_chinese(comparable) if language == "zh" else comparable
 
 
 def lyric_token_units(text: str, language: str = DEFAULT_LANGUAGE) -> list[dict[str, Any]]:
@@ -532,13 +535,16 @@ def match_known_lyrics(
                 "window_end_ms": line_end_ms,
                 "window_tolerance_ms": tolerance_ms,
             }
-            matches.append(record)
-            consumed_indices.add(best_index)
-            cursor = best_index + 1
-            assert interval is not None
-            last_consumed_start_ms = interval[0]
             if matched:
+                # Only a real match may advance the monotonic cursor. Consuming
+                # a low-similarity guess would hide a token that may correctly
+                # belong to the next expected unit and cause cascading errors.
+                consumed_indices.add(best_index)
+                cursor = best_index + 1
+                assert interval is not None
+                last_consumed_start_ms = interval[0]
                 recognized_indices.append(best_index)
+            matches.append(record)
 
         matched_count = sum(item["status"] == "matched" for item in matches)
         confidences = [
@@ -608,9 +614,12 @@ def match_known_lyrics(
                 "consumed_recognized_indices": [
                     item["recognized_index"]
                     for item in matches
-                    if "recognized_index" in item
+                    if item.get("status") == "matched"
+                    and "recognized_index" in item
                 ],
                 "gate_ok": gate_ok,
+                "structural_gate_ok": gate_ok,
+                "support_gate_ok": gate_ok and disposition == "support",
                 "errors": line_errors,
             }
         )
@@ -935,6 +944,12 @@ def run_recognition_audit(
         ],
         "disposition": disposition,
         "gate_ok": all(line.get("gate_ok") is True for line in lines),
+        "structural_gate_ok": all(
+            line.get("structural_gate_ok", line.get("gate_ok")) is True
+            for line in lines
+        ),
+        "support_gate_ok": bool(lines)
+        and all(line.get("support_gate_ok") is True for line in lines),
         "errors": gate_errors,
         "human_reviewed": False,
         "lyrics_written": False,
@@ -1032,6 +1047,15 @@ def run_manifest_audit(
     ]
     if requested and {str(track.song_id) for track in tracks} != requested:
         raise ValueError("requested song ID is not present in the album manifest")
+    selected_languages = {
+        normalize_language(track.language) for track in tracks
+    }
+    if len(selected_languages) != 1:
+        raise ValueError(
+            "one manifest ASR run must select tracks in exactly one language; "
+            "use --song-id to split ja, zh, and en into separate runs"
+        )
+    selected_language = next(iter(selected_languages))
     resolved_vocals_root = (
         Path(vocals_root).resolve()
         if vocals_root is not None
@@ -1048,7 +1072,7 @@ def run_manifest_audit(
         single = run_recognition_audit(
             audio_path=audio_path,
             lyric_lines=_manifest_lines(album, track, source_path),
-            language=track.language,
+            language=selected_language,
             audio_kind=audio_kind,
             model_name=model_name,
             model_cache=model_cache,
@@ -1078,6 +1102,22 @@ def run_manifest_audit(
                 "transcription_cache_path": single["cache"]["path"],
             }
         )
+    dispositions = [
+        str(line.get("disposition") or "unresolved")
+        for song in song_reports
+        for line in song.get("lines", [])
+    ]
+    if dispositions and any(value == "veto" for value in dispositions):
+        disposition = "veto"
+    elif dispositions and all(value == "support" for value in dispositions):
+        disposition = "support"
+    else:
+        disposition = "unresolved"
+    structural_gate_ok = all(
+        line.get("structural_gate_ok", line.get("gate_ok")) is True
+        for song in song_reports
+        for line in song.get("lines", [])
+    )
     report = {
         "schema_version": SCHEMA_VERSION,
         "matcher_version": MATCHER_VERSION,
@@ -1096,6 +1136,8 @@ def run_manifest_audit(
             else (album.deliverable_dir / "sources" / "netease_lyrics.json").resolve()
         ),
         "audio_kind": audio_kind,
+        "language": selected_language,
+        "language_identity": language_identity(selected_language),
         "model": model_name,
         "model_path": str(model_path.resolve()) if model_path is not None else None,
         "songs": song_reports,
@@ -1107,11 +1149,12 @@ def run_manifest_audit(
             item["transcription_cache_key"] for item in recognition_audits
         ],
         "window_tolerance_ms": _window_tolerance(window_tolerance_ms),
-        "gate_ok": all(
-            line.get("gate_ok") is True
-            for song in song_reports
-            for line in song.get("lines", [])
-        ),
+        "disposition": disposition,
+        "gate_ok": structural_gate_ok,
+        "structural_gate_ok": structural_gate_ok,
+        "support_gate_ok": bool(dispositions)
+        and structural_gate_ok
+        and disposition == "support",
         "errors": [
             {"song_id": song["song_id"], "line_index": line["line_index"], "error": error}
             for song in song_reports
@@ -1161,7 +1204,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--song-id", action="append", dest="song_ids")
     parser.add_argument("--audio", type=Path, help="direct mix/stem input")
     parser.add_argument("--lyrics", type=Path, help="direct frozen LRC/JSON input")
-    parser.add_argument("--language", choices=("zh", "en"), default=None)
+    parser.add_argument(
+        "--language",
+        choices=tuple(sorted(SUPPORTED_LANGUAGES)),
+        default=None,
+        help="language for direct audio/lyrics mode (ja, zh, or en)",
+    )
     parser.add_argument("--audio-kind", choices=tuple(sorted(SUPPORTED_AUDIO_KINDS)), default="mix")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--model-cache", type=Path)
@@ -1177,6 +1225,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--allow-partial-manifest", action="store_true")
+    parser.add_argument(
+        "--allow-unresolved",
+        action="store_true",
+        help="return success for structurally valid unresolved evidence; veto still fails",
+    )
     return parser
 
 
@@ -1185,8 +1238,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if bool(args.audio) != bool(args.lyrics):
         raise SystemExit("--audio and --lyrics must be supplied together")
     if args.audio is not None:
-        if args.language not in {"zh", "en"}:
-            raise SystemExit("--language zh or en is required with direct audio")
+        if args.language not in SUPPORTED_LANGUAGES:
+            raise SystemExit("--language ja, zh, or en is required with direct audio")
         report = run_recognition_audit(
             audio_path=args.audio,
             lyric_lines=_load_direct_lines(args.lyrics),
@@ -1216,8 +1269,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             window_tolerance_ms=args.window_tolerance_ms,
             allow_partial_manifest=args.allow_partial_manifest,
         )
-    print(json.dumps({"status": "ok", "disposition": report.get("disposition"), "output": str(args.output) if args.output else None}, ensure_ascii=False))
-    return 0
+    disposition = str(report.get("disposition") or "unresolved")
+    structural_ok = report.get("structural_gate_ok", report.get("gate_ok")) is True
+    support_ok = report.get("support_gate_ok") is True
+    accepted = support_ok or (
+        args.allow_unresolved and structural_ok and disposition == "unresolved"
+    )
+    print(
+        json.dumps(
+            {
+                "status": "pass" if accepted else "fail",
+                "disposition": disposition,
+                "structural_gate_ok": structural_ok,
+                "support_gate_ok": support_ok,
+                "output": str(args.output) if args.output else None,
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0 if accepted else 2
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import sys
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from statistics import median
 from types import SimpleNamespace
 from typing import Any
 
@@ -51,7 +52,15 @@ WIDE_RUBY_TO_MAIN_ANCHOR_GAP_PX = 35
 ENGLISH_WIDE_MAIN_FONT_SIZE = 96
 ENGLISH_WIDE_MIN_MAIN_FONT_SIZE = 54
 ENGLISH_WIDE_LETTER_SPACING_EM = 0.0
-ENGLISH_WIDE_WORD_GAP_EM = 0.18
+# Pillow's 96 px advances are wider than libass's visible HarmonyOS Sans SC
+# word runs by roughly 1 / 0.735.  English words are emitted as intact ASS
+# runs, so this scale changes only their block placement, never letter spacing.
+ENGLISH_WIDE_RENDER_ADVANCE_SCALE = 0.735
+# HarmonyOS Sans SC's natural ASCII space is about 0.27 em at this size,
+# which reads too loose once every word is rendered as an outlined ASS run.
+# Keep the font's kerning inside words, but use a calibrated total word gap.
+ENGLISH_WIDE_WORD_GAP_EM = 0.25
+ENGLISH_WIDE_MIN_SPLIT_WORDS = 3
 SECONDARY_FONT_SIZE = 51
 SECONDARY_MIN_FONT_SIZE = 36
 SECONDARY_OUTLINE_PX = 3
@@ -75,6 +84,9 @@ VOCAL_CUE_ABOVE_RUBY_PX = 16
 OUTRO_MAIN_Y = 765
 OUTRO_RUBY_Y = OUTRO_MAIN_Y - WIDE_RUBY_TO_MAIN_ANCHOR_GAP_PX
 DEFAULT_HIGHLIGHT_COLOR = "#FF0000"
+COMPATIBILITY_AUDIO_BITRATE = "320k"
+COMPATIBILITY_AUDIO_PROFILE = "aac_low"
+LOSSLESS_AUDIO_CODEC = "flac"
 STANDARD_RIGHT_START_X = 860
 STANDARD_RIGHT_SAFE_EDGE_X = 1890
 STANDARD_RIGHT_SAFE_MARGIN_PX = CANVAS_WIDTH - STANDARD_RIGHT_SAFE_EDGE_X
@@ -105,13 +117,7 @@ def _load_external_json(name: str) -> object:
 
 
 def _load_ruby_group_overrides() -> dict[str, Any]:
-    """Load reviewed ruby data without embedding song-specific mappings.
-
-    The JSON object may contain ``reading_overrides`` as a surface-to-reading
-    object, ``span_splits`` and ``multi_kanji_splits`` as nested
-    surface-to-reading-to-list objects, and ``linked_spans`` as a string list.
-    All fields are optional and default to empty.
-    """
+    """Load reviewed ruby rules without embedding song-specific mappings."""
 
     document = _load_external_json("KARAOKE_RUBY_GROUP_OVERRIDES")
     if not document:
@@ -162,14 +168,10 @@ def _load_ruby_group_overrides() -> dict[str, Any]:
         raise ValueError("ruby multi_kanji_splits must be an object")
     for surface, readings in raw_multi_kanji_splits.items():
         if not isinstance(surface, str) or not isinstance(readings, dict):
-            raise ValueError(
-                "ruby multi_kanji_splits must be nested string objects"
-            )
+            raise ValueError("ruby multi_kanji_splits must be nested string objects")
         for reading, parts in readings.items():
             if not isinstance(reading, str) or not isinstance(parts, list):
-                raise ValueError(
-                    "ruby multi-kanji split readings must be string lists"
-                )
+                raise ValueError("ruby multi-kanji split readings must be string lists")
             if not all(isinstance(part, str) for part in parts):
                 raise ValueError("ruby multi-kanji split parts must be strings")
             multi_kanji_splits[(surface, reading)] = tuple(parts)
@@ -189,6 +191,8 @@ def _load_ruby_group_overrides() -> dict[str, Any]:
 
 
 RUBY_GROUP_OVERRIDES = _load_ruby_group_overrides()
+READING_OVERRIDES = RUBY_GROUP_OVERRIDES["reading_overrides"]
+REVIEWED_RUBY_SPAN_SPLITS = RUBY_GROUP_OVERRIDES["span_splits"]
 
 
 @dataclass(frozen=True)
@@ -223,6 +227,7 @@ class SubtitleLayout:
     fit_outline_px: int = 0
     semantic_gap_em: float = 0.0
     letter_spacing_em: float = 0.0
+    word_gap_em: float | None = None
     enforce_main_font_size: bool = True
     main_outline_px: int = MAIN_OUTLINE_PX
     ruby_outline_px: int = RUBY_OUTLINE_PX
@@ -294,10 +299,11 @@ ENGLISH_WIDE_LAYOUT = replace(
     max_phrase_chars=None,
     main_font_size=ENGLISH_WIDE_MAIN_FONT_SIZE,
     min_main_font_size=ENGLISH_WIDE_MIN_MAIN_FONT_SIZE,
-    advance_scale=1.0,
-    fit_advance_scale=1.0,
+    advance_scale=ENGLISH_WIDE_RENDER_ADVANCE_SCALE,
+    fit_advance_scale=ENGLISH_WIDE_RENDER_ADVANCE_SCALE,
     letter_spacing_em=ENGLISH_WIDE_LETTER_SPACING_EM,
-    semantic_gap_em=ENGLISH_WIDE_WORD_GAP_EM,
+    semantic_gap_em=0.0,
+    word_gap_em=ENGLISH_WIDE_WORD_GAP_EM,
     enforce_main_font_size=False,
 )
 SUBTITLE_LAYOUTS = {
@@ -328,6 +334,7 @@ class TextGeometry:
     width: float = 0.0
     letter_spacing_px: float = 0.0
     semantic_gap_px: float = 0.0
+    word_gap_px: float | None = None
 
     @property
     def right(self) -> float:
@@ -440,9 +447,7 @@ def _kanji_ruby_spans(
             return [RubyToken(original, reading, start, start + len(original))]
         ruby = reading[reading_cursor:reading_end]
         if ruby:
-            reviewed_split = RUBY_GROUP_OVERRIDES["span_splits"].get(
-                (run_text, ruby),
-            )
+            reviewed_split = REVIEWED_RUBY_SPAN_SPLITS.get((run_text, ruby))
             if reviewed_split is None:
                 result.append(
                     RubyToken(
@@ -483,19 +488,29 @@ def contextual_ruby_tokens(
         return []
     converted = kakasi().convert(text)
     result: list[RubyToken] = []
-    reading_overrides = RUBY_GROUP_OVERRIDES["reading_overrides"]
     cursor = 0
     for item in converted:
         original = str(item.get("orig") or "")
         reading = str(item.get("hira") or original)
-        reading = reading_overrides.get(original, reading)
+        reading = READING_OVERRIDES.get(original, reading)
         start = cursor
         end = start + len(original)
         cursor = end
-        if _contains_kanji(original) and reading and reading != original:
+        if (
+            original in READING_OVERRIDES
+            and not _contains_kanji(original)
+            and reading != original
+        ):
+            result.append(
+                RubyToken(
+                    original,
+                    reading,
+                    start,
+                    end,
+                )
+            )
+        elif _contains_kanji(original) and reading and reading != original:
             result.extend(_kanji_ruby_spans(original, reading, start=start))
-        elif original in reading_overrides and reading and reading != original:
-            result.append(RubyToken(original, reading, start, end))
     return result
 
 
@@ -611,13 +626,24 @@ def _measured_text_span(
     semantic_gap_count: int = 0,
     semantic_gap_em: float = 0.0,
     letter_spacing_em: float = 0.0,
+    word_gap_em: float | None = None,
 ) -> float:
     """Measure the exact span consumed by the geometry and fit gate."""
 
-    natural_width = _text_width(font_file, font_size, text) * advance_scale
+    font = ImageFont.truetype(str(font_file), font_size)
+    natural_width = float(font.getlength(text)) * advance_scale
+    word_gap_adjustment = 0.0
+    if word_gap_em is not None:
+        target_word_gap_px = font_size * word_gap_em
+        word_gap_adjustment = sum(
+            target_word_gap_px - float(font.getlength(character)) * advance_scale
+            for character in text
+            if character.isspace()
+        )
     letter_spacing_count = len(_english_letter_spacing_after_indices(text))
     return float(
         natural_width
+        + word_gap_adjustment
         + semantic_gap_count * font_size * semantic_gap_em
         + letter_spacing_count * font_size * letter_spacing_em
     )
@@ -635,6 +661,7 @@ def fit_main_font_size(
     semantic_gap_count: int = 0,
     semantic_gap_em: float = 0.0,
     letter_spacing_em: float = 0.0,
+    word_gap_em: float | None = None,
 ) -> int:
     """Choose the largest size whose measured rendered span fits the slot.
 
@@ -652,6 +679,7 @@ def fit_main_font_size(
             semantic_gap_count=semantic_gap_count,
             semantic_gap_em=semantic_gap_em,
             letter_spacing_em=letter_spacing_em,
+            word_gap_em=word_gap_em,
         ) + 2 * outline_px
         if measured_width <= slot_width:
             return size
@@ -681,6 +709,7 @@ def fit_main_font_size_for_layout(
         semantic_gap_count=semantic_gap_count,
         semantic_gap_em=layout.semantic_gap_em,
         letter_spacing_em=letter_spacing_em,
+        word_gap_em=layout.word_gap_em,
     )
 
 
@@ -694,6 +723,7 @@ def text_geometry(
     semantic_gap_after_indices: frozenset[int] = frozenset(),
     semantic_gap_em: float = 0.0,
     letter_spacing_em: float = 0.0,
+    word_gap_em: float | None = None,
 ) -> TextGeometry:
     """Measure one line once so its glyphs and ruby use identical coordinates."""
 
@@ -704,6 +734,7 @@ def text_geometry(
     )
     gap_px = font_size * semantic_gap_em
     letter_spacing_px = font_size * letter_spacing_em
+    target_word_gap_px = font_size * word_gap_em if word_gap_em is not None else None
     letter_spacing_after_indices = _english_letter_spacing_after_indices(text)
     gap_before = tuple(
         sum(1 for gap_index in semantic_gap_after_indices if gap_index < index)
@@ -719,12 +750,28 @@ def text_geometry(
         * letter_spacing_px
         for index in range(len(text) + 1)
     )
+    word_gap_adjustment_before = tuple(
+        sum(
+            target_word_gap_px - float(font.getlength(character)) * advance_scale
+            for character in text[:index]
+            if character.isspace()
+        )
+        if target_word_gap_px is not None
+        else 0.0
+        for index in range(len(text) + 1)
+    )
     glyph_starts_relative = tuple(
-        natural_boundaries[index] + gap_before[index] + spacing_before[index]
+        natural_boundaries[index]
+        + gap_before[index]
+        + spacing_before[index]
+        + word_gap_adjustment_before[index]
         for index in range(len(text))
     )
     glyph_ends_relative = tuple(
-        natural_boundaries[index + 1] + gap_before[index] + spacing_before[index]
+        natural_boundaries[index + 1]
+        + gap_before[index]
+        + spacing_before[index]
+        + word_gap_adjustment_before[index + 1]
         for index in range(len(text))
     )
     line_width = (
@@ -751,6 +798,7 @@ def text_geometry(
         width=line_width,
         letter_spacing_px=letter_spacing_px,
         semantic_gap_px=gap_px,
+        word_gap_px=target_word_gap_px,
     )
 
 
@@ -765,6 +813,7 @@ def centered_lane_for_text(
     semantic_gap_after_indices: frozenset[int] = frozenset(),
     semantic_gap_em: float = 0.0,
     letter_spacing_em: float = 0.0,
+    word_gap_em: float | None = None,
 ) -> Lane:
     """Create a left-anchored lane whose rendered text is screen-centered."""
 
@@ -776,6 +825,7 @@ def centered_lane_for_text(
         semantic_gap_count=len(semantic_gap_after_indices),
         semantic_gap_em=semantic_gap_em,
         letter_spacing_em=letter_spacing_em,
+        word_gap_em=word_gap_em,
     )
     return Lane(
         x=int(round((CANVAS_WIDTH - width) / 2.0)),
@@ -986,6 +1036,49 @@ def _character_releases(
     return result
 
 
+def _trailing_repeated_token_visual_onsets(sentence: Sentence) -> dict[int, int]:
+    """Repair a repeated refrain whose last morae were aligned to the tail.
+
+    MMS can mistake the end of a held vowel for the onset of the final mora.
+    For a lyric ending in at least three adjacent copies of the same token, use
+    the earlier copies as the visual rhythm reference and move only implausibly
+    late mora onsets in the final copy. Source timing remains untouched.
+    """
+
+    separated = re.search(r"(.{2,}?)([^\w\s]+)\1\2\1$", sentence.text)
+    contiguous = re.search(r"(.{2,}?)\1\1$", sentence.text) if separated is None else None
+    repeated = separated or contiguous
+    if repeated is None:
+        return {}
+    token = repeated.group(1)
+    separator = repeated.group(2) if separated is not None else ""
+    starts = [
+        repeated.start(1) + index * (len(token) + len(separator))
+        for index in range(3)
+    ]
+    onsets = _character_onsets(sentence)
+    if not onsets:
+        return {}
+    target_start = starts[-1]
+    overrides: dict[int, int] = {}
+    effective_previous = onsets[target_start]
+    for token_offset in range(1, len(token)):
+        reference_steps = [
+            onsets[start + token_offset] - onsets[start + token_offset - 1]
+            for start in starts[:-1]
+        ]
+        expected_step = int(round(median(reference_steps)))
+        target_index = target_start + token_offset
+        expected_onset = effective_previous + expected_step
+        current_onset = onsets[target_index]
+        if current_onset - expected_onset >= 500:
+            overrides[target_index] = expected_onset
+            effective_previous = expected_onset
+        else:
+            effective_previous = current_onset
+    return overrides
+
+
 def main_glyph_events(
     sentence: Sentence,
     *,
@@ -1004,6 +1097,7 @@ def main_glyph_events(
     outline_px: int = MAIN_OUTLINE_PX,
     glow_blur: int = MAIN_GLOW_BLUR,
     letter_spacing_em: float = 0.0,
+    word_gap_em: float | None = None,
     glow_style: str = "Glow",
     main_style: str = "Main",
     glow_layer: int = 1,
@@ -1030,6 +1124,7 @@ def main_glyph_events(
             semantic_gap_after_indices=semantic_gap_after_indices,
             semantic_gap_em=semantic_gap_em,
             letter_spacing_em=letter_spacing_em,
+            word_gap_em=word_gap_em,
         )
     releases = _character_releases(
         onsets,
@@ -1155,6 +1250,7 @@ def ruby_events(
     semantic_gap_after_indices: frozenset[int] = frozenset(),
     semantic_gap_em: float = 0.0,
     letter_spacing_em: float = 0.0,
+    word_gap_em: float | None = None,
     tokens: list[RubyToken] | None = None,
     language: str = DEFAULT_LANGUAGE,
     outline_px: int = RUBY_OUTLINE_PX,
@@ -1180,6 +1276,7 @@ def ruby_events(
             semantic_gap_after_indices=semantic_gap_after_indices,
             semantic_gap_em=semantic_gap_em,
             letter_spacing_em=letter_spacing_em,
+            word_gap_em=word_gap_em,
         )
     result: list[str] = []
     for token in tokens:
@@ -1606,11 +1703,122 @@ def _coalesce_display_runs_that_fit(
     return result
 
 
+def _english_word_spans(sentence: Sentence) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, character in enumerate(sentence.characters):
+        if character.char.isspace():
+            if start is not None:
+                spans.append((start, index))
+                start = None
+        elif start is None:
+            start = index
+    if start is not None:
+        spans.append((start, len(sentence.characters)))
+    return spans
+
+
+def _english_word_slice(
+    sentence: Sentence,
+    spans: list[tuple[int, int]],
+    start_word: int,
+    end_word: int,
+) -> Sentence:
+    start = spans[start_word][0]
+    end = spans[end_word - 1][1]
+    return Sentence(
+        singer_id=sentence.singer_id,
+        characters=list(sentence.characters[start:end]),
+    )
+
+
+def _english_phrase_width_at_target(
+    sentence: Sentence,
+    *,
+    font_file: Path,
+    layout: SubtitleLayout,
+) -> float:
+    semantic_gaps = _semantic_gap_after_indices(
+        sentence,
+        sentence,
+        language="en",
+    )
+    return _measured_text_span(
+        font_file,
+        sentence.text,
+        font_size=layout.main_font_size,
+        advance_scale=layout.fit_advance_scale,
+        semantic_gap_count=len(semantic_gaps),
+        semantic_gap_em=layout.semantic_gap_em,
+        letter_spacing_em=layout.letter_spacing_em,
+        word_gap_em=layout.word_gap_em,
+    ) + 2 * layout.fit_outline_px
+
+
+def _split_english_sentence_for_wide_fit(
+    sentence: Sentence,
+    *,
+    font_file: Path,
+    layout: SubtitleLayout,
+) -> list[Sentence]:
+    """Split an overflowing English line at balanced whole-word boundaries."""
+
+    if _english_phrase_width_at_target(
+        sentence,
+        font_file=font_file,
+        layout=layout,
+    ) <= layout.slot_width:
+        return [sentence]
+
+    spans = _english_word_spans(sentence)
+    if len(spans) < 2 * ENGLISH_WIDE_MIN_SPLIT_WORDS:
+        return [sentence]
+
+    candidates: list[tuple[float, int, Sentence, Sentence]] = []
+    for split_at in range(
+        ENGLISH_WIDE_MIN_SPLIT_WORDS,
+        len(spans) - ENGLISH_WIDE_MIN_SPLIT_WORDS + 1,
+    ):
+        left = _english_word_slice(sentence, spans, 0, split_at)
+        right = _english_word_slice(sentence, spans, split_at, len(spans))
+        left_width = _english_phrase_width_at_target(
+            left,
+            font_file=font_file,
+            layout=layout,
+        )
+        right_width = _english_phrase_width_at_target(
+            right,
+            font_file=font_file,
+            layout=layout,
+        )
+        if left_width > layout.slot_width or right_width > layout.slot_width:
+            continue
+        punctuation_bonus = (
+            layout.slot_width * 0.08
+            if left.text.rstrip().endswith((",", ";", ":", ".", "!", "?"))
+            else 0.0
+        )
+        candidates.append(
+            (
+                abs(left_width - right_width) - punctuation_bonus,
+                split_at,
+                left,
+                right,
+            )
+        )
+    if candidates:
+        _, _, left, right = min(candidates, key=lambda item: (item[0], item[1]))
+        return [left, right]
+    return [sentence]
+
+
 def split_sentence_for_display(
     sentence: Sentence,
     *,
     max_chars: int | None = None,
     language: str = DEFAULT_LANGUAGE,
+    font_file: Path | None = None,
+    layout: SubtitleLayout | None = None,
 ) -> list[Sentence]:
     """Create short display-only phrases without changing the editable SUG."""
 
@@ -1633,7 +1841,19 @@ def split_sentence_for_display(
             )
             for run in override_runs
         ]
-    if language in {"zh", "en"}:
+    if language == "en":
+        if (
+            font_file is not None
+            and layout is not None
+            and layout.name == ENGLISH_WIDE_LAYOUT.name
+        ):
+            return _split_english_sentence_for_wide_fit(
+                sentence,
+                font_file=font_file,
+                layout=layout,
+            )
+        return [sentence]
+    if language == "zh":
         return [sentence]
     if max_chars is None:
         return [sentence]
@@ -1880,6 +2100,7 @@ def vocal_cue_anchor(
         semantic_gap_after_indices=semantic_gap_after_indices,
         semantic_gap_em=layout.semantic_gap_em,
         letter_spacing_em=layout.letter_spacing_em,
+        word_gap_em=layout.word_gap_em,
     )
     group_half_width = (
         VOCAL_CUE_DOT_COUNT - 1
@@ -1940,7 +2161,7 @@ def _cue_lyric_preload_starts(
             continue
         # A cue fills the two display lanes, not necessarily two phrases from
         # one editable source line.  Some short source lines (notably the
-        # Some short intro source lines produce only one display phrase, so the second
+        # Some short intro lines produce only one display phrase, so the second
         # lane must preload the following source line without merging either
         # source or changing its timing data.
         target_phrase_indices = range(
@@ -1949,8 +2170,8 @@ def _cue_lyric_preload_starts(
         )
 
         if cue.after_line_index < 0:
-            # Keep the first two lyric lanes visible throughout the title/intro,
-            # independently of the later
+            # The established album contract keeps the first two lyric lanes
+            # visible throughout the title/intro, independently of the later
             # countdown-dot window and acoustic lyric onset.
             preload_start_ms = 0
         else:
@@ -2100,6 +2321,8 @@ def build_review_ass(
             sentence,
             max_chars=layout.max_phrase_chars,
             language=language,
+            font_file=font_file,
+            layout=layout,
         )
         source_sentence_to_display[source_line_index] = {
             "source_sentence": source_sentence.text,
@@ -2122,7 +2345,9 @@ def build_review_ass(
                     phrase,
                     language=language,
                 )
-                visual_onset_overrides: dict[int, int] = {}
+                visual_onset_overrides = _trailing_repeated_token_visual_onsets(
+                    phrase
+                )
                 glyph_release_overrides: dict[int, int] = {}
                 source_glyph_indices: dict[int, int] = {}
                 for display_index, character in enumerate(phrase.characters):
@@ -2178,7 +2403,7 @@ def build_review_ass(
                 phrase,
                 language=language,
             )
-            visual_onset_overrides: dict[int, int] = {}
+            visual_onset_overrides = _trailing_repeated_token_visual_onsets(phrase)
             glyph_release_overrides: dict[int, int] = {}
             source_glyph_indices: dict[int, int] = {}
             for display_index, character in enumerate(phrase.characters):
@@ -2356,16 +2581,12 @@ def build_review_ass(
             event_start_ms = cue_preload_start_ms
         else:
             event_start_ms = min(event_start_ms, item["natural_start_ms"])
-        event_start_before_secondary_barrier_ms = event_start_ms
-        secondary_release_ms = item["preceding_secondary_block_release_ms"]
-        if secondary_release_ms is not None:
-            event_start_ms = max(event_start_ms, int(secondary_release_ms))
-        item["event_start_before_secondary_barrier_ms"] = (
-            event_start_before_secondary_barrier_ms
-        )
-        item["secondary_release_barrier_applied"] = (
-            event_start_ms != event_start_before_secondary_barrier_ms
-        )
+        # Secondary vocals occupy an independent top overlay. They must not
+        # suppress the normal two-lane preload of upcoming main lyrics below.
+        # Keep the legacy diagnostic fields for report compatibility, but the
+        # barrier is intentionally disabled and acoustic checkpoints stay put.
+        item["event_start_before_secondary_barrier_ms"] = event_start_ms
+        item["secondary_release_barrier_applied"] = False
         item["event_start_ms"] = event_start_ms
         previous_index_by_lane[lane_index] = prepared_index
         lane = layout.lanes[lane_index]
@@ -2384,6 +2605,7 @@ def build_review_ass(
             semantic_gap_after_indices=item["semantic_gap_after_indices"],
             semantic_gap_em=layout.semantic_gap_em,
             letter_spacing_em=layout.letter_spacing_em,
+            word_gap_em=layout.word_gap_em,
         )
         if language == "en":
             events.extend(
@@ -2416,6 +2638,7 @@ def build_review_ass(
                     semantic_gap_after_indices=item["semantic_gap_after_indices"],
                     semantic_gap_em=layout.semantic_gap_em,
                     letter_spacing_em=layout.letter_spacing_em,
+                    word_gap_em=layout.word_gap_em,
                     offset_ms=offset_ms,
                     onset_overrides=item["visual_onset_overrides"],
                     release_overrides=item["visual_release_overrides"],
@@ -2437,6 +2660,7 @@ def build_review_ass(
                 semantic_gap_after_indices=item["semantic_gap_after_indices"],
                 semantic_gap_em=layout.semantic_gap_em,
                 letter_spacing_em=layout.letter_spacing_em,
+                word_gap_em=layout.word_gap_em,
                 language=language,
                 outline_px=layout.ruby_outline_px,
                 glow_blur=layout.ruby_glow_blur,
@@ -2519,7 +2743,9 @@ def build_review_ass(
                 ),
                 "semantic_gap_px": round(font_size * layout.semantic_gap_em, 2),
                 "word_gap_px": round(
-                    ImageFont.truetype(str(font_file), font_size).getlength(" ")
+                    font_size * layout.word_gap_em
+                    if layout.word_gap_em is not None
+                    else ImageFont.truetype(str(font_file), font_size).getlength(" ")
                     + font_size * layout.semantic_gap_em,
                     2,
                 )
@@ -2701,6 +2927,7 @@ def build_review_ass(
             font_size=marker_font_size,
             advance_scale=layout.advance_scale,
             letter_spacing_em=layout.letter_spacing_em,
+            word_gap_em=layout.word_gap_em,
         )
         events.extend(
             main_glyph_events(
@@ -2713,6 +2940,7 @@ def build_review_ass(
                 font_size=marker_font_size,
                 advance_scale=layout.advance_scale,
                 letter_spacing_em=layout.letter_spacing_em,
+                word_gap_em=layout.word_gap_em,
                 outline_px=layout.main_outline_px,
                 glow_blur=layout.main_glow_blur,
             )
@@ -2730,6 +2958,7 @@ def build_review_ass(
                     ruby_font_size=layout.ruby_font_size,
                     advance_scale=layout.advance_scale,
                     letter_spacing_em=layout.letter_spacing_em,
+                    word_gap_em=layout.word_gap_em,
                     tokens=[RubyToken(text="終", reading=marker_ruby, start=0, end=1)],
                     language=language,
                     outline_px=layout.ruby_outline_px,
@@ -2802,13 +3031,65 @@ def build_review_ass(
             "positive": layout.letter_spacing_em > 0,
         },
         "word_gap": {
+            "target_em": layout.word_gap_em,
+            "target_px_at_main_font_size": (
+                round(layout.main_font_size * layout.word_gap_em, 3)
+                if layout.word_gap_em is not None
+                else None
+            ),
             "semantic_gap_em": layout.semantic_gap_em,
             "semantic_gap_px_at_main_font_size": round(
                 layout.main_font_size * layout.semantic_gap_em,
                 3,
             ),
-            "greater_than_letter_spacing": layout.semantic_gap_em
-            > layout.letter_spacing_em,
+            "natural_space_px_at_main_font_size": round(
+                ImageFont.truetype(
+                    str(font_file),
+                    layout.main_font_size,
+                ).getlength(" "),
+                3,
+            ),
+            "natural_space_only": (
+                language == "en"
+                and layout.semantic_gap_em == 0.0
+                and layout.word_gap_em is None
+            ),
+            "narrowed_from_natural": (
+                language == "en"
+                and layout.word_gap_em is not None
+                and layout.main_font_size * layout.word_gap_em
+                < ImageFont.truetype(
+                    str(font_file),
+                    layout.main_font_size,
+                ).getlength(" ")
+            ),
+            "strategy": (
+                "fixed-em-renderer-geometry"
+                if language == "en" and layout.word_gap_em is not None
+                else "font-natural-plus-semantic-gap"
+            ),
+            "word_run_positioning_advance_scale": (
+                layout.advance_scale if language == "en" else None
+            ),
+            "word_internal_spacing_affected": False,
+            "native_frame_visible_white_gap_target_px": (
+                {"minimum": 18, "maximum": 32}
+                if language == "en"
+                else None
+            ),
+            "native_frame_measurement_required": language == "en",
+            "greater_than_letter_spacing": (
+                (
+                    layout.main_font_size * layout.word_gap_em
+                    if layout.word_gap_em is not None
+                    else ImageFont.truetype(
+                        str(font_file),
+                        layout.main_font_size,
+                    ).getlength(" ")
+                    + layout.main_font_size * layout.semantic_gap_em
+                )
+                > layout.main_font_size * layout.letter_spacing_em
+            ),
         },
         "top_safe_area": {
             "top_px": SECONDARY_TOP_SAFE_TOP_PX,
@@ -2824,6 +3105,8 @@ def build_review_ass(
             "line_count": len(secondary_diagnostics),
             "excluded_from_main_lane_phase": True,
             "excluded_from_main_cue_pairing": True,
+            "blocks_main_preload": False,
+            "main_preload_coexists": True,
             "ruby": False,
             "highlight_color": secondary_highlight_color,
             "highlight_color_source": secondary_highlight_color_source,
@@ -2896,12 +3179,165 @@ def build_review_ass(
     }
 
 
+def ensure_lossless_output_is_new(output_path: Path) -> None:
+    if output_path.exists():
+        raise FileExistsError(
+            "lossless preview refuses to overwrite existing output: "
+            f"{output_path}"
+        )
+
+
+def probe_lossless_audio_codec(audio_path: Path) -> str:
+    """Probe the source audio and return its first FFmpeg-reported codec."""
+
+    if audio_path.suffix.lower() not in {".flac", ".wav"}:
+        raise ValueError(
+            "--lossless-output requires --audio with a .flac or .wav extension: "
+            f"{audio_path}"
+        )
+
+    ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+    completed = subprocess.run(
+        [str(ffmpeg), "-hide_banner", "-i", str(audio_path)],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    diagnostic = completed.stdout + "\n" + completed.stderr
+    codecs = re.findall(
+        r"Stream #.*?:\s*Audio:\s*([^\s,]+)",
+        diagnostic,
+        flags=re.IGNORECASE,
+    )
+    if not codecs:
+        raise ValueError(
+            "FFmpeg could not probe a lossless audio stream in "
+            f"{audio_path}"
+        )
+    normalized = [codec.lower() for codec in codecs]
+    unsupported = [
+        codec
+        for codec in normalized
+        if codec != "flac" and not codec.startswith("pcm_")
+    ]
+    if unsupported:
+        raise ValueError(
+            "--lossless-output requires a lossless --audio source; FFmpeg "
+            f"reported codec(s) {', '.join(normalized)} for {audio_path}"
+        )
+    return normalized[0]
+
+
+def build_lossless_review_command(
+    *,
+    ffmpeg: Path,
+    mp4_path: Path,
+    audio_path: Path,
+    output_path: Path,
+    start_seconds: float,
+    duration_seconds: float,
+) -> list[str]:
+    """Build the MKV command using MP4 video and original lossless audio."""
+
+    start = max(0.0, float(start_seconds))
+    duration = max(0.1, float(duration_seconds))
+    end = start + duration
+    return [
+        str(ffmpeg),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-n",
+        "-i",
+        str(mp4_path),
+        "-i",
+        str(audio_path),
+        "-filter_complex",
+        (
+            f"[1:a]atrim=start={start:.3f}:end={end:.3f},"
+            "asetpts=PTS-STARTPTS[lossless_audio]"
+        ),
+        "-map",
+        "0:v:0",
+        "-map",
+        "[lossless_audio]",
+        "-c:v",
+        "copy",
+        "-c:a",
+        LOSSLESS_AUDIO_CODEC,
+        str(output_path),
+    ]
+
+
+def render_lossless_review_clip(
+    *,
+    ffmpeg: Path,
+    mp4_path: Path,
+    audio_path: Path,
+    output_path: Path,
+    start_seconds: float,
+    duration_seconds: float,
+    source_codec: str | None = None,
+) -> dict:
+    """Mux copied MP4 video with a trimmed FLAC stream from the source audio."""
+
+    ensure_lossless_output_is_new(output_path)
+    if not mp4_path.exists():
+        raise FileNotFoundError(f"MP4 preview was not generated: {mp4_path}")
+    if source_codec is None:
+        source_codec = probe_lossless_audio_codec(audio_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    command = build_lossless_review_command(
+        ffmpeg=ffmpeg,
+        mp4_path=mp4_path,
+        audio_path=audio_path,
+        output_path=output_path,
+        start_seconds=start_seconds,
+        duration_seconds=duration_seconds,
+    )
+    completed = subprocess.run(
+        command,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if completed.returncode != 0 or not output_path.exists():
+        raise RuntimeError(completed.stderr[-2000:])
+    start = max(0.0, float(start_seconds))
+    duration = max(0.1, float(duration_seconds))
+    end = start + duration
+    return {
+        "path": str(output_path),
+        "container": "mkv",
+        "codec": LOSSLESS_AUDIO_CODEC,
+        "audio_codec": LOSSLESS_AUDIO_CODEC,
+        "source": str(audio_path),
+        "audio_source": str(audio_path),
+        "source_codec": source_codec,
+        "video_source": str(mp4_path),
+        "video_codec": "copy",
+        "audio_filter": (
+            f"[1:a]atrim=start={start:.3f}:end={end:.3f},"
+            "asetpts=PTS-STARTPTS"
+        ),
+        "start_seconds": start,
+        "duration_seconds": duration,
+        "bytes": output_path.stat().st_size,
+    }
+
+
 def render_review_clip(
     *,
     ass_path: Path,
     audio_path: Path,
     composition_path: Path,
-    vinyl_path: Path,
+    vinyl_path: Path | None,
     fonts_dir: Path,
     output_path: Path,
     start_seconds: float,
@@ -2910,7 +3346,19 @@ def render_review_clip(
     video_encoder: str = "libx264",
     av1_cq: int = 44,
     hevc_cq: int = 30,
+    visual_style: str = "vinyl",
+    spectrum_color: str = "#E19E84",
+    progress_color: str | None = None,
+    program_duration_seconds: float | None = None,
+    lossless_output: Path | None = None,
+    lossless_audio_codec: str | None = None,
 ) -> dict:
+    if lossless_output is not None:
+        ensure_lossless_output_is_new(lossless_output)
+        if lossless_output.resolve() == output_path.resolve():
+            raise ValueError("lossless output must be different from MP4 output")
+        if lossless_audio_codec is None:
+            lossless_audio_codec = probe_lossless_audio_codec(audio_path)
     ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
     subtitle = (
         f"ass=filename='{escape_filter_path(ass_path)}'"
@@ -2919,17 +3367,122 @@ def render_review_clip(
     start = max(0.0, float(start_seconds))
     duration = max(0.1, float(duration_seconds))
     end = start + duration
-    filter_complex = (
-        "[0:v]format=rgba[bg];"
-        f"[1:v]scale={layout.vinyl_size}:{layout.vinyl_size}:flags=lanczos,"
-        "format=rgba,rotate=2*PI*t/8:ow=iw:oh=ih:"
-        "fillcolor=black@0:bilinear=1[vinyl];"
-        f"[bg][vinyl]overlay={layout.vinyl_x}:{layout.vinyl_y}:format=auto[scene];"
-        f"[scene]{subtitle},trim=start={start:.3f}:end={end:.3f},"
-        "setpts=PTS-STARTPTS[v];"
-        f"[2:a]atrim=start={start:.3f}:end={end:.3f},"
-        "asetpts=PTS-STARTPTS[a]"
+    if visual_style not in {"vinyl", "spectrum"}:
+        raise ValueError(f"unsupported visual style: {visual_style}")
+    if visual_style == "vinyl" and vinyl_path is None:
+        raise ValueError("vinyl visual style requires a vinyl image")
+    if visual_style == "spectrum" and output_path.exists():
+        raise FileExistsError(f"spectrum preview already exists: {output_path}")
+    color = spectrum_color.strip().lstrip("#")
+    if not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+        raise ValueError(f"invalid spectrum color: {spectrum_color!r}")
+    color = color.upper()
+    progress = (progress_color or f"#{color}").strip().lstrip("#")
+    if not re.fullmatch(r"[0-9A-Fa-f]{6}", progress):
+        raise ValueError(f"invalid progress color: {progress_color!r}")
+    progress = progress.upper()
+    program_duration = max(
+        end,
+        float(program_duration_seconds)
+        if program_duration_seconds is not None
+        else end,
     )
+    if visual_style == "vinyl":
+        filter_complex = (
+            "[0:v]format=rgba[bg];"
+            f"[1:v]scale={layout.vinyl_size}:{layout.vinyl_size}:flags=lanczos,"
+            "format=rgba,rotate=2*PI*t/8:ow=iw:oh=ih:"
+            "fillcolor=black@0:bilinear=1[vinyl];"
+            f"[bg][vinyl]overlay={layout.vinyl_x}:{layout.vinyl_y}:format=auto[scene];"
+            f"[scene]{subtitle},trim=start={start:.3f}:end={end:.3f},"
+            "setpts=PTS-STARTPTS[v];"
+            f"[2:a]atrim=start={start:.3f}:end={end:.3f},"
+            "asetpts=PTS-STARTPTS[a]"
+        )
+    else:
+        filter_complex = (
+            f"[0:v]format=rgba,trim=start={start:.3f}:end={end:.3f},"
+            "setpts=PTS-STARTPTS[bgclip];"
+            f"[1:a]atrim=start={start:.3f}:end={end:.3f},"
+            "asetpts=PTS-STARTPTS,asplit=2[a][specaudio];"
+            "[specaudio]aformat=channel_layouts=mono,"
+            "showfreqs=s=80x220:r=30:mode=bar:ascale=log:fscale=log:"
+            f"win_size=4096:overlap=0.80:averaging=4:colors=0x{color},"
+            "scale=1040:220:flags=neighbor,"
+            "drawgrid=width=13:height=220:thickness=5:color=black@1,"
+            "format=rgba,colorkey=0x000000:0.06:0.08,alphaextract,"
+            "pad=1040:228:0:0:color=black,"
+            "erosion=coordinates=90,erosion=coordinates=90,"
+            "erosion=coordinates=90,dilation=coordinates=90,"
+            "dilation=coordinates=90,dilation=coordinates=90,"
+            "gblur=sigma=0.8:steps=1,"
+            "split=5[coremask][specinner][specouter][specwide][specpeak];"
+            "[specinner]pad=1168:284:64:0:color=black,"
+            "gblur=sigma=4:steps=2,"
+            "lut=y='val*2.0'[innermask];"
+            "[specouter]pad=1168:284:64:0:color=black,"
+            "gblur=sigma=14:steps=2,"
+            "lut=y='val*2.4'[outermask];"
+            "[specwide]pad=1168:284:64:0:color=black,"
+            "gblur=sigma=28:steps=3,"
+            "lut=y='val*2.8'[widemask];"
+            "[specpeak]pad=1168:284:64:0:color=black,"
+            "lagfun=decay=0.975,"
+            "gblur=sigma=2.2:steps=2,lut=y='val*0.55'[peakmask];"
+            f"color=c=0x{color}:s=1040x228:r=30:d={duration:.3f},"
+            "format=rgba,colorchannelmixer=rr=1:rg=0.18:rb=0.18:"
+            "gr=0.18:gg=1:gb=0.18:br=0.18:bg=0.18:bb=1[corecolor];"
+            f"color=c=0x{color}:s=1168x284:r=30:d={duration:.3f},"
+            "format=rgba[innercolor];"
+            f"color=c=0x{color}:s=1168x284:r=30:d={duration:.3f},"
+            "format=rgba[outercolor];"
+            f"color=c=0x{color}:s=1168x284:r=30:d={duration:.3f},"
+            "format=rgba[widecolor];"
+            f"color=c=0x{color}:s=1168x284:r=30:d={duration:.3f},"
+            "format=rgba[peakcolor];"
+            "[corecolor][coremask]alphamerge[core];"
+            "[innercolor][innermask]alphamerge[innerglow];"
+            "[outercolor][outermask]alphamerge[outerglow];"
+            "[widecolor][widemask]alphamerge[wideglow];"
+            "[peakcolor][peakmask]alphamerge[peakhold];"
+            "[bgclip][wideglow]overlay=736:290:format=auto[wide];"
+            "[wide][outerglow]overlay=736:290:format=auto[outer];"
+            "[outer][peakhold]overlay=736:290:format=auto[held];"
+            "[held][innerglow]overlay=736:290:format=auto[inner];"
+            "[inner][core]overlay=800:290:format=auto[spectrumbars];"
+            f"[spectrumbars]drawbox=x=800:y=516:w=1040:h=3:"
+            f"color=0x{color}@0.85:t=fill[spectrumscene];"
+            f"color=c=black@0.0:s=1040x28:r=30:d={duration:.3f},"
+            "format=rgba[progressbase];"
+            f"color=c=0x{progress}@0.98:s=1040x6:r=30:d={duration:.3f},"
+            "format=rgba[progressfill];"
+            "[progressbase][progressfill]overlay="
+            f"x='-1040+1040*(t+{start:.3f})/{program_duration:.3f}':"
+            "y=11:eval=frame:format=auto[progress];"
+            "[progress]split=2[progresscore][progressglowsrc];"
+            "[progressglowsrc]gblur=sigma=8:steps=2,"
+            "colorchannelmixer=aa=2.0[progressglow];"
+            f"color=c=0x{progress}:s=40x40:r=30:d={duration:.3f},"
+            "format=rgba,"
+            "geq=r='r(X\\,Y)':g='g(X\\,Y)':b='b(X\\,Y)':"
+            "a='255*lte((X-19.5)*(X-19.5)+(Y-19.5)*(Y-19.5)\\,100)'"
+            "[knobsource];"
+            "[knobsource]split=2[knobcore][knobglowsrc];"
+            "[knobglowsrc]gblur=sigma=7:steps=2,"
+            "colorchannelmixer=aa=1.8[knobglow];"
+            f"[spectrumscene]drawbox=x=800:y=548:w=1040:h=6:"
+            f"color=0x{progress}@0.34:t=fill[track];"
+            "[track][progressglow]overlay=800:537:format=auto[trackglow];"
+            "[trackglow][progresscore]overlay=800:537:format=auto[progressscene];"
+            "[progressscene][knobglow]overlay="
+            f"x='800+1040*(t+{start:.3f})/{program_duration:.3f}-20':"
+            "y=531:eval=frame:format=auto[knobhalo];"
+            "[knobhalo][knobcore]overlay="
+            f"x='800+1040*(t+{start:.3f})/{program_duration:.3f}-20':"
+            "y=531:eval=frame:format=auto[visual];"
+            f"[visual]setpts=PTS+{start:.3f}/TB,{subtitle},"
+            "setpts=PTS-STARTPTS[v]"
+        )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pixel_format = "yuv420p"
     if video_encoder == "av1_nvenc":
@@ -3080,26 +3633,33 @@ def render_review_clip(
             "-crf",
             "20",
         ]
-    command = [
-        str(ffmpeg),
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
+    input_args = [
         "-loop",
         "1",
         "-framerate",
         "30",
         "-i",
         str(composition_path),
-        "-loop",
-        "1",
-        "-framerate",
-        "30",
-        "-i",
-        str(vinyl_path),
-        "-i",
-        str(audio_path),
+    ]
+    if visual_style == "vinyl":
+        input_args.extend(
+            [
+                "-loop",
+                "1",
+                "-framerate",
+                "30",
+                "-i",
+                str(vinyl_path),
+            ]
+        )
+    input_args.extend(["-i", str(audio_path)])
+    command = [
+        str(ffmpeg),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y" if visual_style == "vinyl" else "-n",
+        *input_args,
         "-filter_complex",
         filter_complex,
         "-map",
@@ -3117,8 +3677,10 @@ def render_review_clip(
         pixel_format,
         "-c:a",
         "aac",
+        "-profile:a",
+        COMPATIBILITY_AUDIO_PROFILE,
         "-b:a",
-        "192k",
+        COMPATIBILITY_AUDIO_BITRATE,
         "-ar",
         "44100",
         "-ac",
@@ -3138,6 +3700,17 @@ def render_review_clip(
     )
     if completed.returncode != 0 or not output_path.exists():
         raise RuntimeError(completed.stderr[-2000:])
+    lossless_report = None
+    if lossless_output is not None:
+        lossless_report = render_lossless_review_clip(
+            ffmpeg=ffmpeg,
+            mp4_path=output_path,
+            audio_path=audio_path,
+            output_path=lossless_output,
+            start_seconds=start,
+            duration_seconds=duration,
+            source_codec=lossless_audio_codec,
+        )
     return {
         "video": str(output_path),
         "bytes": output_path.stat().st_size,
@@ -3147,8 +3720,67 @@ def render_review_clip(
         "layout": layout.name,
         "video_encoder": video_encoder,
         "pixel_format": pixel_format,
+        "preferred_output": "compatibility-mp4",
+        "default_output": "compatibility-mp4",
+        "output_policy": {
+            "preferred": "compatibility-mp4",
+            "default": "compatibility-mp4",
+        },
+        "compatibility_mp4": {
+            "path": str(output_path),
+            "container": "mp4",
+            "audio_codec": "aac",
+            "audio_profile": COMPATIBILITY_AUDIO_PROFILE,
+            "audio_codec_label": "AAC-LC",
+            "audio_bitrate": COMPATIBILITY_AUDIO_BITRATE,
+        },
+        "audio_codec": "aac",
+        "audio_profile": COMPATIBILITY_AUDIO_PROFILE,
+        "audio_bitrate": COMPATIBILITY_AUDIO_BITRATE,
+        "lossless": lossless_report,
         "av1_cq": av1_cq if video_encoder == "av1_nvenc" else None,
         "hevc_cq": hevc_cq if video_encoder == "hevc_nvenc_444" else None,
+        "visual_style": visual_style,
+        "spectrum_color": f"#{color}" if visual_style == "spectrum" else None,
+        "spectrum_geometry": (
+            {"x": 800, "y": 290, "width": 1040, "height": 220}
+            if visual_style == "spectrum"
+            else None
+        ),
+        "spectrum_mode": "glowing-bars" if visual_style == "spectrum" else None,
+        "spectrum_bar_count": 80 if visual_style == "spectrum" else None,
+        "spectrum_bar_corner_radius_px": 3 if visual_style == "spectrum" else None,
+        "spectrum_bar_soft_edge_sigma": 0.8 if visual_style == "spectrum" else None,
+        "spectrum_glow_horizontal_padding_px": (
+            64 if visual_style == "spectrum" else None
+        ),
+        "spectrum_bar_bottom_clearance_px": 8 if visual_style == "spectrum" else None,
+        "spectrum_glow_bottom_padding_px": 56 if visual_style == "spectrum" else None,
+        "spectrum_baseline_y": 516 if visual_style == "spectrum" else None,
+        "peak_hold": (
+            {"enabled": True, "decay": 0.975, "half_life_seconds": 0.91}
+            if visual_style == "spectrum"
+            else None
+        ),
+        "program_duration_seconds": (
+            program_duration if visual_style == "spectrum" else None
+        ),
+        "progress_bar": (
+            {
+                "x": 800,
+                "y": 548,
+                "width": 1040,
+                "height": 6,
+                "color": f"#{progress}",
+                "color_source": (
+                    "explicit-secondary" if progress_color is not None else "spectrum-fallback"
+                ),
+                "show_time": False,
+                "indicator": {"shape": "circle", "diameter": 20},
+            }
+            if visual_style == "spectrum"
+            else None
+        ),
     }
 
 
@@ -3198,15 +3830,60 @@ def load_visual_release_overrides(
     return result
 
 
+def ensure_spectrum_targets_are_new(
+    *,
+    output_path: Path,
+    ass_path: Path,
+    report_path: Path | None,
+    ass_only: bool,
+) -> None:
+    targets = [ass_path]
+    if not ass_only:
+        targets.append(output_path)
+    if report_path is not None:
+        targets.append(report_path)
+    existing = [str(path) for path in targets if path.exists()]
+    if existing:
+        raise FileExistsError(
+            "spectrum preview refuses to overwrite existing outputs: "
+            + ", ".join(existing)
+        )
+
+
+def probe_audio_duration_seconds(audio_path: Path) -> float:
+    ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+    completed = subprocess.run(
+        [str(ffmpeg), "-hide_banner", "-i", str(audio_path)],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    diagnostic = completed.stdout + "\n" + completed.stderr
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", diagnostic)
+    if match is None:
+        raise RuntimeError(f"could not determine audio duration: {audio_path}")
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sug", type=Path, required=True)
     parser.add_argument("--audio", type=Path, required=True)
     parser.add_argument("--composition", type=Path, required=True)
-    parser.add_argument("--vinyl", type=Path, required=True)
+    parser.add_argument("--vinyl", type=Path)
     parser.add_argument("--fonts-dir", type=Path, required=True)
     parser.add_argument("--font-file", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--lossless-output",
+        type=Path,
+        metavar="MKV",
+        help="optional MKV output with FLAC audio from the original lossless source",
+    )
     parser.add_argument("--ass-output", type=Path)
     parser.add_argument("--report-output", type=Path)
     parser.add_argument("--ass-only", action="store_true")
@@ -3257,6 +3934,20 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--timing-overrides", type=Path)
     parser.add_argument("--song-id")
+    parser.add_argument(
+        "--visual-style",
+        choices=("vinyl", "spectrum"),
+        default="vinyl",
+        help="mutually exclusive right-side visual effect",
+    )
+    parser.add_argument(
+        "--spectrum-color",
+        help="RGB hex color for the spectrum; defaults to the project singer color",
+    )
+    parser.add_argument(
+        "--progress-color",
+        help="RGB hex secondary color for the spectrum progress track",
+    )
     return parser
 
 
@@ -3266,13 +3957,43 @@ def main(argv: list[str] | None = None) -> int:
         args.sug,
         args.audio,
         args.composition,
-        args.vinyl,
         args.fonts_dir,
         args.font_file,
     ]
+    if args.visual_style == "vinyl":
+        if args.vinyl is None:
+            raise ValueError("--vinyl is required when --visual-style=vinyl")
+        paths.append(args.vinyl)
     missing = [str(path) for path in paths if not path.exists()]
     if missing:
         raise FileNotFoundError(f"missing review inputs: {missing}")
+    output = args.output.resolve()
+    ass_path = (
+        args.ass_output.resolve()
+        if args.ass_output is not None
+        else output.with_suffix(".ass")
+    )
+    report_path = (
+        args.report_output.resolve() if args.report_output is not None else None
+    )
+    lossless_output = (
+        args.lossless_output.resolve()
+        if args.lossless_output is not None
+        else None
+    )
+    lossless_audio_codec = None
+    if not args.ass_only and lossless_output is not None:
+        ensure_lossless_output_is_new(lossless_output)
+        if lossless_output == output:
+            raise ValueError("lossless output must be different from MP4 output")
+        lossless_audio_codec = probe_lossless_audio_codec(args.audio.resolve())
+    if args.visual_style == "spectrum":
+        ensure_spectrum_targets_are_new(
+            output_path=output,
+            ass_path=ass_path,
+            report_path=report_path,
+            ass_only=args.ass_only,
+        )
     project = SugProjectParser.load(str(args.sug.resolve()))
     releases = parse_release_overrides(args.release)
     if (args.timing_overrides is None) != (args.song_id is None):
@@ -3286,12 +4007,6 @@ def main(argv: list[str] | None = None) -> int:
         else {}
     )
     layout = SUBTITLE_LAYOUTS[args.layout]
-    output = args.output.resolve()
-    ass_path = (
-        args.ass_output.resolve()
-        if args.ass_output is not None
-        else output.with_suffix(".ass")
-    )
     ass_report = build_review_ass(
         project,
         ass_path,
@@ -3322,11 +4037,19 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
+    lossless_render_options = (
+        {
+            "lossless_output": lossless_output,
+            "lossless_audio_codec": lossless_audio_codec,
+        }
+        if lossless_output is not None
+        else {}
+    )
     video_report = render_review_clip(
         ass_path=ass_path,
         audio_path=args.audio.resolve(),
         composition_path=args.composition.resolve(),
-        vinyl_path=args.vinyl.resolve(),
+        vinyl_path=args.vinyl.resolve() if args.vinyl is not None else None,
         fonts_dir=args.fonts_dir.resolve(),
         output_path=output,
         start_seconds=args.start,
@@ -3335,6 +4058,15 @@ def main(argv: list[str] | None = None) -> int:
         video_encoder=args.video_encoder,
         av1_cq=args.av1_cq,
         hevc_cq=args.hevc_cq,
+        visual_style=args.visual_style,
+        spectrum_color=args.spectrum_color or _project_highlight_color(project),
+        progress_color=args.progress_color,
+        program_duration_seconds=(
+            probe_audio_duration_seconds(args.audio.resolve())
+            if args.visual_style == "spectrum"
+            else None
+        ),
+        **lossless_render_options,
     )
     payload = {"status": "ok", "ass": ass_report, "video": video_report}
     if args.report_output is not None:

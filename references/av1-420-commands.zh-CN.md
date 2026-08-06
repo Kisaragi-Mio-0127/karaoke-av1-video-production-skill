@@ -1,0 +1,57 @@
+# AV1 4:2:0 命令模式
+
+[English](av1-420-commands.md) | 简体中文
+
+根据仓库和本机FFmpeg版本调整命令。Windows路径要正确引用；字幕滤镜先用短预览验证。
+
+## 输入探测与画布
+
+使用`ffprobe`检查容器、起始时间、时长、视频编码、像素格式、尺寸、帧率、色彩元数据、采样率、声道数和声道布局。用`ffmpeg -encoders`及对应编码器帮助确认可用参数，但编码器出现在列表中不代表本机GPU能够运行；必须先做短探测编码。
+
+4:2:0要求宽高为偶数。应在字幕渲染前明确补边或缩放，例如：
+
+```text
+pad=ceil(iw/2)*2:ceil(ih/2)*2,subtitles=...,format=p010le
+```
+
+10位软件路径使用`yuv420p10le`，NVENC输入使用`p010le`，8位兼容路径使用`yuv420p`。不要静默裁剪源画面。
+
+## AV1编码与默认MP4
+
+NVENC探测成功时可使用`av1_nvenc`做预览或交付；CPU质量路径使用`libaom-av1`。质量参数必须由代表性预览和交付要求决定，不能把示例CQ/CRF当作固定标准。
+
+默认主交付是MP4，音频使用AAC-LC，目标码率为320 kb/s，并显式映射视频和选定音轨：
+
+```powershell
+& $ffmpeg -nostdin -n -i $input `
+  -map 0:v:0 -map 0:a:0? -map_metadata -1 -map_chapters -1 `
+  -vf "subtitles='$ass':fontsdir='$fonts',format=p010le" `
+  -c:v av1_nvenc -preset p6 -tune hq -rc vbr -cq 28 -b:v 0 `
+  -c:a aac -profile:a aac_low -b:a 320k -movflags +faststart `
+  $temporaryMp4
+```
+
+不确定目标设备是否支持AV1时，另产H.264兼容版本。普通SDR不要添加冲突HDR标签，并用`ffprobe`验证最终像素格式和色彩元数据。
+
+## ASS软字幕与FLAC-MKV配对
+
+需要保留ASS软字幕或多音轨时使用MKV；复杂ASS样式不要承诺在MP4中生效。正式AV1 4:2:0交付若源音频确为无损FLAC或PCM WAV，应从通过验证的MP4复制视频流，并从同一裁剪时间段的无损源直接编码FLAC：
+
+```powershell
+& $ffmpeg -nostdin -n -i $temporaryMp4 -i $losslessSource `
+  -filter_complex "[1:a:0]atrim=start=$start:end=$end,asetpts=PTS-STARTPTS[a]" `
+  -map 0:v:0 -map "[a]" -c:v copy -c:a flac `
+  $temporaryLosslessMkv
+```
+
+不要添加`-shortest`、`-ar`或`-ac`。真实源编码为MP3/AAC或其他有损格式时拒绝无损配对，即使文件扩展名写成FLAC/WAV。MKV保留无损源的采样率和声道结构，不强行套用MP4的44.1 kHz立体声转换。发布前要求MP4为AAC-LC/320k、MKV仅含FLAC音频、两者视频流哈希一致、MKV解码PCM等于源音频切片，时间轴在容差内一致，并具备可回滚的成对发布记录。
+
+## 时间轴、验证与发布
+
+- 检查所有输入的`start_time`、流时长、帧率模式和最终ASS事件；不要用`-shortest`掩盖漂移。
+- 多音轨必须逐条显式`-map`并验证；不要依赖FFmpeg自动选流。
+- 用`ffprobe`检查视频编码、像素格式、尺寸、帧率、色彩、音频编码、声道、时长和字幕流。
+- 完整空解码默认是可选诊断，只在用户要求或探测、封装、传输、损坏证据需要时执行。执行时记录每个真实退出码；未执行不能写成成功。
+- 临时文件、目标和备份应在同一卷；解析并约束路径后再提升。替换已有Windows目标时优先使用文件系统替换API，发布后再次探测最终路径。
+
+探测JSON和FFmpeg日志默认放在私有目录，报告中脱敏绝对路径、设备标识和未批准标签。检查FFmpeg、libaom、音频编码器、NVENC组件、字体和捆绑二进制的许可证与再分发条件；不要因为成品获授权就再分发这些依赖、字体、歌词或ASS源文件。

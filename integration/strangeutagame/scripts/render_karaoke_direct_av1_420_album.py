@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -51,20 +51,21 @@ except ImportError:  # pragma: no cover - direct script execution
     )
 
 try:
-    from .karaoke_language import language_identity as _bingbu_language_identity
+    from .karaoke_language import language_identity as _shared_language_identity
 except ImportError:  # pragma: no cover - direct script execution/compatibility
     try:
         from karaoke_language import (
-            language_identity as _bingbu_language_identity,  # type: ignore[no-redef]
+            language_identity as _shared_language_identity,  # type: ignore[no-redef]
         )
-    except ImportError:  # pragma: no cover - compatibility before Bingbu lands
-        _bingbu_language_identity = None  # type: ignore[assignment]
+    except ImportError:  # pragma: no cover - reduced standalone bundle
+        _shared_language_identity = None  # type: ignore[assignment]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PREVIEW_SCRIPT = REPO_ROOT / "scripts" / "karaoke_review_preview.py"
 PROFILES = ("standard", "wide")
 AV1_OUTPUT_DIR = "av1-420"
+LOSSLESS_OUTPUT_DIR = "av1-420-lossless"
 AV1_REPORT_NAME = "av1_420_report.json"
 
 
@@ -112,14 +113,41 @@ def _remove_if_present(path: Path) -> None:
         path.unlink()
 
 
-def _publish_atomically(pairs: Sequence[tuple[Path, Path]]) -> None:
-    for temporary, target in pairs:
+def _publish_atomically(
+    pairs: Sequence[tuple[Path, Path]],
+    *,
+    post_publish_check: Callable[[], None] | None = None,
+) -> None:
+    """Publish a generation as one rollback-safe artifact set."""
+
+    for temporary, _target in pairs:
         if not temporary.is_file():
             raise DirectAV1420RenderError(
                 f"validated temporary artifact disappeared: {temporary}"
             )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(str(temporary), str(target))
+    token = uuid.uuid4().hex
+    states: list[tuple[Path, Path | None]] = []
+    try:
+        for temporary, target in pairs:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            backup: Path | None = None
+            if target.exists():
+                backup = target.with_name(f".{target.name}.{token}.rollback")
+                os.replace(str(target), str(backup))
+            states.append((target, backup))
+            os.replace(str(temporary), str(target))
+        if post_publish_check is not None:
+            post_publish_check()
+    except Exception:
+        for target, backup in reversed(states):
+            _remove_if_present(target)
+            if backup is not None and backup.exists():
+                os.replace(str(backup), str(target))
+        raise
+    else:
+        for _target, backup in states:
+            if backup is not None:
+                _remove_if_present(backup)
 
 
 def write_json_atomically(path: Path, value: dict[str, Any]) -> None:
@@ -263,16 +291,14 @@ def _rendered_ruby_entries(report: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _language_interface() -> Any:
-    """Return Bingbu's optional language resolver when it is available.
+    """Return the shared language resolver when it is available.
 
-    The 420 lane is intentionally compatible with both the current core and
-    the upcoming Bingbu interface.  The fallback remains deterministic and
-    reads the language from the SUG metadata; it is not a second source of
-    project language policy.
+    The fallback remains deterministic and reads the language from SUG
+    metadata; it is not a second source of project language policy.
     """
 
-    if callable(_bingbu_language_identity):
-        return _bingbu_language_identity
+    if callable(_shared_language_identity):
+        return _shared_language_identity
     for name in (
         "language_identity",
         "get_language_identity",
@@ -299,7 +325,7 @@ def _call_language_interface(
         return callback()
     parameter = parameters[0]
     name = parameter.name.casefold()
-    if callback is _bingbu_language_identity or "language" in name:
+    if callback is _shared_language_identity or "language" in name:
         argument: Any = fallback_language
     elif "path" in name or "sug" in name or "source" in name:
         argument: Any = task.sug_path
@@ -351,7 +377,7 @@ def language_identity(
     *,
     prefer_report: bool = True,
 ) -> dict[str, Any]:
-    """Resolve one track's language through Bingbu or deterministic SUG fallback."""
+    """Resolve language through the shared policy or deterministic SUG metadata."""
 
     if (
         prefer_report
@@ -381,7 +407,7 @@ def language_identity(
             return _normalise_language_identity(
                 value,
                 fallback_language=fallback_language,
-                source="bingbu-language-interface",
+                source="shared-language-interface",
             )
     return _normalise_language_identity(
         fallback_language,
@@ -493,6 +519,13 @@ def configure_av1_tasks(
             / task.profile
             / task.track.numbered_video_filename
         ).resolve()
+        task.lossless_video_output = (
+            root
+            / "video"
+            / LOSSLESS_OUTPUT_DIR
+            / task.profile
+            / Path(task.track.numbered_video_filename).with_suffix(".mkv")
+        ).resolve()
         task.direct_report = (
             root
             / "validation"
@@ -507,6 +540,7 @@ def build_preview_command(
     task: render_core.RenderTask,
     *,
     temporary_video: Path,
+    temporary_lossless_video: Path,
     temporary_ass: Path,
     temporary_report: Path,
     preview_script: Path,
@@ -529,6 +563,8 @@ def build_preview_command(
         str(task.font_file),
         "--output",
         str(temporary_video),
+        "--lossless-output",
+        str(temporary_lossless_video),
         "--ass-output",
         str(temporary_ass),
         "--report-output",
@@ -568,6 +604,8 @@ def _flag_value(command: Sequence[str], flag: str) -> str:
 def validate_direct_source_command(command: Sequence[str]) -> None:
     if _flag_value(command, "--video-encoder") != "av1_nvenc":
         raise DirectAV1420RenderError("AV1 lane must use video_encoder=av1_nvenc")
+    if Path(_flag_value(command, "--lossless-output")).suffix.casefold() != ".mkv":
+        raise DirectAV1420RenderError("lossless AV1 output must use Matroska (.mkv)")
     expected_suffixes = {
         "--sug": ".sug",
         "--composition": ".png",
@@ -580,11 +618,12 @@ def validate_direct_source_command(command: Sequence[str]) -> None:
                 f"direct AV1 source {flag} must be {suffix}, got {source}"
             )
     audio_source = Path(_flag_value(command, "--audio"))
-    allowed_audio_suffixes = {".flac", ".mp3", ".wav"}
+    allowed_audio_suffixes = {".flac", ".wav"}
     if audio_source.suffix.casefold() not in allowed_audio_suffixes:
         expected = ", ".join(sorted(allowed_audio_suffixes))
         raise DirectAV1420RenderError(
-            f"direct AV1 audio source must be one of {expected}, got {audio_source}"
+            "direct AV1 dual delivery requires a lossless source "
+            f"({expected}), got {audio_source}"
         )
     forbidden_video_suffixes = {".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v"}
     for flag in ("--sug", "--audio", "--composition", "--vinyl"):
@@ -640,16 +679,188 @@ def validate_preview_report(report: dict[str, Any], *, av1_cq: int) -> None:
         "video_encoder": "av1_nvenc",
         "pixel_format": "yuv420p",
         "av1_cq": av1_cq,
+        "preferred_output": "compatibility-mp4",
+        "audio_codec": "aac",
+        "audio_profile": "aac_low",
+        "audio_bitrate": "320k",
     }
     for key, value in expected.items():
         if video.get(key) != value:
             raise DirectAV1420RenderError(
                 f"preview report mismatch: {key}={video.get(key)!r}, expected {value!r}"
             )
+    lossless = video.get("lossless")
+    if not isinstance(lossless, dict):
+        raise DirectAV1420RenderError("preview report has no lossless companion")
+    if lossless.get("audio_codec") != "flac" or lossless.get("video_codec") != "copy":
+        raise DirectAV1420RenderError(
+            f"preview lossless report is invalid: {lossless!r}"
+        )
 
 
 def default_ffmpeg() -> Path:
     return render_core.default_ffmpeg()
+
+
+def _duration_from_probe(probe: str) -> float | None:
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe)
+    if match is None:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def _stream_packet_timeline(
+    output: Path,
+    stream_specifier: str,
+    *,
+    ffmpeg: Path,
+) -> dict[str, Any]:
+    """Read packet boundaries without requiring a separate ffprobe binary."""
+
+    completed = subprocess.run(
+        [
+            str(ffmpeg),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(output),
+            "-map",
+            stream_specifier,
+            "-c",
+            "copy",
+            "-f",
+            "framehash",
+            "-hash",
+            "sha256",
+            "-",
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    time_base_match = re.search(r"^#tb\s+0:\s*(-?\d+)\s*/\s*(\d+)\s*$", completed.stdout, re.MULTILINE)
+    packets: list[tuple[int, int, int]] = []
+    for raw_line in completed.stdout.splitlines():
+        if not raw_line or raw_line.startswith("#"):
+            continue
+        fields = [field.strip() for field in raw_line.split(",")]
+        if len(fields) < 4:
+            continue
+        try:
+            packets.append((int(fields[1]), int(fields[2]), int(fields[3])))
+        except ValueError:
+            continue
+    if completed.returncode != 0 or time_base_match is None or not packets:
+        raise DirectAV1420RenderError(
+            f"could not inspect packet timeline {stream_specifier} for {output}: "
+            f"{completed.stderr[-1200:]}"
+        )
+    numerator = int(time_base_match.group(1))
+    denominator = int(time_base_match.group(2))
+    scale = numerator / denominator
+    dts_values = [packet[0] for packet in packets]
+    pts_values = [packet[1] for packet in packets]
+    first_pts = min(pts_values) * scale
+    end_pts = max(pts + duration for _dts, pts, duration in packets) * scale
+    return {
+        "packet_count": len(packets),
+        "time_base": f"{numerator}/{denominator}",
+        "first_pts_seconds": round(first_pts, 9),
+        "end_pts_seconds": round(end_pts, 9),
+        "duration_seconds": round(end_pts - first_pts, 9),
+        "dts_monotonic": all(
+            current >= previous
+            for previous, current in zip(dts_values, dts_values[1:])
+        ),
+    }
+
+
+def _video_stream_sha256(output: Path, *, ffmpeg: Path) -> str:
+    completed = subprocess.run(
+        [
+            str(ffmpeg),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(output),
+            "-map",
+            "0:v:0",
+            "-c",
+            "copy",
+            "-f",
+            "hash",
+            "-hash",
+            "sha256",
+            "-",
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    match = re.search(r"SHA256=([0-9A-Fa-f]{64})", completed.stdout)
+    if completed.returncode != 0 or match is None:
+        raise DirectAV1420RenderError(
+            f"could not hash video stream for {output}: {completed.stderr[-1200:]}"
+        )
+    return match.group(1).upper()
+
+
+def _audio_pcm_sha256(
+    output: Path,
+    *,
+    ffmpeg: Path,
+    start_seconds: float | None = None,
+    duration_seconds: float | None = None,
+) -> str:
+    command = [
+        str(ffmpeg),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(output),
+    ]
+    if start_seconds is not None and duration_seconds is not None:
+        start = max(0.0, float(start_seconds))
+        end = start + max(0.1, float(duration_seconds))
+        command.extend(
+            [
+                "-filter_complex",
+                (
+                    f"[0:a:0]atrim=start={start:.3f}:end={end:.3f},"
+                    "asetpts=PTS-STARTPTS[a]"
+                ),
+                "-map",
+                "[a]",
+            ]
+        )
+    else:
+        command.extend(["-map", "0:a:0"])
+    command.extend(["-c:a", "pcm_s32le", "-f", "hash", "-hash", "sha256", "-"])
+    completed = subprocess.run(
+        command,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    match = re.search(r"SHA256=([0-9A-Fa-f]{64})", completed.stdout)
+    if completed.returncode != 0 or match is None:
+        raise DirectAV1420RenderError(
+            f"could not hash decoded audio for {output}: {completed.stderr[-1200:]}"
+        )
+    return match.group(1).upper()
 
 
 def verify_av1_420_output(
@@ -677,6 +888,22 @@ def verify_av1_420_output(
     )
     probe = f"{completed.stdout}\n{completed.stderr}"
     video_line = re.search(r"Video:\s+([^\r\n]+)", probe, re.IGNORECASE)
+    audio_line = re.search(r"Audio:\s+([^\r\n]+)", probe, re.IGNORECASE)
+    audio_bitrate_match = re.search(
+        r"Audio:\s+aac[^\r\n]*\b(\d+)\s+kb/s\b",
+        probe,
+        re.IGNORECASE,
+    )
+    audio_bitrate_kbps = (
+        int(audio_bitrate_match.group(1)) if audio_bitrate_match is not None else None
+    )
+    video_timeline = _stream_packet_timeline(
+        output, "0:v:0", ffmpeg=executable
+    )
+    audio_timeline = _stream_packet_timeline(
+        output, "0:a:0", ffmpeg=executable
+    )
+    timeline_tolerance = 0.05
     checks.update(
         {
             "codec_av1": bool(re.search(r"Video:\s+av1\b", probe, re.IGNORECASE)),
@@ -694,6 +921,31 @@ def verify_av1_420_output(
             ),
             "cfr_30fps": bool(re.search(r"\b30\s+fps\b", probe)),
             "aac_audio": bool(re.search(r"Audio:\s+aac\b", probe, re.IGNORECASE)),
+            "aac_bitrate_reasonable_for_320k_target": (
+                audio_bitrate_kbps is not None and 240 <= audio_bitrate_kbps <= 360
+            ),
+            "video_dts_monotonic": video_timeline["dts_monotonic"],
+            "audio_dts_monotonic": audio_timeline["dts_monotonic"],
+            "video_starts_at_zero": (
+                abs(video_timeline["first_pts_seconds"]) <= timeline_tolerance
+            ),
+            "audio_starts_near_zero_including_aac_priming": (
+                abs(audio_timeline["first_pts_seconds"]) <= timeline_tolerance
+            ),
+            "av_start_boundaries_match": (
+                abs(
+                    video_timeline["first_pts_seconds"]
+                    - audio_timeline["first_pts_seconds"]
+                )
+                <= timeline_tolerance
+            ),
+            "av_end_boundaries_match": (
+                abs(
+                    video_timeline["end_pts_seconds"]
+                    - audio_timeline["end_pts_seconds"]
+                )
+                <= timeline_tolerance
+            ),
         }
     )
     decode: dict[str, Any] | None = None
@@ -734,6 +986,193 @@ def verify_av1_420_output(
         "size_bytes": output.stat().st_size,
         "checks": checks,
         "video_line": video_line.group(0) if video_line else None,
+        "audio_line": audio_line.group(0) if audio_line else None,
+        "audio_bitrate_kbps": audio_bitrate_kbps,
+        "duration_seconds": _duration_from_probe(probe),
+        "packet_timelines": {
+            "video": video_timeline,
+            "audio": audio_timeline,
+        },
+        "decode": decode,
+    }
+
+
+def verify_lossless_av1_420_output(
+    output: Path,
+    *,
+    compatibility_output: Path,
+    source_audio: Path,
+    start_seconds: float,
+    duration_seconds: float,
+    ffmpeg: Path | None = None,
+    full_decode: bool = False,
+) -> dict[str, Any]:
+    checks: dict[str, bool] = {
+        "exists": output.is_file(),
+        "non_empty": output.is_file() and output.stat().st_size > 0,
+    }
+    if not checks["non_empty"]:
+        return {"ok": False, "path": str(output), "checks": checks, "probe": ""}
+
+    executable = (ffmpeg or default_ffmpeg()).resolve()
+    completed = subprocess.run(
+        [str(executable), "-hide_banner", "-i", str(output)],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    probe = f"{completed.stdout}\n{completed.stderr}"
+    compatibility_probe = subprocess.run(
+        [str(executable), "-hide_banner", "-i", str(compatibility_output)],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    compatibility_text = (
+        f"{compatibility_probe.stdout}\n{compatibility_probe.stderr}"
+    )
+    duration = _duration_from_probe(probe)
+    compatibility_duration = _duration_from_probe(compatibility_text)
+    video_sha256 = _video_stream_sha256(output, ffmpeg=executable)
+    compatibility_video_sha256 = _video_stream_sha256(
+        compatibility_output,
+        ffmpeg=executable,
+    )
+    audio_pcm_sha256 = _audio_pcm_sha256(output, ffmpeg=executable)
+    source_audio_pcm_sha256 = _audio_pcm_sha256(
+        source_audio,
+        ffmpeg=executable,
+        start_seconds=start_seconds,
+        duration_seconds=duration_seconds,
+    )
+    compatibility_video_timeline = _stream_packet_timeline(
+        compatibility_output, "0:v:0", ffmpeg=executable
+    )
+    compatibility_audio_timeline = _stream_packet_timeline(
+        compatibility_output, "0:a:0", ffmpeg=executable
+    )
+    video_timeline = _stream_packet_timeline(output, "0:v:0", ffmpeg=executable)
+    audio_timeline = _stream_packet_timeline(output, "0:a:0", ffmpeg=executable)
+    timeline_tolerance = 0.05
+    checks.update(
+        {
+            "codec_av1": bool(re.search(r"Video:\s+av1\b", probe, re.IGNORECASE)),
+            "resolution_1920x1080": "1920x1080" in probe,
+            "pixel_format_yuv420p": bool(
+                re.search(r"Video:.*\byuv420p\b", probe, re.IGNORECASE)
+            ),
+            "limited_range_bt709": bool(
+                re.search(r"\byuv420p\(tv,\s*bt709", probe, re.IGNORECASE)
+            ),
+            "cfr_30fps": bool(re.search(r"\b30\s+fps\b", probe)),
+            "flac_audio": bool(re.search(r"Audio:\s+flac\b", probe, re.IGNORECASE)),
+            "not_aac_audio": not bool(
+                re.search(r"Audio:\s+aac\b", probe, re.IGNORECASE)
+            ),
+            "video_stream_copy_matches_mp4": (
+                video_sha256 == compatibility_video_sha256
+            ),
+            "duration_matches_mp4": (
+                duration is not None
+                and compatibility_duration is not None
+                and abs(duration - compatibility_duration) <= 0.05
+            ),
+            "decoded_audio_matches_lossless_source_slice": (
+                audio_pcm_sha256 == source_audio_pcm_sha256
+            ),
+            "compatibility_video_dts_monotonic": compatibility_video_timeline[
+                "dts_monotonic"
+            ],
+            "compatibility_audio_dts_monotonic": compatibility_audio_timeline[
+                "dts_monotonic"
+            ],
+            "lossless_video_dts_monotonic": video_timeline["dts_monotonic"],
+            "lossless_audio_dts_monotonic": audio_timeline["dts_monotonic"],
+            "video_packet_boundaries_match_mp4": (
+                abs(
+                    video_timeline["first_pts_seconds"]
+                    - compatibility_video_timeline["first_pts_seconds"]
+                )
+                <= timeline_tolerance
+                and abs(
+                    video_timeline["end_pts_seconds"]
+                    - compatibility_video_timeline["end_pts_seconds"]
+                )
+                <= timeline_tolerance
+            ),
+            "lossless_audio_starts_near_zero": (
+                abs(audio_timeline["first_pts_seconds"]) <= timeline_tolerance
+            ),
+            "lossless_av_start_boundaries_match": (
+                abs(
+                    video_timeline["first_pts_seconds"]
+                    - audio_timeline["first_pts_seconds"]
+                )
+                <= timeline_tolerance
+            ),
+            "lossless_av_end_boundaries_match": (
+                abs(
+                    video_timeline["end_pts_seconds"]
+                    - audio_timeline["end_pts_seconds"]
+                )
+                <= timeline_tolerance
+            ),
+        }
+    )
+    decode: dict[str, Any] | None = None
+    if full_decode:
+        started = time.perf_counter()
+        decoded = subprocess.run(
+            [
+                str(executable),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(output),
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a:0",
+                "-f",
+                "null",
+                os.devnull,
+            ],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        checks["full_decode"] = decoded.returncode == 0
+        decode = {
+            "returncode": decoded.returncode,
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+            "stderr_tail": decoded.stderr[-1200:],
+        }
+    return {
+        "ok": all(checks.values()),
+        "path": str(output),
+        "size_bytes": output.stat().st_size,
+        "checks": checks,
+        "duration_seconds": duration,
+        "video_stream_sha256": video_sha256,
+        "compatibility_video_stream_sha256": compatibility_video_sha256,
+        "audio_pcm_sha256": audio_pcm_sha256,
+        "source_audio_pcm_sha256": source_audio_pcm_sha256,
+        "packet_timelines": {
+            "compatibility_video": compatibility_video_timeline,
+            "compatibility_audio": compatibility_audio_timeline,
+            "lossless_video": video_timeline,
+            "lossless_audio": audio_timeline,
+        },
         "decode": decode,
     }
 
@@ -743,7 +1182,9 @@ def normalise_report(
     task: render_core.RenderTask,
     *,
     media: dict[str, Any],
+    lossless_media: dict[str, Any],
     video_sha256: str,
+    lossless_video_sha256: str,
     elapsed_seconds: float,
     av1_cq: int,
     ass_source_path: Path | None = None,
@@ -771,6 +1212,30 @@ def normalise_report(
             if task.video_output.is_file()
             else media["size_bytes"],
             "media_checks": media,
+            "preferred_delivery": "compatibility_mp4",
+            "primary_delivery": {
+                "path": str(task.video_output.resolve()),
+                "container": "mp4",
+                "video_codec": "av1",
+                "audio_codec": "aac",
+                "audio_profile": "LC",
+                "audio_target_bitrate_bps": 320_000,
+            },
+            "lossless_audio_delivery": {
+                "path": str(task.lossless_video_output.resolve()),
+                "container": "matroska",
+                "video_codec": "copy",
+                "audio_codec": "flac",
+                "audio_source": str(task.track.audio_path.resolve()),
+                "audio_source_sha256": sha256_file(task.track.audio_path),
+                "bytes": (
+                    task.lossless_video_output.stat().st_size
+                    if task.lossless_video_output.is_file()
+                    else lossless_media["size_bytes"]
+                ),
+                "sha256": lossless_video_sha256,
+                "media_checks": lossless_media,
+            },
         }
     )
     result.update(
@@ -786,10 +1251,13 @@ def normalise_report(
             "intermediate_hevc": False,
             "source_chain": (
                 "manifest audio + composition + vinyl + latest SUG/ASS -> "
-                "av1_nvenc/yuv420p"
+                "AV1/yuv420p + AAC-LC 320k MP4; copied AV1 + source-derived "
+                "FLAC Matroska companion"
             ),
             "sources": _source_record(task, ass_path=ass_source_path),
             "output_sha256": video_sha256,
+            "lossless_output_sha256": lossless_video_sha256,
+            "default_delivery": "compatibility_mp4",
             "render_elapsed_seconds": elapsed_seconds,
         }
     )
@@ -810,11 +1278,13 @@ def render_one(
     libass_font_probe: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     temporary_video = _temporary_path(task.video_output)
+    temporary_lossless_video = _temporary_path(task.lossless_video_output)
     temporary_ass = _temporary_path(task.ass_output)
     temporary_report = _temporary_path(task.direct_report)
     command = build_preview_command(
         task,
         temporary_video=temporary_video,
+        temporary_lossless_video=temporary_lossless_video,
         temporary_ass=temporary_ass,
         temporary_report=temporary_report,
         preview_script=preview_script,
@@ -839,6 +1309,18 @@ def render_one(
         if not media.get("ok"):
             raise DirectAV1420RenderError(
                 f"AV1 yuv420p media validation failed: {media}"
+            )
+        lossless_media = verify_lossless_av1_420_output(
+            temporary_lossless_video,
+            compatibility_output=temporary_video,
+            source_audio=task.track.audio_path,
+            start_seconds=0.0,
+            duration_seconds=task.duration_seconds,
+            ffmpeg=ffmpeg,
+        )
+        if not lossless_media.get("ok"):
+            raise DirectAV1420RenderError(
+                f"lossless AV1 companion validation failed: {lossless_media}"
             )
         actual_libass_probe = (
             dict(libass_font_probe)
@@ -866,11 +1348,14 @@ def render_one(
             )
         elapsed_seconds = round(time.perf_counter() - started, 3)
         output_sha256 = sha256_file(temporary_video)
+        lossless_output_sha256 = sha256_file(temporary_lossless_video)
         normalised = normalise_report(
             preview_report,
             task,
             media=media,
+            lossless_media=lossless_media,
             video_sha256=output_sha256,
+            lossless_video_sha256=lossless_output_sha256,
             elapsed_seconds=elapsed_seconds,
             av1_cq=av1_cq,
             ass_source_path=temporary_ass,
@@ -881,12 +1366,44 @@ def render_one(
             json.dumps(normalised, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+
+        def verify_published_generation() -> None:
+            published_media = verify_av1_420_output(task.video_output, ffmpeg=ffmpeg)
+            if not published_media.get("ok"):
+                raise DirectAV1420RenderError(
+                    f"published compatibility MP4 failed validation: {published_media}"
+                )
+            published_lossless_media = verify_lossless_av1_420_output(
+                task.lossless_video_output,
+                compatibility_output=task.video_output,
+                source_audio=task.track.audio_path,
+                start_seconds=0.0,
+                duration_seconds=task.duration_seconds,
+                ffmpeg=ffmpeg,
+            )
+            if not published_lossless_media.get("ok"):
+                raise DirectAV1420RenderError(
+                    "published lossless companion failed validation: "
+                    f"{published_lossless_media}"
+                )
+            if sha256_file(task.video_output) != output_sha256:
+                raise DirectAV1420RenderError(
+                    f"published MP4 hash changed during publish: {task.video_output}"
+                )
+            if sha256_file(task.lossless_video_output) != lossless_output_sha256:
+                raise DirectAV1420RenderError(
+                    "published lossless MKV hash changed during publish: "
+                    f"{task.lossless_video_output}"
+                )
+
         _publish_atomically(
             [
                 (temporary_ass, task.ass_output),
-                (temporary_report, task.direct_report),
                 (temporary_video, task.video_output),
-            ]
+                (temporary_lossless_video, task.lossless_video_output),
+                (temporary_report, task.direct_report),
+            ],
+            post_publish_check=verify_published_generation,
         )
         return {
             "status": "ok",
@@ -896,18 +1413,27 @@ def render_one(
             "artifact_slug": task.track.artifact_slug,
             "render_mode": "direct-av1-420",
             "video": str(task.video_output),
+            "lossless_video": str(task.lossless_video_output),
             "report": str(task.direct_report),
             "output_size_bytes": task.video_output.stat().st_size,
             "sha256": output_sha256,
+            "lossless_output_size_bytes": task.lossless_video_output.stat().st_size,
+            "lossless_sha256": lossless_output_sha256,
             "elapsed_seconds": elapsed_seconds,
             "sources": _source_record(task),
             "media": media,
+            "lossless_media": lossless_media,
             "language_identity": normalised["language_identity"],
             "ruby_identity": normalised["ruby_identity"],
             "libass_font_probe": normalised["libass_font_probe"],
         }
     finally:
-        for temporary in (temporary_video, temporary_ass, temporary_report):
+        for temporary in (
+            temporary_video,
+            temporary_lossless_video,
+            temporary_ass,
+            temporary_report,
+        ):
             _remove_if_present(temporary)
 
 
@@ -983,10 +1509,30 @@ def collect_existing_results(
             raise DirectAV1420RenderError(
                 f"published AV1 failed validation: {task.video_output}: {media}"
             )
+        lossless_media = verify_lossless_av1_420_output(
+            task.lossless_video_output,
+            compatibility_output=task.video_output,
+            source_audio=task.track.audio_path,
+            start_seconds=0.0,
+            duration_seconds=task.duration_seconds,
+            ffmpeg=ffmpeg,
+            full_decode=full_decode,
+        )
+        if not lossless_media.get("ok"):
+            raise DirectAV1420RenderError(
+                "published lossless AV1 companion failed validation: "
+                f"{task.lossless_video_output}: {lossless_media}"
+            )
         output_sha256 = sha256_file(task.video_output)
+        lossless_output_sha256 = sha256_file(task.lossless_video_output)
         if report.get("output_sha256") != output_sha256:
             raise DirectAV1420RenderError(
                 f"published AV1 hash differs from report: {task.video_output}"
+            )
+        if report.get("lossless_output_sha256") != lossless_output_sha256:
+            raise DirectAV1420RenderError(
+                "published lossless AV1 hash differs from report: "
+                f"{task.lossless_video_output}"
             )
         identities = build_language_ruby_identity(task, report)
         identity_keys = {
@@ -1013,12 +1559,18 @@ def collect_existing_results(
                 "artifact_slug": task.track.artifact_slug,
                 "render_mode": "direct-av1-420",
                 "video": str(task.video_output),
+                "lossless_video": str(task.lossless_video_output),
                 "report": str(task.direct_report),
                 "output_size_bytes": task.video_output.stat().st_size,
                 "sha256": output_sha256,
+                "lossless_output_size_bytes": (
+                    task.lossless_video_output.stat().st_size
+                ),
+                "lossless_sha256": lossless_output_sha256,
                 "elapsed_seconds": report.get("render_elapsed_seconds"),
                 "sources": _source_record(task),
                 "media": media,
+                "lossless_media": lossless_media,
                 "language_identity": identities["language"],
                 "ruby_identity": identities["ruby"],
                 "libass_font_probe": dict(recorded_libass_probe),
@@ -1071,6 +1623,10 @@ def build_av1_420_report(
             "source": f"manifest audio + artwork + timing/{item['profile']}/ASS",
             "source_paths": item["sources"],
             "output": project_relative(Path(str(item["video"])), root),
+            "default_delivery": "compatibility_mp4",
+            "lossless_output": project_relative(
+                Path(str(item["lossless_video"])), root
+            ),
             "direct_av1_420_render_report": project_relative(
                 Path(str(item["report"])), root
             ),
@@ -1078,11 +1634,15 @@ def build_av1_420_report(
             "intermediate_video": False,
             "intermediate_h264": False,
             "intermediate_hevc": False,
-            "audio": "aac-192k",
+            "audio": "aac-lc-320k",
+            "lossless_audio": "flac",
             "output_size_bytes": item["output_size_bytes"],
             "sha256": item["sha256"],
+            "lossless_output_size_bytes": item["lossless_output_size_bytes"],
+            "lossless_sha256": item["lossless_sha256"],
             "elapsed_seconds": item["elapsed_seconds"],
             "media_checks": item["media"],
+            "lossless_media_checks": item["lossless_media"],
         }
         for key in ("language_identity", "ruby_identity", "libass_font_probe"):
             if key in item:
@@ -1092,20 +1652,24 @@ def build_av1_420_report(
     verification_status = "complete"
     release_decision = "verified"
     return {
-        "schema_version": "karaoke-av1-420/v1",
+        "schema_version": "karaoke-av1-420/v2",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "pass",
         "verification_status": verification_status,
         "release_decision": release_decision,
         "profiles": list(selected_profiles),
         "encoder": "av1_nvenc",
-        "container": "mp4",
+        "default_delivery": "compatibility_mp4",
+        "containers": ["mp4", "matroska"],
         "codec_tag": "av01",
         "profile": "Main",
         "pixel_format": "yuv420p",
         "color_range": "tv",
         "color_matrix": "bt709",
-        "audio": "AAC 192 kb/s",
+        "audio": {
+            "compatibility": "AAC-LC 320 kb/s",
+            "lossless": "FLAC from the manifest lossless source",
+        },
         "full_decode": full_decode,
         "full_decode_gate": {
             "performed": full_decode,
@@ -1122,7 +1686,8 @@ def build_av1_420_report(
             "song_ids": sorted({str(item["song_id"]) for item in results}),
             "source_chain": (
                 "manifest audio + artwork + timing/{profile}/ASS -> "
-                "av1_nvenc/yuv420p"
+                "AV1/yuv420p MP4 with AAC-LC 320k + stream-copied AV1 MKV "
+                "with source-derived FLAC"
             ),
             "intermediate_video": False,
             "reports": (

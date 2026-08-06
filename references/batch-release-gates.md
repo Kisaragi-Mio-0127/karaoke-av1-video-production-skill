@@ -1,5 +1,7 @@
 # Batch Release Gates
 
+[简体中文](batch-release-gates.zh-CN.md) | English
+
 Use these gates when encoding, promoting, or packaging multiple songs or delivery profiles.
 
 ## Freeze The Generation

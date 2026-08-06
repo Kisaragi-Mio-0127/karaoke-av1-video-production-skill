@@ -1,5 +1,7 @@
 # AV1 4:2:0 Command Patterns
 
+[简体中文](av1-420-commands.zh-CN.md) | English
+
 Adapt these patterns to the repository and installed FFmpeg build. Quote paths carefully on Windows and test subtitle filter paths with a short preview first.
 
 ## Probe Inputs
@@ -39,7 +41,7 @@ Use for fast previews and delivery when the local NVIDIA encoder probe succeeds:
   -map 0:v:0 -map 0:a:0? -map_metadata -1 -map_chapters -1 `
   -vf "subtitles='$ass':fontsdir='$fonts',format=p010le" `
   -c:v av1_nvenc -preset p6 -tune hq -rc vbr -cq 28 -b:v 0 `
-  -c:a aac -b:a 192k -movflags +faststart `
+  -c:a aac -profile:a aac_low -b:a 320k -movflags +faststart `
   $temporaryMp4
 ```
 
@@ -54,7 +56,7 @@ Use as the CPU fallback or slower quality lane:
   -map 0:v:0 -map 0:a:0? -map_metadata -1 -map_chapters -1 `
   -vf "subtitles='$ass':fontsdir='$fonts',format=yuv420p10le" `
   -c:v libaom-av1 -crf 30 -b:v 0 -cpu-used 4 -row-mt 1 `
-  -c:a aac -b:a 192k -movflags +faststart `
+  -c:a aac -profile:a aac_low -b:a 320k -movflags +faststart `
   $temporaryMp4
 ```
 
@@ -73,6 +75,19 @@ Encode video without burn-in, then preserve the editable ASS track:
 ```
 
 Set the real subtitle language and confirm the target player supports ASS rendering.
+
+## Paired Lossless-Audio Companion
+
+Keep the MP4 as the default delivery. After it passes its preliminary media gate, copy its video stream into MKV and take audio directly from the original lossless FLAC/PCM-WAV source over the exact same timeline:
+
+```powershell
+& $ffmpeg -nostdin -n -i $temporaryMp4 -i $losslessSource `
+  -filter_complex "[1:a:0]atrim=start=$start:end=$end,asetpts=PTS-STARTPTS[a]" `
+  -map 0:v:0 -map "[a]" -c:v copy -c:a flac `
+  $temporaryLosslessMkv
+```
+
+Do not add `-shortest`, `-ar`, or `-ac`. Reject MP3/AAC and probe the true source codec instead of trusting the extension. Before paired promotion, require matching encoded video-stream hashes and require decoded MKV PCM to match the equivalently trimmed source PCM.
 
 ## Timeline Decisions
 

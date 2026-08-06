@@ -389,7 +389,7 @@ def inspect_track(
             "candidate_paths": [
                 project_relative(path, args.project_root) for path in ass_options
             ],
-            "ownership": "兵部生成；本脚本仅读取",
+            "ownership": "由渲染流程生成；本脚本仅读取",
             "burn_ready_gate": ass_gate,
         },
         "video": video,

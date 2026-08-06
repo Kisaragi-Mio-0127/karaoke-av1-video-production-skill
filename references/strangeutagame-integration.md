@@ -1,5 +1,7 @@
 # StrangeUtaGame Integration
 
+[简体中文](strangeutagame-integration.zh-CN.md) | English
+
 Use this integration only with an authorized StrangeUtaGame checkout. The
 bundled files are a sanitized pipeline snapshot, not the full GUI application.
 They are later-developed integration scripts rather than files from the
@@ -46,6 +48,16 @@ uv pip install -r requirements-karaoke.skill.lock.txt
 The lock installs StrangeUtaGame editable plus GUI, rendering, timing,
 Whisper/stable-ts, PyTorch, and MMS dependencies. Use the copied `.in` file as
 the human-readable dependency source. Keep this environment project-local.
+
+The current tested application baseline is StrangeUtaGame 1.4.5 with SUG
+storage format 0.3.0. Verify those values from the application source and
+`SugMigrator.CURRENT_VERSION`; the `pyproject.toml` package version may still
+read 1.2.6 and is not the version authority. Run
+`scripts/check_sug_compatibility.py` against representative projects after an
+application update. Every ASR/alignment run must select exactly one of `ja`,
+`zh`, or `en`; simplified/traditional conversion is only comparison
+normalization within `zh`, never a language fallback. Require unchanged
+before/after project hashes.
 
 ## Native tools
 
@@ -107,10 +119,20 @@ them before sharing. Do not commit probe, audit, validation, or snapshot JSON.
 | Artwork/render | `build_karaoke_wide_artwork.py`, `render_vinyl_karaoke.py`, `render_karaoke_direct_av1_album.py`, `render_karaoke_direct_hevc444_album.py`, `render_karaoke_direct_av1_420_album.py` |
 | Media/release | `inspect_karaoke_media.py`, `transcode_karaoke_av1.py`, `finalize_karaoke_release.py`, `package_karaoke_numbered_archives.py`, `karaoke_release_snapshot.py` |
 
+Support tools in this repository include `scripts/check_sug_compatibility.py`
+for read-only SUG validation and `scripts/pitch_shift_audio.py` for complete-
+mix pitch shifting. The latter is also installed with the production script
+snapshot; keep its verified FLAC and JSON report together.
+
 The album-specific automatic timing-override generator and one-off spectrum
 comparison utility are intentionally not bundled. They contained real song
-text or machine-specific executable paths. Use private override JSON and the
-separate pitch-shift skill instead.
+text or machine-specific executable paths. Use private override JSON. When a
+key change is requested, run `scripts/pitch_shift_audio.py` on the complete mix
+before timing and rendering; use the verified shifted FLAC for timing evidence,
+the default MP4 AAC-LC 320 kb/s output, and the paired MKV FLAC output. Do not
+use deterministic interpolation as an independent-ASR fallback; an unavailable
+or failed independent ASR lane is `unresolved`. Explicitly select Japanese,
+Chinese, or English, and never insert spaces between Chinese lyric characters.
 
 ## Production order
 

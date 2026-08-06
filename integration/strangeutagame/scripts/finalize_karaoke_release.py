@@ -892,12 +892,24 @@ def validate_av1_420_delivery(
         expected_output = (
             f"video/av1-420/{profile}/{track['numbered_video_filename']}"
         )
+        expected_lossless_output = (
+            "video/av1-420-lossless/"
+            f"{profile}/{Path(track['numbered_video_filename']).with_suffix('.mkv')}"
+        )
         output_path = (
             str(item.get("output", "")).replace("\\", "/")
             if item is not None
             else ""
         )
         media_checks = item.get("media_checks") if item is not None else None
+        lossless_output_path = (
+            str(item.get("lossless_output", "")).replace("\\", "/")
+            if item is not None
+            else ""
+        )
+        lossless_media_checks = (
+            item.get("lossless_media_checks") if item is not None else None
+        )
         checks = {
             "report_entry_present": item is not None,
             "render_mode_direct_av1_420": item is not None
@@ -913,9 +925,22 @@ def validate_av1_420_delivery(
             "source_has_no_video_master": item is not None
             and not _has_video_master_source(item),
             "output_path_matches": output_path == expected_output,
+            "lossless_output_path_matches": (
+                lossless_output_path == expected_lossless_output
+            ),
+            "default_delivery_is_compatibility_mp4": item is not None
+            and item.get("default_delivery") == "compatibility_mp4",
+            "compatibility_audio_is_aac_lc_320k": item is not None
+            and item.get("audio") == "aac-lc-320k",
+            "lossless_audio_is_flac": item is not None
+            and item.get("lossless_audio") == "flac",
             "direct_render_report_exists": direct_report_ok,
             "reported_media_checks_pass": isinstance(media_checks, dict)
             and media_checks.get("ok") is True,
+            "reported_lossless_media_checks_pass": isinstance(
+                lossless_media_checks, dict
+            )
+            and lossless_media_checks.get("ok") is True,
         }
         entry_checks[f"{profile}:{song_id}"] = {
             "profile": profile,
@@ -944,7 +969,7 @@ def validate_av1_420_delivery(
     )
     schema_ok = (
         isinstance(av1_report, dict)
-        and av1_report.get("schema_version") == "karaoke-av1-420/v1"
+        and av1_report.get("schema_version") == "karaoke-av1-420/v2"
     )
     status_ok = isinstance(av1_report, dict) and av1_report.get("status") == "pass"
     encoder_ok = (
@@ -954,14 +979,25 @@ def validate_av1_420_delivery(
         and av1_report.get("codec_tag") == "av01"
         and av1_report.get("pixel_format") == "yuv420p"
         and av1_report.get("color_range") == "tv"
-        and av1_report.get("container") == "mp4"
+        and av1_report.get("default_delivery") == "compatibility_mp4"
+        and av1_report.get("containers") == ["mp4", "matroska"]
     )
     direct_render_ok = (
         isinstance(av1_report, dict)
         and isinstance(av1_report.get("direct_render"), dict)
         and direct_render.get("intermediate_video") is False
     )
-    full_decode_ok = isinstance(av1_report, dict) and av1_report.get("full_decode") is True
+    full_decode_gate = (
+        av1_report.get("full_decode_gate") if isinstance(av1_report, dict) else None
+    )
+    full_decode_ok = (
+        isinstance(full_decode_gate, dict)
+        and full_decode_gate.get("required") is False
+        and (
+            full_decode_gate.get("performed") is True
+            or isinstance(full_decode_gate.get("reason"), str)
+        )
+    )
     return {
         "ok": schema_ok
         and status_ok
@@ -1149,6 +1185,11 @@ def inspect_av1_420_media(ffmpeg: Path, video: Path) -> dict[str, Any]:
     video_details = next(
         (line for line in details.splitlines() if "Video:" in line), details
     )
+    audio_details = next(
+        (line for line in details.splitlines() if "Audio:" in line), details
+    )
+    bitrate_match = re.search(r"\b(\d+)\s+kb/s\b", audio_details)
+    bitrate_kbps = int(bitrate_match.group(1)) if bitrate_match is not None else None
     return {
         "codec_av1": re.search(r"Video:\s+av1\b", video_details, re.IGNORECASE)
         is not None,
@@ -1176,10 +1217,61 @@ def inspect_av1_420_media(ffmpeg: Path, video: Path) -> dict[str, Any]:
         )
         is not None,
         "aac_audio": re.search(r"Audio:\s+aac\b", details) is not None,
+        "aac_lc_profile": re.search(
+            r"Audio:\s+aac\s*\(LC\)", audio_details, re.IGNORECASE
+        )
+        is not None,
+        "aac_bitrate_reasonable_for_320k_target": bitrate_kbps is not None
+        and 240 <= bitrate_kbps <= 360,
     }
 
 
 inspect_av1_media = inspect_av1_420_media
+
+
+def inspect_av1_420_lossless_media(ffmpeg: Path, video: Path) -> dict[str, Any]:
+    completed = subprocess.run(
+        [str(ffmpeg), "-hide_banner", "-i", str(video)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    details = completed.stdout + "\n" + completed.stderr
+    video_details = next(
+        (line for line in details.splitlines() if "Video:" in line), details
+    )
+    return {
+        "codec_av1": re.search(r"Video:\s+av1\b", video_details, re.IGNORECASE)
+        is not None,
+        "profile_main": re.search(
+            r"\bav1\s+\([^)]*\)\s+\(\s*main\s*\)",
+            video_details,
+            re.IGNORECASE,
+        )
+        is not None,
+        "resolution_1920x1080": re.search(r"\b1920x1080\b", details) is not None,
+        "pixel_format_yuv420p": re.search(
+            r"\byuv420p\b", video_details, re.IGNORECASE
+        )
+        is not None,
+        "yuv_limited_range": re.search(
+            r"\byuv420p\(\s*tv(?:[,)]|\s)", video_details, re.IGNORECASE
+        )
+        is not None,
+        "cfr_30fps": re.search(
+            r"\b30(?:\.0+)?\s+fps\b|\bfps\s*=\s*30(?:\.0+)?\b",
+            details,
+            re.IGNORECASE,
+        )
+        is not None,
+        "flac_audio": re.search(r"Audio:\s+flac\b", details, re.IGNORECASE)
+        is not None,
+        "no_aac_audio": re.search(r"Audio:\s+aac\b", details, re.IGNORECASE)
+        is None,
+    }
 
 
 def _ass_timestamp_ms(value: str) -> int | None:
@@ -1454,6 +1546,11 @@ def validate_numbered_packages(report: Any, root: Path) -> dict[str, Any]:
             for entry in entries
             if isinstance(entry, dict) and entry.get("kind") == "video"
         ]
+        lossless_video_entries = [
+            entry
+            for entry in entries
+            if isinstance(entry, dict) and entry.get("kind") == "lossless-video"
+        ]
         expected_track_keys = {
             (profile, track_number)
             for profile in PROFILES
@@ -1463,6 +1560,13 @@ def validate_numbered_packages(report: Any, root: Path) -> dict[str, Any]:
             (str(entry.get("profile")), int(entry.get("track_number", -1)))
             for entry in video_entries
         }
+        reported_lossless_track_keys = {
+            (str(entry.get("profile")), int(entry.get("track_number", -1)))
+            for entry in lossless_video_entries
+        }
+        expected_entry_count = 23 if lane == "av1-420" else 13
+        expected_video_entry_count = 20 if lane == "av1-420" else 10
+        expected_lossless_count = 10 if lane == "av1-420" else 0
         checks = {
             "report_entry_present": item is not None,
             "path_matches": item is not None
@@ -1474,17 +1578,25 @@ def validate_numbered_packages(report: Any, root: Path) -> dict[str, Any]:
             "sha256_matches": exists
             and item is not None
             and item.get("sha256") == sha256_file(expected_path),
-            "entry_count_13": item is not None and item.get("entry_count") == 13,
-            "video_entry_count_10": item is not None
-            and item.get("video_entry_count") == 10,
+            "entry_count_matches_lane": item is not None
+            and item.get("entry_count") == expected_entry_count,
+            "video_entry_count_matches_lane": item is not None
+            and item.get("video_entry_count") == expected_video_entry_count,
+            "lossless_video_entry_count_matches_lane": item is not None
+            and item.get("lossless_video_entry_count") == expected_lossless_count,
             "numbered_true": item is not None and item.get("numbered") is True,
             "track_numbers_exact": reported_track_keys == expected_track_keys,
+            "lossless_track_numbers_exact": (
+                reported_lossless_track_keys == expected_track_keys
+                if lane == "av1-420"
+                else not reported_lossless_track_keys
+            ),
         }
         lane_checks[lane] = {"checks": checks, "ok": all(checks.values())}
     status_ok = isinstance(report, dict) and report.get("status") == "pass"
     schema_ok = (
         isinstance(report, dict)
-        and report.get("schema_version") == "karaoke-numbered-packages/v1"
+        and report.get("schema_version") == "karaoke-numbered-packages/v2"
     )
     lanes_exact = set(by_lane) == set(expected)
     return {
@@ -1711,7 +1823,15 @@ def main(argv: list[str] | None = None) -> int:
                 / profile
                 / track["numbered_video_filename"]
             )
+            lossless_video = (
+                root
+                / "video"
+                / "av1-420-lossless"
+                / profile
+                / Path(track["numbered_video_filename"]).with_suffix(".mkv")
+            )
             exists = video.is_file()
+            lossless_exists = lossless_video.is_file()
             checks = (
                 inspect_av1_420_media(ffmpeg, video)
                 if exists
@@ -1724,6 +1844,22 @@ def main(argv: list[str] | None = None) -> int:
                     "yuv_limited_range": False,
                     "cfr_30fps": False,
                     "aac_audio": False,
+                    "aac_lc_profile": False,
+                    "aac_bitrate_reasonable_for_320k_target": False,
+                }
+            )
+            lossless_checks = (
+                inspect_av1_420_lossless_media(ffmpeg, lossless_video)
+                if lossless_exists
+                else {
+                    "codec_av1": False,
+                    "profile_main": False,
+                    "resolution_1920x1080": False,
+                    "pixel_format_yuv420p": False,
+                    "yuv_limited_range": False,
+                    "cfr_30fps": False,
+                    "flac_audio": False,
+                    "no_aac_audio": False,
                 }
             )
             if exists and not args.skip_decode:
@@ -1735,23 +1871,45 @@ def main(argv: list[str] | None = None) -> int:
             reported = av1_output_by_key.get(key, {})
             actual_size = video.stat().st_size if exists else None
             actual_sha256 = sha256_file(video) if exists else None
+            actual_lossless_size = (
+                lossless_video.stat().st_size if lossless_exists else None
+            )
+            actual_lossless_sha256 = (
+                sha256_file(lossless_video) if lossless_exists else None
+            )
             size_matches = exists and reported.get("output_size_bytes") == actual_size
             sha256_matches = exists and reported.get("sha256") == actual_sha256
+            lossless_size_matches = lossless_exists and reported.get(
+                "lossless_output_size_bytes"
+            ) == actual_lossless_size
+            lossless_sha256_matches = lossless_exists and reported.get(
+                "lossless_sha256"
+            ) == actual_lossless_sha256
             track_ok = (
                 bool(av1_entry.get("ok"))
                 and exists
+                and lossless_exists
                 and all(checks.values())
+                and all(lossless_checks.values())
                 and size_matches
                 and sha256_matches
+                and lossless_size_matches
+                and lossless_sha256_matches
             )
             av1_media_ok &= track_ok
             direct_report_path = av1_direct_report_paths[key]
             profile_tracks[title] = {
                 "ok": track_ok,
                 "checks": checks,
+                "lossless_checks": lossless_checks,
                 "reported_size_matches": size_matches,
                 "reported_sha256_matches": sha256_matches,
+                "reported_lossless_size_matches": lossless_size_matches,
+                "reported_lossless_sha256_matches": lossless_sha256_matches,
                 "artifact": artifact(video, root) if exists else None,
+                "lossless_artifact": (
+                    artifact(lossless_video, root) if lossless_exists else None
+                ),
                 "direct_av1_420_render_report": (
                     artifact(direct_report_path, root)
                     if direct_report_path.is_file()

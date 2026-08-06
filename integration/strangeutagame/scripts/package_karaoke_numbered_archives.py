@@ -133,7 +133,9 @@ def write_package_checksum_manifest(package: dict[str, Any]) -> Path:
     archive_path = Path(str(package["path"]))
     profiles = list(package["profiles"])
     video_entries = [
-        entry for entry in package["entries"] if entry.get("kind") == "video"
+        entry
+        for entry in package["entries"]
+        if entry.get("kind") in {"video", "lossless-video"}
     ]
     lines: list[str] = []
     for entry in video_entries:
@@ -242,6 +244,47 @@ def build_archive(
                             "sha256": sha256_file(source),
                         }
                     )
+                    if lane == "av1-420":
+                        lossless_filename = Path(numbered_filename(track)).with_suffix(
+                            ".mkv"
+                        )
+                        lossless_source = (
+                            deliverable_root
+                            / "video"
+                            / "av1-420-lossless"
+                            / profile
+                            / lossless_filename
+                        )
+                        if (
+                            not lossless_source.is_file()
+                            or lossless_source.stat().st_size == 0
+                        ):
+                            raise FileNotFoundError(
+                                "missing lossless package input: "
+                                f"{lossless_source}"
+                            )
+                        lossless_entry_name = (
+                            f"{package_root}/{profile}/{lossless_filename}"
+                        )
+                        archive.write(
+                            lossless_source,
+                            lossless_entry_name,
+                            compress_type=zipfile.ZIP_DEFLATED,
+                            compresslevel=compression_level,
+                        )
+                        entries.append(
+                            {
+                                "entry": lossless_entry_name,
+                                "kind": "lossless-video",
+                                "profile": profile,
+                                "track_number": int(track["track_number"]),
+                                "title": display_title(track),
+                                "vocal": str(track["artist"]),
+                                "source": str(lossless_source.resolve()),
+                                "size_bytes": lossless_source.stat().st_size,
+                                "sha256": sha256_file(lossless_source),
+                            }
+                        )
         os.replace(temporary, output)
     finally:
         if temporary.exists():
@@ -269,7 +312,7 @@ def build_archive(
         info = info_by_name[str(entry["entry"])]
         entry["archive_size_bytes"] = info.compress_size
         entry["archive_compression"] = "deflate"
-        if entry["kind"] == "video":
+        if entry["kind"] in {"video", "lossless-video"}:
             packaged_hash = member_hashes[str(entry["entry"])]
             if packaged_hash != entry["sha256"]:
                 raise NumberedPackageError(
@@ -287,7 +330,15 @@ def build_archive(
         "size_bytes": output.stat().st_size,
         "sha256": sha256_file(output),
         "entry_count": len(entries),
-        "video_entry_count": sum(entry["kind"] == "video" for entry in entries),
+        "video_entry_count": sum(
+            entry["kind"] in {"video", "lossless-video"} for entry in entries
+        ),
+        "compatibility_video_entry_count": sum(
+            entry["kind"] == "video" for entry in entries
+        ),
+        "lossless_video_entry_count": sum(
+            entry["kind"] == "lossless-video" for entry in entries
+        ),
         "profiles": list(profiles),
         "numbered": True,
         "compression": {
@@ -316,7 +367,7 @@ def write_report(path: Path, packages: list[dict[str, Any]]) -> None:
         }
     )
     value = {
-        "schema_version": "karaoke-numbered-packages/v1",
+        "schema_version": "karaoke-numbered-packages/v2",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "pass",
         "track_numbers": track_numbers,

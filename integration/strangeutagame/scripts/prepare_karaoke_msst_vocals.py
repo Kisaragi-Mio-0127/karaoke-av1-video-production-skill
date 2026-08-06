@@ -80,7 +80,7 @@ def load_msst_module(external_script: Path | None = None) -> ModuleType:
         raise FileNotFoundError(f"MSST preparation script does not exist: {script}")
 
     spec = importlib.util.spec_from_file_location(
-        "tts_test_prepare_sovits41_msst_stems", str(script)
+        "karaoke_external_msst_helper", str(script)
     )
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load MSST preparation script: {script}")
@@ -400,7 +400,7 @@ def prepare(
         for _source, input_wav, _output, _report in pending:
             shutil.copy2(input_wav, run_input_dir / input_wav.name)
         print(
-            f"Running MSST for {len(pending)} source(s) with the imported TTS_Test runner",
+            f"Running MSST for {len(pending)} source(s) with the configured external runner",
             flush=True,
         )
         msst_module.run_msst(

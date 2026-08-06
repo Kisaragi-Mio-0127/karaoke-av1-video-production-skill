@@ -1,5 +1,7 @@
 # Subtitle Timing And Quality Gates
 
+[简体中文](subtitle-timing-quality.zh-CN.md) | English
+
 Use these gates for semantic segmentation, cue display behavior, ruby, MMS timing evidence, and adjacent-line highlight release.
 
 ## Fact Chain
@@ -77,6 +79,10 @@ canonical source -> timing/phrase overrides -> renderer output
 ## MMS Evidence And Timing Overrides
 
 Treat MMS as project-provided machine alignment or timestamp evidence, not as a universal algorithm. Record the tool, model, version, input lane, configuration, and generation identity that produced it.
+
+Keep independent ASR outside this fallback path. Every ASR/alignment run must select exactly one language, `ja`, `zh`, or `en`. stable-ts and MMS are known-text forced alignment; deterministic interpolation is display timing. If independent ASR is unavailable, fails, or cannot confidently match the frozen lyric window, record an unresolved ASR disposition instead of substituting interpolation or forced-alignment tokens. Simplified/traditional conversion is only comparison normalization within `zh`, never a language fallback; preserve Japanese kanji and kana.
+
+中文说明：独立ASR不属于插值后备流程。stable-ts和MMS使用已知文本做强制对齐，确定性插值只负责显示时间。独立ASR无法运行、执行失败或无法可靠匹配冻结歌词窗口时，必须记录为未解决，不能用插值或强制对齐结果冒充ASR。日语比对必须保留汉字和假名，繁简转换只用于中文。中文歌词的字间不能为了计时而插入空格。
 
 Compare, when available:
 

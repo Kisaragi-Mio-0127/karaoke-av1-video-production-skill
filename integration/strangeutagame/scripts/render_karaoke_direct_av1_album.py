@@ -930,7 +930,7 @@ def build_hevc444_report(
                 "render_mode": "direct-hevc444",
                 "intermediate_h264": False,
                 "intermediate_av1": False,
-                "audio": "aac-192k",
+                "audio": "aac-lc-320k",
                 "output_size_bytes": result["output_size_bytes"],
                 "sha256": result["sha256"],
                 "elapsed_seconds": result["elapsed_seconds"],
@@ -947,7 +947,7 @@ def build_hevc444_report(
         "pixel_format": "yuv444p",
         "color_range": "pc",
         "color_matrix": "bt709",
-        "audio": "AAC 192 kb/s for direct renders",
+        "audio": "AAC-LC 320 kb/s for direct renders",
         "direct_render": {
             "song_ids": song_ids,
             "source_chain": (

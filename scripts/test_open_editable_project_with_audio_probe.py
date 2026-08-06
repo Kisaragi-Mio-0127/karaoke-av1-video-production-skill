@@ -1,3 +1,5 @@
+"""Regression tests for guarded editor/audio probing without project saves."""
+
 from __future__ import annotations
 
 import importlib.util

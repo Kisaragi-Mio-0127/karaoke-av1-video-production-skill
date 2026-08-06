@@ -10,10 +10,17 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 CANVAS_SIZE = (1920, 1080)
-SLEEVE_BOX = (60, 40, 280, 365)
+SLEEVE_BOXES = {
+    "vinyl": (40, 30, 340, 402),
+    "spectrum": (40, 30, 460, 522),
+}
 RIGHT_PANEL = (640, 30, 1900, 970)
-BOTTOM_PANEL = (20, 450, 1900, 1050)
+BOTTOM_PANEL = (20, 576, 1900, 1050)
 BOTTOM_PANEL_FILL = (3, 5, 10, 92)
+SLEEVE_MARGIN = 20
+SLEEVE_FOOTER_HEIGHT = 70
+SLEEVE_BOTTOM_PADDING = 12
+TITLE_BLOCK_X = {"vinyl": 430, "spectrum": 800}
 
 
 def _font(path: Path, size: int) -> ImageFont.FreeTypeFont:
@@ -36,6 +43,26 @@ def _fit_font(
     return _font(font_path, min_size)
 
 
+def _draw_text_with_visual_left(
+    draw: ImageDraw.ImageDraw,
+    *,
+    visual_left: int,
+    y: int,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: tuple[int, int, int, int],
+) -> dict[str, int]:
+    mask_bbox = font.getmask(text).getbbox()
+    ink_left_offset = mask_bbox[0] if mask_bbox is not None else 0
+    draw_x = visual_left - ink_left_offset
+    draw.text((draw_x, y), text, font=font, fill=fill)
+    return {
+        "visual_left": visual_left,
+        "draw_x": draw_x,
+        "ink_left_offset": ink_left_offset,
+    }
+
+
 def build_wide_composition(
     *,
     background_path: Path,
@@ -47,7 +74,10 @@ def build_wide_composition(
     album_title: str,
     album_artist: str,
     output_path: Path,
+    visual_style: str = "vinyl",
 ) -> dict:
+    if visual_style not in SLEEVE_BOXES:
+        raise ValueError(f"unsupported visual style: {visual_style}")
     canvas = Image.open(background_path).convert("RGBA")
     if canvas.size != CANVAS_SIZE:
         canvas = ImageOps.fit(canvas, CANVAS_SIZE, method=Image.Resampling.LANCZOS)
@@ -59,7 +89,8 @@ def build_wide_composition(
     panel_draw.rounded_rectangle(BOTTOM_PANEL, radius=34, fill=BOTTOM_PANEL_FILL)
     canvas.alpha_composite(panels)
 
-    sleeve_x, sleeve_y, sleeve_width, sleeve_height = SLEEVE_BOX
+    sleeve_x, sleeve_y, sleeve_width, sleeve_height = SLEEVE_BOXES[visual_style]
+    title_block_x = TITLE_BLOCK_X[visual_style]
     shadow = Image.new("RGBA", CANVAS_SIZE, (0, 0, 0, 0))
     ImageDraw.Draw(shadow).rounded_rectangle(
         (
@@ -82,16 +113,25 @@ def build_wide_composition(
         outline=(255, 255, 255, 150),
         width=3,
     )
-    cover_size = sleeve_width - 40
+    cover_size = sleeve_width - 2 * SLEEVE_MARGIN
     fitted_cover = ImageOps.fit(
         cover,
         (cover_size, cover_size),
         method=Image.Resampling.LANCZOS,
     )
-    sleeve.paste(fitted_cover, (20, 20))
-    footer_top = 20 + cover_size
+    sleeve.paste(fitted_cover, (SLEEVE_MARGIN, SLEEVE_MARGIN))
+    footer_top = SLEEVE_MARGIN + cover_size
+    footer_bottom = min(
+        sleeve_height - SLEEVE_BOTTOM_PADDING,
+        footer_top + SLEEVE_FOOTER_HEIGHT,
+    )
     sleeve_draw.rectangle(
-        (20, footer_top, sleeve_width - 20, sleeve_height - 20),
+        (
+            SLEEVE_MARGIN,
+            footer_top,
+            sleeve_width - SLEEVE_MARGIN,
+            footer_bottom,
+        ),
         fill=(238, 235, 228, 255),
     )
     album_title_font = _fit_font(
@@ -109,7 +149,7 @@ def build_wide_composition(
         fill=(39, 42, 48, 240),
     )
     sleeve_draw.text(
-        (30, footer_top + 32),
+        (30, footer_top + 36),
         album_artist,
         font=_font(regular_font, 15),
         fill=(82, 84, 89, 230),
@@ -117,9 +157,11 @@ def build_wide_composition(
     canvas.alpha_composite(sleeve, (sleeve_x, sleeve_y))
 
     draw = ImageDraw.Draw(canvas)
-    draw.text(
-        (380, 70),
-        "STUDIO KARAOKE / WIDE CUT",
+    label_alignment = _draw_text_with_visual_left(
+        draw,
+        visual_left=title_block_x,
+        y=70,
+        text="STUDIO KARAOKE / WIDE CUT",
         font=_font(bold_font, 18),
         fill=(234, 232, 227, 195),
     )
@@ -130,7 +172,14 @@ def build_wide_composition(
         max_width=430,
         start_size=48,
     )
-    draw.text((380, 105), title, font=title_font, fill=(255, 255, 255, 255))
+    title_alignment = _draw_text_with_visual_left(
+        draw,
+        visual_left=title_block_x,
+        y=105,
+        text=title,
+        font=title_font,
+        fill=(255, 255, 255, 255),
+    )
     artist_font = _fit_font(
         draw,
         artist,
@@ -138,7 +187,14 @@ def build_wide_composition(
         max_width=430,
         start_size=28,
     )
-    draw.text((380, 170), artist, font=artist_font, fill=(204, 207, 215, 238))
+    artist_alignment = _draw_text_with_visual_left(
+        draw,
+        visual_left=title_block_x,
+        y=170,
+        text=artist,
+        font=artist_font,
+        fill=(204, 207, 215, 238),
+    )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.convert("RGB").save(output_path, format="PNG", optimize=True)
@@ -161,6 +217,19 @@ def build_wide_composition(
         "album_title_font_size": album_title_font.size,
         "album_title_max_width": sleeve_width - 60,
         "album_artist": album_artist,
+        "sleeve_footer": {
+            "top": footer_top,
+            "bottom": footer_bottom,
+            "height": footer_bottom - footer_top,
+            "bottom_padding": sleeve_height - footer_bottom,
+        },
+        "title_block_x": title_block_x,
+        "title_block_ink_alignment": {
+            "label": label_alignment,
+            "title": title_alignment,
+            "artist": artist_alignment,
+        },
+        "visual_style": visual_style,
     }
     output_path.with_suffix(".json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n",
@@ -180,6 +249,11 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--album-title", required=True)
     parser.add_argument("--album-artist", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--visual-style",
+        choices=sorted(SLEEVE_BOXES),
+        default="vinyl",
+    )
     return parser
 
 
@@ -199,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         album_title=args.album_title,
         album_artist=args.album_artist,
         output_path=args.output.resolve(),
+        visual_style=args.visual_style,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0

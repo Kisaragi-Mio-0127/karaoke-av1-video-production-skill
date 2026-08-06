@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create compact AV1 delivery copies of karaoke masters."""
+"""Create compact AV1 delivery copies of the five karaoke masters."""
 
 from __future__ import annotations
 

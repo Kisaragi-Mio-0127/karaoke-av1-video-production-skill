@@ -1,7 +1,7 @@
 """Shared album manifest loading for the karaoke build scripts.
 
 The karaoke pipeline has one source of track metadata: an explicit album
-manifest.  Set ``KARAOKE_ALBUM_MANIFEST`` or pass ``--manifest`` to a command.
+manifest. Set ``KARAOKE_ALBUM_MANIFEST`` or pass ``--manifest`` to a command.
 No real album, lyric, audio, hash, font, or deliverable path is bundled here.
 """
 

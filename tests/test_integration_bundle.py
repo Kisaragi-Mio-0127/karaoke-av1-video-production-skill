@@ -1,3 +1,5 @@
+"""Regression tests for the sanitized public integration bundle."""
+
 from __future__ import annotations
 
 import ast
@@ -67,6 +69,11 @@ class IntegrationBundleTests(unittest.TestCase):
         }
         self.assertEqual(recorded_direct_imports, actual_direct_imports)
 
+        for record in manifest["support_tools"]:
+            with self.subTest(support_tool=record["path"]):
+                self.assertTrue((ROOT / record["path"]).is_file())
+                self.assertTrue(record.get("reason", "").strip())
+
         for readme_name in ("README.md", "README.zh-CN.md"):
             readme = (ROOT / readme_name).read_text(encoding="utf-8")
             for path in recorded_paths:
@@ -78,7 +85,85 @@ class IntegrationBundleTests(unittest.TestCase):
         self.assertGreaterEqual(len(files), 15)
         for path in files:
             with self.subTest(path=path.name):
-                ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                self.assertIsNotNone(
+                    ast.get_docstring(tree),
+                    "bundled scripts need a module comment explaining their purpose",
+                )
+
+    def test_documentation_has_bilingual_pairs_without_cjk_word_spacing(self) -> None:
+        references = ROOT / "references"
+        english_references = sorted(
+            path for path in references.glob("*.md") if not path.name.endswith(".zh-CN.md")
+        )
+        self.assertGreaterEqual(len(english_references), 6)
+        for english in english_references:
+            chinese = english.with_name(f"{english.stem}.zh-CN.md")
+            with self.subTest(reference=english.name):
+                self.assertTrue(chinese.is_file())
+                self.assertIn(chinese.name, english.read_text(encoding="utf-8"))
+                self.assertIn(english.name, chinese.read_text(encoding="utf-8"))
+
+        chinese_documents = [
+            ROOT / "README.zh-CN.md",
+            ROOT / "NOTICE.md",
+            ROOT / "THIRD_PARTY_NOTICES.md",
+            ROOT / "SKILL.md",
+            *(path.with_name(f"{path.stem}.zh-CN.md") for path in english_references),
+        ]
+        for path in chinese_documents:
+            with self.subTest(chinese_document=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertRegex(text, r"[一-龯]")
+                self.assertIsNone(
+                    re.search(r"[一-龯] [一-龯]", text),
+                    "Chinese prose must not insert spaces between CJK characters",
+                )
+
+    def test_asr_uses_explicit_language_and_fails_closed(self) -> None:
+        source = (SCRIPTS / "audit_karaoke_asr_recognition.py").read_text(
+            encoding="utf-8"
+        )
+        language_source = (SCRIPTS / "karaoke_language.py").read_text(encoding="utf-8")
+        self.assertIn('SUPPORTED_LANGUAGES = frozenset({"ja", "zh", "en"})', language_source)
+        self.assertIn('if language == "zh" else comparable', source)
+        self.assertIn("--language ja, zh, or en is required with direct audio", source)
+        self.assertIn("one manifest ASR run must select tracks in exactly one language", source)
+        self.assertIn('"--allow-unresolved"', source)
+        self.assertIn('report.get("support_gate_ok") is True', source)
+
+    def test_pitch_tool_and_dual_audio_contract_are_bundled(self) -> None:
+        top_level = ROOT / "scripts" / "pitch_shift_audio.py"
+        installed = SCRIPTS / "pitch_shift_audio.py"
+        self.assertEqual(top_level.read_bytes(), installed.read_bytes())
+        pitch_source = top_level.read_text(encoding="utf-8")
+        for option in ("--semitones", "--no-formant", "--rubberband"):
+            self.assertIn(option, pitch_source)
+        pitch = load_module("public_pitch_shift_audio", top_level)
+        self.assertTrue(pitch.is_formal_lossless_source({"codec_name": "flac"}))
+        self.assertTrue(pitch.is_formal_lossless_source({"codec_name": "pcm_f32le"}))
+        self.assertFalse(pitch.is_formal_lossless_source({"codec_name": "mp3"}))
+        self.assertFalse(pitch.is_formal_lossless_source({"codec_name": "aac"}))
+
+        renderer = (SCRIPTS / "render_karaoke_direct_av1_420_album.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"audio_bitrate": "320k"', renderer)
+        self.assertIn('"audio_codec": "flac"', renderer)
+        self.assertIn("lossless-output", renderer)
+
+    def test_sug_checker_requires_a_representative_project(self) -> None:
+        checker = load_module(
+            "public_check_sug_compatibility",
+            ROOT / "scripts" / "check_sug_compatibility.py",
+        )
+        with self.assertRaisesRegex(ValueError, "at least one representative"):
+            checker.inspect_checkout(
+                ROOT,
+                [],
+                minimum_app_version="1.4.5",
+                expected_sug_version="0.3.0",
+            )
 
     def test_sensitive_literals_are_absent(self) -> None:
         text = "\n".join(
@@ -93,7 +178,6 @@ class IntegrationBundleTests(unittest.TestCase):
         for pattern in forbidden_patterns:
             with self.subTest(pattern=pattern):
                 self.assertIsNone(re.search(pattern, text))
-
     def test_example_manifest_loads_without_private_media(self) -> None:
         sys.path.insert(0, str(SCRIPTS))
         try:

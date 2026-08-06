@@ -69,6 +69,11 @@
       "reason": "Packages numbered release archives from shared manifest paths."
     },
     {
+      "path": "pitch_shift_audio.py",
+      "category": "no-upstream-code-import",
+      "reason": "Runs FFmpeg and Rubber Band R3 as external tools without importing StrangeUtaGame."
+    },
+    {
       "path": "prepare_karaoke_msst_vocals.py",
       "category": "no-upstream-code-import",
       "reason": "Prepares optional external MSST evidence without importing StrangeUtaGame."
@@ -111,6 +116,11 @@
       "reason": "Checks a StrangeUtaGame checkout and its project-local runtime."
     },
     {
+      "path": "scripts/check_sug_compatibility.py",
+      "category": "direct-upstream-import",
+      "reason": "Loads the installed StrangeUtaGame version, SUG migrator, and parser to verify representative projects without writing them."
+    },
+    {
       "path": "scripts/install_strangeutagame_integration.py",
       "category": "integration-tool",
       "reason": "Copies this bundle into an existing compatible checkout with backup and rollback guards."
@@ -119,6 +129,11 @@
       "path": "scripts/open_editable_project_with_audio_probe.py",
       "category": "direct-upstream-import",
       "reason": "Dynamically imports StrangeUtaGame GUI, persistence, and audio-loading modules."
+    },
+    {
+      "path": "scripts/pitch_shift_audio.py",
+      "category": "standalone-tool",
+      "reason": "Provides the same commented Rubber Band R3 pitch-shift utility outside the installer bundle."
     }
   ]
 }

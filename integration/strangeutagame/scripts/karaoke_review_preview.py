@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
@@ -23,6 +23,34 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.karaoke_common.layout import (  # noqa: E402
+    CANVAS_WIDTH,
+    MAIN_ADVANCE_SCALE,
+    MAIN_FONT_SIZE,
+    MAIN_GLOW_BLUR,
+    MAIN_OUTLINE_PX,
+    MIN_MAIN_FONT_SIZE,
+    RUBY_FONT_SIZE,
+    RUBY_GLOW_BLUR,
+    RUBY_OUTLINE_PX,
+    SLOT_WIDTH,
+    STANDARD_LAYOUT,
+    STANDARD_RIGHT_AVAILABLE_WIDTH,
+    STANDARD_RIGHT_SAFE_EDGE_X,
+    STANDARD_RIGHT_SAFE_MARGIN_PX,
+    STANDARD_RIGHT_START_X,
+    WIDE_RUBY_TO_MAIN_ANCHOR_GAP_PX,
+    Lane,
+    SubtitleLayout,
+)
+from scripts.karaoke_common.pronunciation import (  # noqa: E402
+    PRONUNCIATION_VALIDATION_MODES,
+    validate_pronunciation,
+)
+from scripts.karaoke_japanese.layout import (  # noqa: E402
+    WIDE_LAYOUT,
+    WIDE_SEMANTIC_GAP_EM,
+)
 from scripts.karaoke_language import (  # noqa: E402
     DEFAULT_LANGUAGE,
     language_identity,
@@ -37,7 +65,6 @@ from scripts.sug_ruby import (  # noqa: E402
     iter_sug_ruby_spans,
     load_review_sidecar,
     sug_hash,
-    validate_sug_ruby,
 )
 
 try:  # noqa: E402
@@ -48,6 +75,21 @@ from strange_uta_game.backend.domain import Sentence  # noqa: E402
 from strange_uta_game.backend.infrastructure.persistence.sug_io import (  # noqa: E402
     SugProjectParser,
 )
+
+__all__ = [
+    "Lane",
+    "STANDARD_LAYOUT",
+    "STANDARD_RIGHT_AVAILABLE_WIDTH",
+    "STANDARD_RIGHT_SAFE_EDGE_X",
+    "STANDARD_RIGHT_SAFE_MARGIN_PX",
+    "STANDARD_RIGHT_START_X",
+    "SubtitleLayout",
+    "WIDE_LAYOUT",
+    "WIDE_RUBY_TO_MAIN_ANCHOR_GAP_PX",
+    "WIDE_SEMANTIC_GAP_EM",
+    "build_review_ass",
+    "build_review_ass_required",
+]
 
 
 def _require_reviewed_canonical_ruby(
@@ -82,20 +124,11 @@ def _require_reviewed_canonical_ruby(
         )
 
 FONT_FAMILY = "HarmonyOS Sans SC"
-CANVAS_WIDTH = 1920
+SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
+SHARED_FONT_FILE = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Regular.ttf"
 # Stable release profile shared by full renders and review reports.
 DEFAULT_AV1_CQ = 38
 DEFAULT_AV1_PRESET = "p7"
-MAIN_FONT_SIZE = 52
-MIN_MAIN_FONT_SIZE = 38
-RUBY_FONT_SIZE = 24
-MAIN_ADVANCE_SCALE = 0.78
-MAIN_OUTLINE_PX = 4
-RUBY_OUTLINE_PX = 2
-MAIN_GLOW_BLUR = 8
-RUBY_GLOW_BLUR = 5
-WIDE_SEMANTIC_GAP_EM = 0.14
-WIDE_RUBY_TO_MAIN_ANCHOR_GAP_PX = 35
 SECONDARY_FONT_SIZE = 51
 SECONDARY_MIN_FONT_SIZE = 36
 SECONDARY_OUTLINE_PX = 3
@@ -122,107 +155,6 @@ DEFAULT_HIGHLIGHT_COLOR = "#FF0000"
 COMPATIBILITY_AUDIO_BITRATE = "320k"
 COMPATIBILITY_AUDIO_PROFILE = "aac_low"
 LOSSLESS_AUDIO_CODEC = "flac"
-STANDARD_RIGHT_START_X = 860
-STANDARD_RIGHT_SAFE_EDGE_X = 1890
-STANDARD_RIGHT_SAFE_MARGIN_PX = CANVAS_WIDTH - STANDARD_RIGHT_SAFE_EDGE_X
-STANDARD_RIGHT_AVAILABLE_WIDTH = (
-    CANVAS_WIDTH - STANDARD_RIGHT_START_X - STANDARD_RIGHT_SAFE_MARGIN_PX
-)
-# Backwards-compatible name for the default (standard) fit width.  It is
-# derived from the two standard lane anchors rather than the former 810px
-# estimate.
-SLOT_WIDTH = STANDARD_RIGHT_AVAILABLE_WIDTH
-@dataclass(frozen=True)
-class Lane:
-    """One of two staggered slots inside the existing lower-right panel."""
-
-    x: int
-    main_y: int
-    ruby_y: int
-    alignment: int
-
-
-@dataclass(frozen=True)
-class SubtitleLayout:
-    """Subtitle geometry plus video-side vinyl placement for one edition."""
-
-    name: str
-    lanes: tuple[Lane, Lane]
-    advance_scale: float
-    slot_width: int
-    vinyl_x: int
-    vinyl_y: int
-    vinyl_size: int
-    main_font_size: int = MAIN_FONT_SIZE
-    min_main_font_size: int = MIN_MAIN_FONT_SIZE
-    ruby_font_size: int = RUBY_FONT_SIZE
-    max_phrase_chars: int | None = None
-    # ``fit_advance_scale`` and ``fit_outline_px`` are the exact metrics used
-    # by the fit gate.
-    fit_advance_scale: float = 1.0
-    fit_outline_px: int = 0
-    semantic_gap_em: float = 0.0
-    letter_spacing_em: float = 0.0
-    word_gap_em: float | None = None
-    enforce_main_font_size: bool = True
-    main_outline_px: int = MAIN_OUTLINE_PX
-    ruby_outline_px: int = RUBY_OUTLINE_PX
-    main_glow_blur: int = MAIN_GLOW_BLUR
-    ruby_glow_blur: int = RUBY_GLOW_BLUR
-
-
-STANDARD_LAYOUT = SubtitleLayout(
-    name="standard-v7",
-    lanes=(
-        Lane(x=STANDARD_RIGHT_START_X, main_y=790, ruby_y=762, alignment=7),
-        Lane(
-            x=STANDARD_RIGHT_SAFE_EDGE_X,
-            main_y=960,
-            ruby_y=932,
-            alignment=9,
-        ),
-    ),
-    advance_scale=MAIN_ADVANCE_SCALE,
-    slot_width=SLOT_WIDTH,
-    vinyl_x=1030,
-    vinyl_y=110,
-    vinyl_size=860,
-    fit_advance_scale=MAIN_ADVANCE_SCALE,
-    fit_outline_px=MAIN_OUTLINE_PX,
-)
-WIDE_LAYOUT = SubtitleLayout(
-    name="wide-bottom",
-    lanes=(
-        Lane(
-            x=32,
-            main_y=660,
-            ruby_y=660 - WIDE_RUBY_TO_MAIN_ANCHOR_GAP_PX,
-            alignment=7,
-        ),
-        Lane(
-            x=1888,
-            main_y=870,
-            ruby_y=870 - WIDE_RUBY_TO_MAIN_ANCHOR_GAP_PX,
-            alignment=9,
-        ),
-    ),
-    advance_scale=MAIN_ADVANCE_SCALE,
-    slot_width=1856,
-    vinyl_x=790,
-    vinyl_y=-10,
-    vinyl_size=1100,
-    main_font_size=108,
-    min_main_font_size=75,
-    ruby_font_size=51,
-    max_phrase_chars=12,
-    fit_advance_scale=MAIN_ADVANCE_SCALE,
-    fit_outline_px=6,
-    semantic_gap_em=WIDE_SEMANTIC_GAP_EM,
-    main_outline_px=6,
-    ruby_outline_px=3,
-    main_glow_blur=12,
-    ruby_glow_blur=8,
-)
 SUBTITLE_LAYOUTS = {
     "standard": STANDARD_LAYOUT,
     "wide": WIDE_LAYOUT,
@@ -511,16 +443,14 @@ def _text_width(font_file: Path, size: int, text: str) -> float:
     return float(font.getlength(text))
 
 
-_ENGLISH_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['\u2018\u2019][A-Za-z0-9]+)*")
+def _letter_spacing_after_indices(text: str) -> frozenset[int]:
+    """Return adjacent visible glyph positions eligible for configured spacing."""
 
-
-def _english_letter_spacing_after_indices(text: str) -> frozenset[int]:
-    """Return character positions that receive positive word-internal spacing."""
-
-    positions: set[int] = set()
-    for match in _ENGLISH_WORD_RE.finditer(text):
-        positions.update(range(match.start(), match.end() - 1))
-    return frozenset(positions)
+    return frozenset(
+        index
+        for index, (left, right) in enumerate(zip(text, text[1:], strict=False))
+        if not left.isspace() and not right.isspace()
+    )
 
 
 def _measured_text_span(
@@ -546,7 +476,7 @@ def _measured_text_span(
             for character in text
             if character.isspace()
         )
-    letter_spacing_count = len(_english_letter_spacing_after_indices(text))
+    letter_spacing_count = len(_letter_spacing_after_indices(text))
     return float(
         natural_width
         + word_gap_adjustment
@@ -641,7 +571,7 @@ def text_geometry(
     gap_px = font_size * semantic_gap_em
     letter_spacing_px = font_size * letter_spacing_em
     target_word_gap_px = font_size * word_gap_em if word_gap_em is not None else None
-    letter_spacing_after_indices = _english_letter_spacing_after_indices(text)
+    letter_spacing_after_indices = _letter_spacing_after_indices(text)
     gap_before = tuple(
         sum(1 for gap_index in semantic_gap_after_indices if gap_index < index)
         * gap_px
@@ -817,8 +747,6 @@ def _character_onsets(
     return result
 
 
-
-
 def _character_releases(
     onsets: list[int],
     *,
@@ -984,8 +912,6 @@ def main_glyph_events(
     return result
 
 
-
-
 def ruby_events(
     sentence: Sentence,
     *,
@@ -1129,13 +1055,6 @@ _PREFERRED_PHRASE_ENDINGS = (
     "も",
 )
 
-
-def _normalize_display_text(text: str) -> str:
-    """Return the source-line text used for display-phrase override lookup."""
-
-    return "".join(character for character in text if not character.isspace())
-
-
 def _semantic_gap_after_indices(
     source_sentence: Sentence,
     display_sentence: Sentence,
@@ -1173,161 +1092,8 @@ def _semantic_gap_after_indices(
             for character in source_sentence.characters[left_index + 1 : right_index]
         ):
             result.add(display_index)
-    if normalize_language(language, default=DEFAULT_LANGUAGE) == "en":
-        last_visible_index: int | None = None
-        for display_index, character in enumerate(display_sentence.characters):
-            if character.char.isspace():
-                if last_visible_index is not None:
-                    result.add(last_visible_index)
-            else:
-                last_visible_index = display_index
+    normalize_language(language, default=DEFAULT_LANGUAGE)
     return frozenset(result)
-
-
-_BAD_DISPLAY_BOUNDARY_START_CHARS = frozenset(
-    "・ーぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ"
-)
-_BAD_DISPLAY_BOUNDARY_END_CHARS = frozenset("・ーっッ")
-def _load_external_json(name: str) -> object:
-    """Load optional inline JSON or a UTF-8 JSON file named by an env var."""
-
-    raw_value = os.environ.get(name, "").strip()
-    if not raw_value:
-        return {}
-    try:
-        return json.loads(raw_value)
-    except json.JSONDecodeError:
-        try:
-            return json.loads(Path(raw_value).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(
-                f"{name} must contain JSON or name a UTF-8 JSON file"
-            ) from error
-
-
-def _load_display_phrase_overrides() -> dict[str, tuple[str, ...]]:
-    """Load reviewed display splits without embedding private lyric facts."""
-
-    document = _load_external_json("KARAOKE_DISPLAY_OVERRIDES")
-    if not document:
-        return {}
-    if isinstance(document, dict) and set(document) == {"overrides"}:
-        document = document["overrides"]
-    if not isinstance(document, dict) or not all(
-        isinstance(source_text, str)
-        and isinstance(phrases, list)
-        and all(isinstance(phrase, str) for phrase in phrases)
-        for source_text, phrases in document.items()
-    ):
-        raise ValueError("KARAOKE_DISPLAY_OVERRIDES must map text to string lists")
-    return {str(source): tuple(phrases) for source, phrases in document.items()}
-
-
-_DISPLAY_PHRASE_OVERRIDES = _load_display_phrase_overrides()
-_SINGLE_TRACK_DISPLAY_PHRASE_OVERRIDES: dict[str, tuple[str, ...]] = {}
-
-
-def _validate_display_phrase_overrides() -> None:
-    """Validate static display overrides before any source line can use them."""
-
-    combined = {
-        **_DISPLAY_PHRASE_OVERRIDES,
-        **_SINGLE_TRACK_DISPLAY_PHRASE_OVERRIDES,
-    }
-    for source_text, phrases in combined.items():
-        normalized_source_text = _normalize_display_text(source_text)
-        if source_text != normalized_source_text:
-            raise ValueError(
-                "display override keys must be normalized source text: "
-                f"{source_text!r}"
-            )
-        if not phrases or "".join(phrases) != source_text:
-            raise ValueError(
-                "display override phrases must concatenate to their key: "
-                f"{source_text!r}"
-            )
-        for phrase in phrases:
-            if not MIN_DISPLAY_PHRASE_CHARS <= len(phrase) <= MAX_DISPLAY_PHRASE_CHARS:
-                raise ValueError(
-                    "display override phrase length is outside the supported range: "
-                    f"{phrase!r}"
-                )
-        for left, right in zip(phrases, phrases[1:]):
-            if (
-                left[-1] in _BAD_DISPLAY_BOUNDARY_END_CHARS
-                or right[0] in _BAD_DISPLAY_BOUNDARY_START_CHARS
-            ):
-                raise ValueError(
-                    "display override has a bad Japanese phrase boundary: "
-                    f"{left!r} | {right!r}"
-                )
-
-
-_validate_display_phrase_overrides()
-
-
-def _split_sentence_by_display_override(
-    sentence: Sentence,
-    *,
-    language: str = DEFAULT_LANGUAGE,
-) -> list[list] | None:
-    """Return original character slices for a full source-line override."""
-
-    normalized_source_text = _normalize_display_text(sentence.text)
-    override = _DISPLAY_PHRASE_OVERRIDES.get(normalized_source_text)
-    if override is None:
-        override = _SINGLE_TRACK_DISPLAY_PHRASE_OVERRIDES.get(
-            normalized_source_text
-        )
-    if override is None:
-        return None
-    if "".join(override) != normalized_source_text:
-        raise ValueError(
-            "display override phrases must concatenate to their source key: "
-            f"{normalized_source_text!r}"
-        )
-
-    visible_characters = [
-        character
-        for character in sentence.characters
-        if not character.char.isspace()
-    ]
-    visible_text = "".join(character.char for character in visible_characters)
-    if visible_text != normalized_source_text:
-        raise ValueError(
-            "display override source text does not match its character sequence: "
-            f"{normalized_source_text!r} != {visible_text!r}"
-        )
-
-    result: list[list] = []
-    cursor = 0
-    for phrase in override:
-        end = cursor + len(phrase)
-        result.append(visible_characters[cursor:end])
-        cursor = end
-    if cursor != len(visible_characters):
-        raise ValueError(
-            "display override slices do not cover the complete source line: "
-            f"{normalized_source_text!r}"
-        )
-    if normalize_language(language) == "en":
-        visible_positions = [
-            index
-            for index, character in enumerate(sentence.characters)
-            if not character.char.isspace()
-        ]
-        cursor = 0
-        for phrase in override[:-1]:
-            cursor += len(phrase)
-            left_index = visible_positions[cursor - 1]
-            right_index = visible_positions[cursor]
-            between = sentence.characters[left_index + 1 : right_index]
-            if not any(character.char.isspace() for character in between):
-                raise ValueError(
-                    "English display override splits inside a word: "
-                    f"{normalized_source_text!r} at {cursor}"
-                )
-    return result
 
 
 def _character_onset(character) -> int | None:
@@ -1467,8 +1233,6 @@ def _coalesce_display_runs_that_fit(
     return result
 
 
-
-
 def split_sentence_for_display(
     sentence: Sentence,
     *,
@@ -1484,20 +1248,6 @@ def split_sentence_for_display(
         raise ValueError(
             f"max_chars must be at least {MIN_DISPLAY_PHRASE_CHARS}, got {max_chars}"
         )
-    if max_chars is None and language == "ja":
-        return [sentence]
-    override_runs = _split_sentence_by_display_override(
-        sentence,
-        language=language,
-    )
-    if override_runs is not None:
-        return [
-            Sentence(
-                singer_id=sentence.singer_id,
-                characters=list(run),
-            )
-            for run in override_runs
-        ]
     if max_chars is None:
         return [sentence]
     runs: list[list] = []
@@ -1527,7 +1277,7 @@ def layout_for_language(
     layout: SubtitleLayout,
     language: str,
 ) -> SubtitleLayout:
-    """Validate the language and keep the explicitly selected layout."""
+    """Validate the language and retain the bundled generic/Japanese layout."""
 
     normalize_language(language)
     return layout
@@ -1797,9 +1547,10 @@ def _cue_lyric_preload_starts(
         if not 0 <= target_index < len(prepared):
             continue
         # A cue fills the two display lanes, not necessarily two phrases from
-        # one editable source line. Some short source lines produce only one
-        # display phrase, so the second lane must preload the following source
-        # line without merging either source or changing its timing data.
+        # one editable source line. Some short intro lines produce only one
+        # display phrase, so the second
+        # lane must preload the following source line without merging either
+        # source or changing its timing data.
         target_phrase_indices = range(
             target_index,
             min(target_index + 2, len(prepared)),
@@ -1891,23 +1642,25 @@ def build_review_ass(
     layout: SubtitleLayout = STANDARD_LAYOUT,
     offset_ms: int = 0,
     ruby_sidecar: Mapping[str, Any] | None = None,
+    pronunciation_validation: str = "optional",
 ) -> dict:
     visual_release_overrides = visual_release_overrides or {}
     language = _project_language(project)
     canonical_spans = iter_sug_ruby_spans(project)
-    ruby_errors = validate_sug_ruby(project)
-    if ruby_errors:
-        raise RubyValidationError("; ".join(ruby_errors))
-    _require_reviewed_canonical_ruby(project, ruby_sidecar, canonical_spans)
+    pronunciation_result = validate_pronunciation(
+        project,
+        mode=pronunciation_validation,
+        sidecar=ruby_sidecar,
+        sidecar_validator=(
+            validate_review_sidecar if callable(validate_review_sidecar) else None
+        ),
+        rendered_ruby_count=len(canonical_spans),
+    )
     canonical_sug_hash = sug_hash(project)
     canonical_project_ruby_tokens = [
         token
         for source_sentence in project.sentences
-        for token in (
-            canonical_ruby_tokens(source_sentence, sidecar=ruby_sidecar)
-            if language == "ja"
-            else []
-        )
+        for token in canonical_ruby_tokens(source_sentence, sidecar=ruby_sidecar)
     ]
     layout = layout_for_language(layout, language)
     identity = language_identity(language)
@@ -1928,6 +1681,9 @@ def build_review_ass(
         f"; Layout: {layout.name}",
         f"; Language: {identity['code']} ({identity['name']})",
         f"; Ruby policy: {identity['ruby_policy']}",
+        f"; Pronunciation validation mode: {pronunciation_result.mode}",
+        f"; Pronunciation validation status: {pronunciation_result.status}",
+        f"; Pronunciation validation reason: {pronunciation_result.reason}",
         "; Ruby source: canonical-sug",
         f"; SUG Ruby hash: {canonical_sug_hash}",
         *[
@@ -1993,14 +1749,10 @@ def build_review_ass(
         )
         if voice_role is not None:
             for phrase_index, phrase in enumerate(phrases):
-                phrase_ruby_tokens = (
-                    _canonical_tokens_for_phrase(
-                        source_sentence,
-                        phrase,
-                        sidecar=ruby_sidecar,
-                    )
-                    if language == "ja"
-                    else []
+                phrase_ruby_tokens = _canonical_tokens_for_phrase(
+                    source_sentence,
+                    phrase,
+                    sidecar=ruby_sidecar,
                 )
                 first_onset = _first_timestamp(phrase)
                 if first_onset is None:
@@ -2061,14 +1813,10 @@ def build_review_ass(
             continue
         source_to_first_display[source_line_index] = len(prepared)
         for phrase_index, phrase in enumerate(phrases):
-            phrase_ruby_tokens = (
-                _canonical_tokens_for_phrase(
-                    source_sentence,
-                    phrase,
-                    sidecar=ruby_sidecar,
-                )
-                if language == "ja"
-                else []
+            phrase_ruby_tokens = _canonical_tokens_for_phrase(
+                source_sentence,
+                phrase,
+                sidecar=ruby_sidecar,
             )
             first_onset = _first_timestamp(phrase)
             if first_onset is None:
@@ -2401,15 +2149,7 @@ def build_review_ass(
                     item["semantic_gap_after_indices"]
                 ),
                 "semantic_gap_px": round(font_size * layout.semantic_gap_em, 2),
-                "word_gap_px": round(
-                    font_size * layout.word_gap_em
-                    if layout.word_gap_em is not None
-                    else ImageFont.truetype(str(font_file), font_size).getlength(" ")
-                    + font_size * layout.semantic_gap_em,
-                    2,
-                )
-                if language == "en"
-                else 0.0,
+                "word_gap_px": round(geometry.word_gap_px or 0.0, 2),
                 "geometry": {
                     "left": round(geometry.left, 3),
                     "right": round(geometry.right, 3),
@@ -2555,11 +2295,7 @@ def build_review_ass(
     if prepared and project_duration_ms > int(prepared[-1]["event_end_ms"]):
         marker_start_ms = int(prepared[-1]["event_end_ms"])
         marker_end_ms = project_duration_ms
-        marker_text = {
-            "ja": "終わり",
-            "zh": "结束",
-            "en": "The End",
-        }[language]
+        marker_text = "終わり"
         marker_sentence = Sentence.from_text(marker_text, "outro")
         marker_fill_duration_ms = marker_end_ms - marker_start_ms
         marker_character_onsets_ms = [
@@ -2600,7 +2336,7 @@ def build_review_ass(
                 glow_blur=layout.main_glow_blur,
             )
         )
-        marker_ruby = "お" if language == "ja" else None
+        marker_ruby = "お"
         if marker_ruby:
             events.extend(
                 ruby_events(
@@ -2687,11 +2423,7 @@ def build_review_ass(
                 layout.main_font_size * layout.letter_spacing_em,
                 3,
             ),
-            "scope": (
-                "english-word-internal"
-                if layout.letter_spacing_em > 0
-                else "none"
-            ),
+            "scope": "adjacent-visible-glyphs" if layout.letter_spacing_em > 0 else "none",
             "positive": layout.letter_spacing_em > 0,
         },
         "word_gap": {
@@ -2714,13 +2446,10 @@ def build_review_ass(
                 3,
             ),
             "natural_space_only": (
-                language == "en"
-                and layout.semantic_gap_em == 0.0
-                and layout.word_gap_em is None
+                layout.semantic_gap_em == 0.0 and layout.word_gap_em is None
             ),
             "narrowed_from_natural": (
-                language == "en"
-                and layout.word_gap_em is not None
+                layout.word_gap_em is not None
                 and layout.main_font_size * layout.word_gap_em
                 < ImageFont.truetype(
                     str(font_file),
@@ -2729,19 +2458,13 @@ def build_review_ass(
             ),
             "strategy": (
                 "fixed-em-renderer-geometry"
-                if language == "en" and layout.word_gap_em is not None
+                if layout.word_gap_em is not None
                 else "font-natural-plus-semantic-gap"
             ),
             "word_run_positioning_advance_scale": (
-                layout.advance_scale if language == "en" else None
+                layout.advance_scale if layout.word_gap_em is not None else None
             ),
             "word_internal_spacing_affected": False,
-            "native_frame_visible_white_gap_target_px": (
-                {"minimum": 18, "maximum": 32}
-                if language == "en"
-                else None
-            ),
-            "native_frame_measurement_required": language == "en",
             "greater_than_letter_spacing": (
                 (
                     layout.main_font_size * layout.word_gap_em
@@ -2783,7 +2506,6 @@ def build_review_ass(
             "project-default-singer" if getattr(project, "singers", None) else "fallback"
         ),
     }
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(header + events) + "\n", encoding="utf-8")
     lyric_texts = [sentence.text for sentence in project.sentences]
@@ -2806,6 +2528,7 @@ def build_review_ass(
             and isinstance(ruby_sidecar.get("records"), list)
             else 0,
         },
+        "pronunciation_validation": pronunciation_result.to_dict(),
         "ruby_consistency_gate": {
             "sug": "canonical-sug",
             "ass": "canonical-sug",
@@ -2860,6 +2583,13 @@ def build_review_ass(
             for placement in cue_placements
         ],
     }
+
+
+def build_review_ass_required(*args: Any, **kwargs: Any) -> dict:
+    """Compatibility entry point for callers that explicitly require sidecars."""
+
+    kwargs["pronunciation_validation"] = "required"
+    return build_review_ass(*args, **kwargs)
 
 
 def ensure_lossless_output_is_new(output_path: Path) -> None:
@@ -3030,6 +2760,7 @@ def render_review_clip(
     av1_cq: int = DEFAULT_AV1_CQ,
     hevc_cq: int = 30,
     visual_style: str = "vinyl",
+    vinyl_motion: str = "rotate",
     spectrum_color: str = "#E19E84",
     progress_color: str | None = None,
     program_duration_seconds: float | None = None,
@@ -3052,6 +2783,8 @@ def render_review_clip(
     end = start + duration
     if visual_style not in {"vinyl", "spectrum"}:
         raise ValueError(f"unsupported visual style: {visual_style}")
+    if vinyl_motion not in {"static", "rotate"}:
+        raise ValueError(f"unsupported vinyl motion: {vinyl_motion}")
     if visual_style == "vinyl" and vinyl_path is None:
         raise ValueError("vinyl visual style requires a vinyl image")
     if visual_style == "spectrum" and output_path.exists():
@@ -3071,11 +2804,16 @@ def render_review_clip(
         else end,
     )
     if visual_style == "vinyl":
+        vinyl_filter = (
+            "format=rgba,rotate=2*PI*t/8:ow=iw:oh=ih:"
+            "fillcolor=black@0:bilinear=1"
+            if vinyl_motion == "rotate"
+            else "format=rgba"
+        )
         filter_complex = (
             "[0:v]format=rgba[bg];"
             f"[1:v]scale={layout.vinyl_size}:{layout.vinyl_size}:flags=lanczos,"
-            "format=rgba,rotate=2*PI*t/8:ow=iw:oh=ih:"
-            "fillcolor=black@0:bilinear=1[vinyl];"
+            f"{vinyl_filter}[vinyl];"
             f"[bg][vinyl]overlay={layout.vinyl_x}:{layout.vinyl_y}:format=auto[scene];"
             f"[scene]{subtitle},trim=start={start:.3f}:end={end:.3f},"
             "setpts=PTS-STARTPTS[v];"
@@ -3094,45 +2832,49 @@ def render_review_clip(
             "scale=1040:220:flags=neighbor,"
             "drawgrid=width=13:height=220:thickness=5:color=black@1,"
             "format=rgba,colorkey=0x000000:0.06:0.08,alphaextract,"
-            "pad=1040:228:0:0:color=black,"
+            # Preserve the 220 px bars at y=290 while giving their mask 8 px
+            # of clearance above and below for rounded edges.
+            "pad=1040:236:0:8:color=black,"
             "erosion=coordinates=90,erosion=coordinates=90,"
             "erosion=coordinates=90,dilation=coordinates=90,"
             "dilation=coordinates=90,dilation=coordinates=90,"
             "gblur=sigma=0.8:steps=1,"
             "split=5[coremask][specinner][specouter][specwide][specpeak];"
-            "[specinner]pad=1168:284:64:0:color=black,"
+            "[specinner]pad=1168:348:64:56:color=black,"
             "gblur=sigma=4:steps=2,"
             "lut=y='val*2.0'[innermask];"
-            "[specouter]pad=1168:284:64:0:color=black,"
+            "[specouter]pad=1168:348:64:56:color=black,"
             "gblur=sigma=14:steps=2,"
             "lut=y='val*2.4'[outermask];"
-            "[specwide]pad=1168:284:64:0:color=black,"
+            "[specwide]pad=1168:348:64:56:color=black,"
             "gblur=sigma=28:steps=3,"
             "lut=y='val*2.8'[widemask];"
-            "[specpeak]pad=1168:284:64:0:color=black,"
+            "[specpeak]pad=1168:348:64:56:color=black,"
             "lagfun=decay=0.975,"
             "gblur=sigma=2.2:steps=2,lut=y='val*0.55'[peakmask];"
-            f"color=c=0x{color}:s=1040x228:r=30:d={duration:.3f},"
+            f"color=c=0x{color}:s=1040x236:r=30:d={duration:.3f},"
             "format=rgba,colorchannelmixer=rr=1:rg=0.18:rb=0.18:"
             "gr=0.18:gg=1:gb=0.18:br=0.18:bg=0.18:bb=1[corecolor];"
-            f"color=c=0x{color}:s=1168x284:r=30:d={duration:.3f},"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
             "format=rgba[innercolor];"
-            f"color=c=0x{color}:s=1168x284:r=30:d={duration:.3f},"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
             "format=rgba[outercolor];"
-            f"color=c=0x{color}:s=1168x284:r=30:d={duration:.3f},"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
             "format=rgba[widecolor];"
-            f"color=c=0x{color}:s=1168x284:r=30:d={duration:.3f},"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
             "format=rgba[peakcolor];"
             "[corecolor][coremask]alphamerge[core];"
             "[innercolor][innermask]alphamerge[innerglow];"
             "[outercolor][outermask]alphamerge[outerglow];"
             "[widecolor][widemask]alphamerge[wideglow];"
             "[peakcolor][peakmask]alphamerge[peakhold];"
-            "[bgclip][wideglow]overlay=736:290:format=auto[wide];"
-            "[wide][outerglow]overlay=736:290:format=auto[outer];"
-            "[outer][peakhold]overlay=736:290:format=auto[held];"
-            "[held][innerglow]overlay=736:290:format=auto[inner];"
-            "[inner][core]overlay=800:290:format=auto[spectrumbars];"
+            # Moving the padded layers upward exactly offsets their new top
+            # padding: bars stay at y=290 and the glow gains a clip-safe top.
+            "[bgclip][wideglow]overlay=736:226:format=auto[wide];"
+            "[wide][outerglow]overlay=736:226:format=auto[outer];"
+            "[outer][peakhold]overlay=736:226:format=auto[held];"
+            "[held][innerglow]overlay=736:226:format=auto[inner];"
+            "[inner][core]overlay=800:282:format=auto[spectrumbars];"
             f"[spectrumbars]drawbox=x=800:y=516:w=1040:h=3:"
             f"color=0x{color}@0.85:t=fill[spectrumscene];"
             f"color=c=black@0.0:s=1040x28:r=30:d={duration:.3f},"
@@ -3394,6 +3136,58 @@ def render_review_clip(
             duration_seconds=duration,
             source_codec=lossless_audio_codec,
         )
+    vinyl_asset = None
+    if visual_style == "vinyl" and vinyl_path is not None:
+        provenance_path = vinyl_path.parent / "artwork.json"
+        provenance = None
+        if provenance_path.is_file():
+            try:
+                candidate = json.loads(provenance_path.read_text(encoding="utf-8"))
+                provenance = candidate if isinstance(candidate, dict) else None
+            except (OSError, ValueError):
+                provenance = None
+        vinyl_asset = {
+            "path": str(vinyl_path),
+            "sha256": (
+                hashlib.sha256(vinyl_path.read_bytes()).hexdigest()
+                if vinyl_path.is_file()
+                else None
+            ),
+            "provenance_path": (
+                str(provenance_path) if provenance_path.is_file() else None
+            ),
+            "provenance_sha256": (
+                hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+                if provenance_path.is_file()
+                else None
+            ),
+            "generated_at_utc": (
+                provenance.get("generated_at_utc") if provenance else None
+            ),
+            "source_sha256": provenance.get("source_sha256") if provenance else None,
+            "vinyl_style_version": (
+                provenance.get("vinyl_style_version") if provenance else None
+            ),
+            "metadata_vinyl_sha256": (
+                provenance.get("vinyl_sha256") if provenance else None
+            ),
+            "vinyl_generator_sha256": (
+                (
+                    provenance.get("vinyl_generator_sha256")
+                    or provenance.get("render_vinyl_karaoke_sha256")
+                )
+                if provenance
+                else None
+            ),
+            "vinyl_generator_sha256_field": (
+                "vinyl_generator_sha256"
+                if provenance and provenance.get("vinyl_generator_sha256")
+                else "render_vinyl_karaoke_sha256"
+                if provenance and provenance.get("render_vinyl_karaoke_sha256")
+                else None
+            ),
+            "generator": "scripts/render_vinyl_karaoke.py",
+        }
     return {
         "video": str(output_path),
         "bytes": output_path.stat().st_size,
@@ -3427,6 +3221,8 @@ def render_review_clip(
         ),
         "hevc_cq": hevc_cq if video_encoder == "hevc_nvenc_444" else None,
         "visual_style": visual_style,
+        "vinyl_motion": vinyl_motion,
+        "vinyl_asset": vinyl_asset,
         "spectrum_color": f"#{color}" if visual_style == "spectrum" else None,
         "spectrum_geometry": (
             {"x": 800, "y": 290, "width": 1040, "height": 220}
@@ -3440,8 +3236,15 @@ def render_review_clip(
         "spectrum_glow_horizontal_padding_px": (
             64 if visual_style == "spectrum" else None
         ),
+        "spectrum_bar_top_clearance_px": 8 if visual_style == "spectrum" else None,
         "spectrum_bar_bottom_clearance_px": 8 if visual_style == "spectrum" else None,
+        "spectrum_glow_top_padding_px": 56 if visual_style == "spectrum" else None,
         "spectrum_glow_bottom_padding_px": 56 if visual_style == "spectrum" else None,
+        "spectrum_clip_safe_geometry": (
+            {"x": 736, "y": 226, "width": 1168, "height": 348}
+            if visual_style == "spectrum"
+            else None
+        ),
         "spectrum_baseline_y": 516 if visual_style == "spectrum" else None,
         "peak_hold": (
             {"enabled": True, "decay": 0.975, "half_life_seconds": 0.91}
@@ -3561,8 +3364,18 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audio", type=Path, required=True)
     parser.add_argument("--composition", type=Path, required=True)
     parser.add_argument("--vinyl", type=Path)
-    parser.add_argument("--fonts-dir", type=Path, required=True)
-    parser.add_argument("--font-file", type=Path, required=True)
+    parser.add_argument(
+        "--fonts-dir",
+        type=Path,
+        default=SHARED_FONT_DIR,
+        help="HarmonyOS Sans SC directory (defaults to the project shared font directory)",
+    )
+    parser.add_argument(
+        "--font-file",
+        type=Path,
+        default=SHARED_FONT_FILE,
+        help="HarmonyOS Sans SC regular face used for geometry and glyph checks",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--lossless-output",
@@ -3628,6 +3441,18 @@ def make_parser() -> argparse.ArgumentParser:
         choices=("vinyl", "spectrum"),
         default="vinyl",
         help="mutually exclusive right-side visual effect",
+    )
+    parser.add_argument(
+        "--vinyl-motion",
+        choices=("static", "rotate"),
+        default="rotate",
+        help="vinyl animation mode (default: rotate for CLI compatibility)",
+    )
+    parser.add_argument(
+        "--pronunciation-validation",
+        choices=PRONUNCIATION_VALIDATION_MODES,
+        default="optional",
+        help="pronunciation sidecar policy; structure is always validated",
     )
     parser.add_argument(
         "--spectrum-color",
@@ -3712,6 +3537,7 @@ def main(argv: list[str] | None = None) -> int:
         layout=layout,
         offset_ms=args.offset_ms,
         ruby_sidecar=ruby_sidecar,
+        pronunciation_validation=args.pronunciation_validation,
     )
     if args.ass_only:
         payload = {"status": "ass-ready", "ass": ass_report}
@@ -3756,6 +3582,7 @@ def main(argv: list[str] | None = None) -> int:
         av1_cq=args.av1_cq,
         hevc_cq=args.hevc_cq,
         visual_style=args.visual_style,
+        vinyl_motion=args.vinyl_motion,
         spectrum_color=args.spectrum_color or _project_highlight_color(project),
         progress_color=args.progress_color,
         program_duration_seconds=(

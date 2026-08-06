@@ -13,14 +13,28 @@ map.
 
 Produce karaoke videos through an inspect, preview, encode, and verify workflow. Keep subtitle timing, AV1 4:2:0 output, audio integrity, and playback compatibility independently testable.
 
-When no language profile is specified, use the bundled Japanese default
-(`ja`); other languages require separately validated project adapters.
+The generic default remains Japanese (`ja`) for legacy manifests. Use
+`run_karaoke_japanese_workflow.py` for the bundled Japanese route. Any other
+language requires a separately validated adapter; never silently fall back to
+another language profile or workflow.
 
 Use `tts-voice-workflow-ops` separately when generating or cloning voices, separating vocals, or converting a singer. This skill starts from authorized media, lyrics, subtitles, fonts, and audio stems.
 
 Read [av1-420-commands.md](references/av1-420-commands.md) / [中文](references/av1-420-commands.zh-CN.md) when constructing FFmpeg or ffprobe commands.
 
 Read [wide-visual-templates.md](references/wide-visual-templates.md) / [中文](references/wide-visual-templates.zh-CN.md) before selecting or changing the wide-layout vinyl or real-time spectrum template. Keep the two effects mutually exclusive and drive both through the shared artwork and preview-render scripts.
+
+The current `wide-layout-v5/no-right-panels` composition uses a vinyl card at
+`(40,30,340,402)`, footer bottom padding `12`, and a lower subtitle panel that
+starts at `y=576`. Both the extra outer right-panel overlay and the compact
+dark backplate behind/below the rotating record are removed. The rotating
+record, album card, card footer, and bottom subtitle panel remain. Reports use
+`right_panel_visible=false`, `outer_right_panel_visible=false`,
+`vinyl_backplate_present=false`, and the compatibility field
+`vinyl_backplate_preserved=false` for this no-panel composition. The spectrum
+variant must also use the clip-safe geometry documented in
+[wide-visual-templates.md](references/wide-visual-templates.md), leaving top
+and bottom glow clearance so peaks are not clipped.
 
 Read [subtitle-timing-quality.md](references/subtitle-timing-quality.md) / [中文](references/subtitle-timing-quality.zh-CN.md) when changing phrase segmentation, cue behavior, ruby, MMS-derived timing, highlight release, visual-fit rules, or opening an editable timing project for review.
 
@@ -30,7 +44,7 @@ For StrangeUtaGame editor review, use [open_editable_project_with_audio_probe.py
 
 Read [batch-release-gates.md](references/batch-release-gates.md) / [中文](references/batch-release-gates.zh-CN.md) when encoding, promoting, or packaging more than one song or delivery profile.
 
-Read [strangeutagame-integration.md](references/strangeutagame-integration.md) / [中文](references/strangeutagame-integration.zh-CN.md) before installing or running the bundled production scripts. Use [install_strangeutagame_integration.py](scripts/install_strangeutagame_integration.py) to copy the sanitized snapshot into a compatible StrangeUtaGame checkout; dry-run first and do not overwrite differing project scripts without a backup. Run [check_karaoke_environment.py](scripts/check_karaoke_environment.py) after installation. Keep real album manifests, lyrics, media hashes, fonts, models, and song-specific display/ruby overrides private.
+Read [strangeutagame-integration.md](references/strangeutagame-integration.md) / [中文](references/strangeutagame-integration.zh-CN.md) before installing or running the bundled production scripts. Use [install_strangeutagame_integration.py](scripts/install_strangeutagame_integration.py) to copy the sanitized snapshot into a compatible StrangeUtaGame checkout; dry-run first and do not overwrite differing project scripts without a backup. Run [check_karaoke_environment.py](scripts/check_karaoke_environment.py) from the Skill repository after installation (the support tool is not copied into the target checkout). Keep real album manifests, lyrics, media hashes, fonts, models, and song-specific display/ruby overrides private.
 
 ## First Pass
 
@@ -41,7 +55,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 5. Write to a temporary output and preserve source media until all mandatory gates pass. Full-output null decoding is an optional diagnostic, not a release gate.
 6. Keep probes, ASS sources, fonts, and encode logs private by default. Do not include them in delivery unless their redistribution is authorized.
 7. Before full encoding, run project-specific renderer and packager tests with a writable project-local temporary directory. Treat setup errors, skips, interrupted runs, and partial results as inconclusive.
-8. When a Python repository provides `pyproject.toml` and `uv.lock`, use its project-local `uv` environment and writable project-local test/cache paths. Do not install task dependencies globally.
+8. Prefer `uv run --no-sync ...` for every command; it reuses the existing complete project-local `.venv` without creating or syncing an environment. Do not create a new environment per task or set a new `UV_CACHE_DIR` for ordinary runs. Run `uv sync` only when `.venv` is missing or dependency files actually changed. Use task-owned project-local temporary directories/caches and remove them after reports and artifacts are retained.
 
 ## Editable Project Gate
 
@@ -51,7 +65,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - Resolve a relative media path against the editable project file's parent directory. Exercise the actual startup path used by the requested launch mode; command-line, file-menu, drag-and-drop, and recovery flows may use different loader implementations.
 - Inspect autosave and crash-recovery copies before launch. Preserve genuine user edits, but do not allow a stale recovery copy to silently replace a newer reviewed project.
 - Verify that audio entered the playback engine using an engine-observable result such as populated audio metadata, waveform data, a newly generated source cache, or a controlled playback check. A visible window, project title, existing file, or stored path is not proof of audio loading.
-- Prefer a project-local launch/probe script over UI file dialogs when the editable project already stores `media_path`. For StrangeUtaGame, run the bundled audio-probe script with the repository's own `.venv` or `uv` Python. Require it to isolate settings/cache/recovery state, install auto-save and canonical-save guards before opening, and report exact opened-project identity, project/audio hashes, resolved and callback media paths, engine metadata, non-empty finite waveform evidence, dirty transition, and project hashes.
+- Prefer a project-local launch/probe script over UI file dialogs when the editable project already stores `media_path`. For StrangeUtaGame, run the bundled audio-probe script with `uv run --no-sync`; use `uv sync` only to create or refresh a missing/stale environment. Require it to isolate settings/cache/recovery state, install auto-save and canonical-save guards before opening, and report exact opened-project identity, project/audio hashes, resolved and callback media paths, engine metadata, non-empty finite waveform evidence, dirty transition, and project hashes.
 - Allow a review helper to bypass an unrelated startup update check only in process and only to unblock the requested project/media restoration path. Do not change updater settings, start an update, or treat the bypass as application validation; record it in the probe report.
 - Never auto-save an editor review session. If audio loading alone changes the in-memory duration by a rounding-sized amount such as 1 ms, changes dirty from false to true, and leaves all other serialized project fields unchanged, leave it unsaved and record `do-not-save-duration-normalization`. Treat any other dirty state as requiring review before save. A callback pass is provisional while the editor remains open; require graceful exit plus a final unchanged canonical hash for the completed gate. A forced exit or missing final check is inconclusive.
 - Keep guarded loading review separate from editable work. The probe writes only a private JSON evidence report and blocks project saves. If the user actually adjusts timing, reopen the verified canonical project in the application's normal editable mode and save those edits to the canonical editable source (`.sug` for StrangeUtaGame); then regenerate the ASS and final video from that saved source. Do not mistake the probe JSON, ASS, or encoded video for the editable timing source.
@@ -74,10 +88,12 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - For wide-layout karaoke output, fix the default typography at `1.5x` the project's established `1x` baseline for main lyrics, ruby, and countdown cues. For the current 72/34/26 px baseline, require 108/51/39 px respectively. Use a 35 px ruby-to-main anchor gap and place countdown cues 16 px above the ruby anchor. Apply both spacing values consistently to upper, lower, outro, and cue layouts. Do not switch to `2x`, silently shrink, or change only one of these layers unless the user explicitly requests it or measured overflow is accepted as a recorded, rollback-safe exception.
 - Treat original-mix and separated-vocal MMS results as timing evidence, not delivery tracks. Resolve conflicts with recorded confidence and human A/B review.
 - Use the configured language profile for the documented ASR and alignment path; require a validated adapter for any non-default profile. Keep independent ASR separate from stable-ts and MMS forced alignment; it may support, veto, or remain unresolved, but is never a silent fallback that replaces failed alignment. If ASR is unavailable or errors, record `unresolved` and require other evidence or human review.
+- In StrangeUtaGame, pronunciation validation is an explicit `optional`, `required`, or `off` mode and defaults to `optional`. `optional` keeps structural ruby checks and SUG/ASS/frame agreement mandatory, but a missing pronunciation sidecar is recorded as not performed and does not block by default. Validate a supplied sidecar when present; use `required` only when the user explicitly requests that Japanese gate, and use `off` to disable the semantic sidecar review.
 - Resolve CJK fonts explicitly and inspect missing-glyph or fallback-font warnings.
 - Correct odd dimensions by an explicit pad or scale decision before subtitle rendering; prefer padding when cropping would discard content.
 - Render a short preview covering the title, first lyric, longest line, representative lyric changes, dense timing, and ending before the full encode.
 - When a rotating disc or other periodic artwork is generated, require rotationally continuous source art: no unintended transparent wedge, partial shadow/highlight arc, colour sector, or seam that sweeps around as the asset rotates. For an opaque disc on a transparent square canvas, verify that every pixel safely inside the disc is fully opaque and the surrounding canvas remains transparent; semi-transparent details must be alpha-composited over the opaque surface instead of replacing its alpha. Inspect the source PNG with alpha visible and compare frames at four quarter-period phases. Bind the render report to the exact artwork path and SHA-256; reusing the same filename is allowed only after regenerating the image and refreshing its identity, never as proof that the pixels are unchanged or correct.
+- Keep vinyl rotating (`vinyl_motion: rotate`); `static` describes only a background/composition layer, not the Japanese delivery default. Every formal and test run must rebuild the current vinyl with style `direction-neutral-concentric-grooves/v3/backplate-absent`, record the generator and `vinyl_sha256`, and pass that exact generated path via `--vinyl`. The canonical/old `vinyl.png` is identity-only and must never be silently reused. Do not reintroduce either removed right-side backing panel. If cover extraction uses another audio file, record it as `cover-source-audio` separately from delivery audio.
 - Check safe margins, line wrapping, outline/shadow, contrast, and whether lyrics cover faces or essential content.
 - Preserve source timing unless a deliberate constant-frame-rate conversion or offset correction is documented.
 
@@ -97,24 +113,15 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - Map intended streams explicitly. Default to one selected audio stream; when preserving multiple tracks, enumerate and validate every track. Do not rely on FFmpeg automatic stream selection.
 - When independent video and audio durations differ, choose and document trim, pad, loop, or stop behavior. Do not use `-shortest` to hide an unresolved timeline mismatch.
 - Inspect non-zero start times and preserve relative offsets unless one documented timeline normalization is applied consistently. Decide whether VFR is preserved or converted to an explicit CFR.
-- Make the default compatibility delivery MP4 with AAC-LC at 320 kb/s. Keep `--output` and ordinary playback/package references pointed at this MP4; offer a separate lossless-audio companion only when the source is genuinely lossless.
-- Produce a paired MKV lossless-audio companion for every formal AV1 4:2:0 release when the selected delivery source is truly lossless FLAC or PCM WAV. Copy the encoded video stream from the verified MP4 and encode FLAC directly from the same trimmed source-audio interval; never transcode MP4 AAC to FLAC or label a lossy-source conversion as lossless.
-- Reject the paired lossless release when the source codec is MP3/AAC or otherwise lossy, even when its extension claims FLAC/WAV. Preserve the lossless source sample rate and channel structure; do not force the MP4's 44.1 kHz stereo conversion onto the MKV.
+- Make the default compatibility delivery MP4 with AAC-LC at 320 kb/s. Keep `--output` and ordinary playback/package references pointed at this MP4. MKV is never an implicit companion: create or report it only after the user explicitly requests `--lossless-companion` (or an underlying explicit `--lossless-output`) and probing proves FLAC or PCM WAV.
+- For an explicit MKV request, copy the encoded video stream from the verified MP4 and encode FLAC directly from the same trimmed source-audio interval; never transcode MP4 AAC to FLAC or label a lossy-source conversion as lossless. Without the opt-in, do not create, expect, or report an MKV.
+- Reject an explicit MKV request when the source codec is MP3/AAC or otherwise lossy, even when its extension claims FLAC/WAV. Preserve the lossless source sample rate and channel structure; do not force the MP4's 44.1 kHz stereo conversion onto the MKV.
 - Use MP4 for hard-subtitle platform delivery. Use MKV when preserving ASS as a soft subtitle track or carrying multiple tracks.
 - Do not promise complex ASS soft-subtitle styling in MP4; burn it in or switch to MKV.
 - Produce an H.264 compatibility fallback when the target device or platform has uncertain AV1 support.
 - Keep master, subtitle source, font manifest, encode log, and delivery outputs distinct.
-- Validate MP4 and MKV as one generation before promotion. Require AAC-LC/320k target metadata on MP4, FLAC-only audio on MKV, identical encoded video-stream hashes, decoded MKV PCM equal to the selected lossless source slice, matching timeline bounds within tolerance, and rollback-safe paired publication. Do not use `-shortest` to conceal drift.
-- When pitch shifting is requested, run `scripts/pitch_shift_audio.py` on the complete mix before timing/rendering. Require a probed FLAC or PCM source and reject MP3/AAC input; never relabel a lossy-source transform as lossless. Treat signed semitones literally, use Rubber Band R3 Finer with formant preservation by default for vocals, keep tempo unchanged, and feed the verified FLAC result into both timing evidence and final dual-container muxing. Do not separate vocals merely to shift the complete mix.
-
-## 中文要点
-
-- 当前要求并验证的版本为StrangeUtaGame 1.4.5和SUG存储格式0.3.0；`src/strange_uta_game/__version__.py`与`pyproject.toml`中的应用版本必须保持一致，SUG格式版本以`SugMigrator.CURRENT_VERSION`为准。
-- 独立ASR不是强制对齐失败后的自动替代方案。ASR失败时必须记录为未解决，不能悄悄改用插值后宣称ASR通过。
-- 文档化的ASR和对齐流程使用已配置的语言 profile；任何非默认 profile 都必须有经过验证的 adapter，不对未经验证的中文或英文实现作承诺。
-- 升降调时直接处理完整混音，默认使用Rubber Band R3 Finer和共振峰保持。变调后的无损FLAC必须同时作为时间轴证据和最终MKV无损音轨来源。
-- 候选注音生成器只填补缺失项并先写入规范SUG；Agent像语义分句一样按整句歌词、语法、词形、词边界和上下文自动审核每条注音，可自动批准或直接回写修正。无修改时沿用默认注音，但仍须记录批准状态；仅歧义、专名/艺术读音、证据冲突、低置信或`unresolved`升级人工。renderer只读审核后的规范SUG，渲染阶段禁止再推断或覆盖注音；审核sidecar必须匹配当前SUG哈希，且每个注音span都必须有范围精确的已批准记录，缺失、陈旧、`machine-fill`、低置信、冲突或未解决状态一律阻止渲染。保护已有人工或legacy注音，并为每个span记录状态、置信度、evidence、model/prompt版本及SUG修改前后哈希；SUG、ASS/报告和最终帧必须三层一致。
-- 默认发布视频档为AV1 NVENC CQ38、固定preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240、1920x1080 30fps、yuv420p、BT.709；MP4音频保持AAC-LC 320k，可另选无损音频版。
+- Validate the default MP4 alone before promotion. Only when the MKV opt-in is present validate MP4 and MKV as one generation: AAC-LC/320k target metadata on MP4, FLAC-only audio on MKV, identical encoded video-stream hashes, decoded MKV PCM equal to the selected lossless source slice, matching timeline bounds within tolerance, and rollback-safe paired publication. Do not use `-shortest` to conceal drift.
+- When pitch shifting is requested, run `scripts/pitch_shift_audio.py` on the complete mix before timing/rendering. Require a probed FLAC or PCM source and reject MP3/AAC input for an explicit lossless companion; never relabel a lossy-source transform as lossless. Treat signed semitones literally, use Rubber Band R3 Finer with formant preservation by default for vocals, keep tempo unchanged, and feed the verified FLAC result into timing evidence and default MP4 muxing. Add it to an MKV only when the explicit opt-in is present. Do not separate vocals merely to shift the complete mix.
 
 ## Verification Gate
 

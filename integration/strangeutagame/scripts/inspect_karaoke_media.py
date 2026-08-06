@@ -31,6 +31,7 @@ from render_vinyl_karaoke import (  # noqa: E402
     DEFAULT_SLUG,
     DEFAULT_TITLE,
     REPO_ROOT,
+    SHARED_FONT_DIR,
     ass_candidates,
     audio_duration,
     default_ffmpeg,
@@ -205,7 +206,8 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--fonts-dir",
         type=Path,
-        help="HarmonyOS Sans directory; defaults to deliverables/<slug>/artwork/fonts",
+        default=SHARED_FONT_DIR,
+        help="HarmonyOS Sans directory; defaults to assets/fonts/HarmonyOS-Sans",
     )
     parser.add_argument("--ffmpeg", type=Path)
     parser.add_argument("--report", type=Path)
@@ -453,7 +455,7 @@ def main(argv: list[str] | None = None) -> int:
     ).resolve()
     ffmpeg = (args.ffmpeg or default_ffmpeg()).resolve()
     capabilities = probe_ffmpeg_capabilities(ffmpeg)
-    fonts_dir = (args.fonts_dir or deliverable_root / "artwork" / "fonts").resolve()
+    fonts_dir = args.fonts_dir.resolve()
     try:
         font_info = inspect_font_dir(fonts_dir)
         libass_font_probe = probe_libass_font(

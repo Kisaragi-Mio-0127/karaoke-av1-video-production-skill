@@ -21,4 +21,4 @@
 - 请求升降调时，在时间轴和渲染前运行`scripts/pitch_shift_audio.py`。
 - 使用带符号的半音数、Rubber Band R3 Finer（`-3`），含人声时默认启用共振峰保持（`-F`），速度比例保持1.0。
 - 探测到的源编码必须是FLAC或PCM；拒绝MP3、AAC和其他有损输入，不能把有损来源重新标记为无损。先解码为浮点WAV；出现削波时增加余量重试，再编码并验证FLAC/WAV，音频和JSON报告作为一组发布。
-- 验证后的变调FLAC同时作为对齐、预览、MP4 AAC-LC 320 kb/s和MKV FLAC的音频源。绝不能从MP4 AAC反向生成FLAC。
+- 验证后的变调FLAC用于对齐、预览和默认MP4 AAC-LC 320 kb/s。只有显式请求`--lossless-companion`/`--lossless-output`且探测源为FLAC/PCM时才加入MKV FLAC；绝不能从MP4 AAC反向生成FLAC，并且必须拒绝MP3/AAC请求。

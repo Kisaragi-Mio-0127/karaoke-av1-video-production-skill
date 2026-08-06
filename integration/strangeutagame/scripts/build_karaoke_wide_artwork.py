@@ -4,23 +4,36 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
+SHARED_REGULAR_FONT = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Regular.ttf"
+SHARED_BOLD_FONT = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Bold.ttf"
 CANVAS_SIZE = (1920, 1080)
+WIDE_LAYOUT_VERSION = "wide-layout-v5/no-right-panels"
 SLEEVE_BOXES = {
     "vinyl": (40, 30, 340, 402),
     "spectrum": (40, 30, 460, 522),
 }
-RIGHT_PANEL = (640, 30, 1900, 970)
 BOTTOM_PANEL = (20, 576, 1900, 1050)
 BOTTOM_PANEL_FILL = (3, 5, 10, 92)
 SLEEVE_MARGIN = 20
 SLEEVE_FOOTER_HEIGHT = 70
 SLEEVE_BOTTOM_PADDING = 12
 TITLE_BLOCK_X = {"vinyl": 430, "spectrum": 800}
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _font(path: Path, size: int) -> ImageFont.FreeTypeFont:
@@ -85,7 +98,6 @@ def build_wide_composition(
 
     panels = Image.new("RGBA", CANVAS_SIZE, (0, 0, 0, 0))
     panel_draw = ImageDraw.Draw(panels)
-    panel_draw.rounded_rectangle(RIGHT_PANEL, radius=46, fill=(4, 7, 14, 66))
     panel_draw.rounded_rectangle(BOTTOM_PANEL, radius=34, fill=BOTTOM_PANEL_FILL)
     canvas.alpha_composite(panels)
 
@@ -200,7 +212,11 @@ def build_wide_composition(
     canvas.convert("RGB").save(output_path, format="PNG", optimize=True)
     report = {
         "schema_version": 1,
+        "layout_version": WIDE_LAYOUT_VERSION,
+        "layout_generator": "scripts/build_karaoke_wide_artwork.py",
+        "layout_generator_sha256": _sha256_file(Path(__file__).resolve()),
         "output": str(output_path),
+        "composition_sha256": _sha256_file(output_path),
         "canvas": {"width": CANVAS_SIZE[0], "height": CANVAS_SIZE[1]},
         "sleeve": {
             "x": sleeve_x,
@@ -208,7 +224,14 @@ def build_wide_composition(
             "width": sleeve_width,
             "height": sleeve_height,
         },
-        "right_panel": RIGHT_PANEL,
+        "right_panel": None,
+        "right_panel_visible": False,
+        "outer_right_panel": None,
+        "outer_right_panel_visible": False,
+        "vinyl_backplate": None,
+        "vinyl_backplate_present": False,
+        # Compatibility field for consumers of the former preservation flag.
+        "vinyl_backplate_preserved": False,
         "bottom_panel": BOTTOM_PANEL,
         "bottom_panel_fill": BOTTOM_PANEL_FILL,
         "title": title,
@@ -242,8 +265,8 @@ def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--background", type=Path, required=True)
     parser.add_argument("--cover", type=Path, required=True)
-    parser.add_argument("--font-regular", type=Path, required=True)
-    parser.add_argument("--font-bold", type=Path, required=True)
+    parser.add_argument("--font-regular", type=Path, default=SHARED_REGULAR_FONT)
+    parser.add_argument("--font-bold", type=Path, default=SHARED_BOLD_FONT)
     parser.add_argument("--title", required=True)
     parser.add_argument("--artist", required=True)
     parser.add_argument("--album-title", required=True)

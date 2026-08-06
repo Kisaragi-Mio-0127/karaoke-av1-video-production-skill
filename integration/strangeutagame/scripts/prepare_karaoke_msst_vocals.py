@@ -1,8 +1,9 @@
 """Prepare the project's MSST karaoke vocal stems.
 
-The MSST implementation and model are supplied separately.  This adapter keeps
-the StrangeUtaGame side small: decode project inputs into a local cache, import
-an explicitly configured MSST runner, and write auditable per-stem provenance.
+The MSST implementation and its model are owned by ``TTS_Test``.  This file
+keeps the StrangeUtaGame side deliberately small: decode the two project
+inputs into a project-local cache, import the existing MSST runner, and write
+auditable per-stem provenance.
 """
 
 from __future__ import annotations
@@ -45,7 +46,10 @@ MSST_INPUT_DIR = CACHE_ROOT / "msst-input"
 MSST_OUTPUT_DIR = CACHE_ROOT / "msst-vocals"
 MSST_RUNTIME_DIR = CACHE_ROOT / "msst-runtime"
 
-_EXTERNAL_SCRIPT_ENV = "KARAOKE_MSST_HELPER"
+EXTERNAL_SCRIPT = Path(os.environ.get("KARAOKE_MSST_PREPARATION_SCRIPT", ""))
+
+DEFAULT_ALBUM = load_album_manifest(DEFAULT_MANIFEST_PATH)
+DEFAULT_SOURCES = tuple(track.audio_path for track in DEFAULT_ALBUM.tracks)
 
 EXPECTED_SAMPLE_RATE = 44_100
 EXPECTED_CHANNELS = 2
@@ -62,25 +66,15 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def load_msst_module(external_script: Path | None = None) -> ModuleType:
-    """Import a separately supplied MSST preparation script."""
+def load_msst_module() -> ModuleType:
+    """Import the TTS_Test preparation script without changing its source."""
 
-    configured = external_script or (
-        Path(os.environ[_EXTERNAL_SCRIPT_ENV]).expanduser()
-        if os.environ.get(_EXTERNAL_SCRIPT_ENV)
-        else None
-    )
-    if configured is None:
-        raise RuntimeError(
-            "MSST helper is not configured; pass --external-script or set "
-            f"{_EXTERNAL_SCRIPT_ENV}"
-        )
-    script = configured.resolve()
+    script = EXTERNAL_SCRIPT.resolve()
     if not script.is_file():
         raise FileNotFoundError(f"MSST preparation script does not exist: {script}")
 
     spec = importlib.util.spec_from_file_location(
-        "karaoke_external_msst_helper", str(script)
+        "tts_test_prepare_sovits41_msst_stems", str(script)
     )
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load MSST preparation script: {script}")
@@ -103,7 +97,7 @@ def _dependency_paths(msst_module: ModuleType) -> dict[str, Path]:
         label: Path(getattr(msst_module, name)).resolve()
         for label, name in names.items()
     }
-    paths["script"] = Path(msst_module.__file__ or "").resolve()
+    paths["script"] = EXTERNAL_SCRIPT.resolve()
 
     missing = [
         f"{label}: {path}" for label, path in paths.items() if not path.is_file()
@@ -327,12 +321,10 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
 
 def _resolve_sources(
     sources: Sequence[Path] | None,
-    album: AlbumManifest | None = None,
+    album: AlbumManifest = DEFAULT_ALBUM,
 ) -> tuple[Path, ...]:
-    if sources is None and album is None:
-        raise ValueError("a manifest or explicit --audio inputs are required")
     selected = (
-        tuple(track.audio_path for track in album.tracks)  # type: ignore[union-attr]
+        tuple(track.audio_path for track in album.tracks)
         if sources is None
         else tuple(sources)
     )
@@ -353,15 +345,12 @@ def prepare(
     force: bool = False,
     msst_module: ModuleType | None = None,
     manifest: AlbumManifest | None = None,
-    external_script: Path | None = None,
 ) -> list[Path]:
     """Prepare the manifest's five vocal stems in one external MSST batch."""
 
-    album = manifest
-    if album is None:
-        raise ValueError("manifest is required")
+    album = manifest or DEFAULT_ALBUM
     if msst_module is None:
-        msst_module = load_msst_module(external_script)
+        msst_module = load_msst_module()
     dependencies = _dependency_paths(msst_module)
     selected = _resolve_sources(sources, album)
     MSST_INPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -400,7 +389,7 @@ def prepare(
         for _source, input_wav, _output, _report in pending:
             shutil.copy2(input_wav, run_input_dir / input_wav.name)
         print(
-            f"Running MSST for {len(pending)} source(s) with the configured external runner",
+            f"Running MSST for {len(pending)} source(s) with the imported TTS_Test runner",
             flush=True,
         )
         msst_module.run_msst(
@@ -456,11 +445,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="allow an explicitly supplied manifest with fewer than five tracks",
     )
     parser.add_argument(
-        "--external-script",
-        type=Path,
-        help=f"external MSST helper (or set {_EXTERNAL_SCRIPT_ENV})",
-    )
-    parser.add_argument(
         "--force",
         action="store_true",
         help="re-decode and re-run MSST even when a matching report exists",
@@ -477,7 +461,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             args.manifest,
             require_five_tracks=not args.allow_partial_manifest,
         ),
-        external_script=args.external_script,
     )
 
 

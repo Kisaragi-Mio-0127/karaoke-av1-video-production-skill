@@ -5,8 +5,8 @@ The script deliberately treats timing/ASS as an input owned by the timing
 agent.  It can therefore build all artwork before lyrics are available, but
 it never invents or writes an ASS file.
 
-All project-specific paths and metadata come from ``--manifest``.  The public
-integration intentionally contains no album-specific cover URL or media.
+All media and metadata paths are arguments so the same pipeline can be reused
+without embedding album-specific resources in this integration.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterable
@@ -68,6 +69,14 @@ except ImportError:  # pragma: no cover - direct script execution
     )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
+DEFAULT_ALBUM = (
+    load_album_manifest(DEFAULT_MANIFEST_PATH)
+    if DEFAULT_MANIFEST_PATH.is_file()
+    else None
+)
+
+
 def track_dict(track: Any) -> dict[str, Any]:
     """Convert a manifest track to the renderer's small working record."""
 
@@ -84,14 +93,21 @@ def track_dict(track: Any) -> dict[str, Any]:
     }
 
 
-DEFAULT_SLUG = "karaoke"
-DEFAULT_TITLE = "Karaoke Track"
-DEFAULT_ARTIST = "Unknown Artist"
-DEFAULT_AUDIO: Path | None = None
+DEFAULT_TRACKS = (
+    tuple(track_dict(track) for track in DEFAULT_ALBUM.tracks)
+    if DEFAULT_ALBUM is not None
+    else ()
+)
+DEFAULT_TRACK = DEFAULT_TRACKS[0] if DEFAULT_TRACKS else {}
+DEFAULT_SLUG = DEFAULT_ALBUM.title if DEFAULT_ALBUM is not None else "karaoke"
+DEFAULT_TITLE = str(DEFAULT_TRACK.get("title", ""))
+DEFAULT_ARTIST = str(DEFAULT_TRACK.get("artist", ""))
+DEFAULT_AUDIO = DEFAULT_TRACK.get("audio")
 DEFAULT_COVER_URL = ""
+MAX_NETWORK_COVER_BYTES = 25 * 1024 * 1024
 CANVAS_SIZE = (1920, 1080)
 VINYL_SIZE = 860
-MAX_NETWORK_COVER_BYTES = 25 * 1024 * 1024
+VINYL_STYLE_VERSION = "direction-neutral-concentric-grooves/v3/backplate-absent"
 
 
 class WaitingForASSError(RuntimeError):
@@ -169,6 +185,11 @@ def probe_ffmpeg_capabilities(ffmpeg: Path | str) -> dict[str, Any]:
     ]
     audio_candidates = ["aac", "aac_mf", "libfdk_aac", "libmp3lame"]
     available_h264 = [name for name in h264_candidates if _has_named_encoder(encoder_output, name)]
+    available_av1 = [
+        name
+        for name in ("av1_nvenc", "libaom-av1")
+        if _has_named_encoder(encoder_output, name)
+    ]
     available_audio = [name for name in audio_candidates if _has_named_encoder(encoder_output, name)]
 
     return {
@@ -178,6 +199,7 @@ def probe_ffmpeg_capabilities(ffmpeg: Path | str) -> dict[str, Any]:
         "subtitle_filters": {"subtitles": has_subtitles, "ass": has_ass},
         "subtitle_filter_selected": subtitle_filter,
         "h264_encoders": available_h264,
+        "av1_encoders": available_av1,
         "audio_encoders": available_audio,
         "checks": {
             "subtitles_or_ass_filter": subtitle_filter is not None,
@@ -244,40 +266,43 @@ def embedded_cover(audio_path: Path) -> tuple[bytes | None, dict[str, Any]]:
     return None, {"present": False, "reason": "no_embedded_image"}
 
 
-def fetch_cover(url: str) -> tuple[bytes, dict[str, Any]]:
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme.lower() != "https" or not parsed.hostname:
-        raise ValueError("cover URL must use HTTPS and include a hostname")
-    try:
-        addresses = {
-            item[4][0]
-            for item in socket.getaddrinfo(
-                parsed.hostname,
-                parsed.port or 443,
-                type=socket.SOCK_STREAM,
-            )
-        }
-    except OSError as error:
-        raise ValueError(f"cover URL hostname could not be resolved: {parsed.hostname}") from error
-    if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
-        raise ValueError("cover URL must not resolve to a loopback, private, or reserved address")
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
 
+
+def _validate_cover_url(url: str) -> None:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme.casefold() != "https" or not parsed.hostname:
+        raise ValueError("cover URL must use HTTPS and include a hostname")
+    if parsed.username or parsed.password or parsed.hostname.casefold() == "localhost":
+        raise ValueError("cover URL host is not public")
+    try:
+        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443)
+    except OSError as error:
+        raise ValueError(f"cover URL host cannot be resolved: {parsed.hostname}") from error
+    for address in addresses:
+        candidate = ipaddress.ip_address(address[4][0])
+        if not candidate.is_global:
+            raise ValueError(f"cover URL resolves to a non-public address: {candidate}")
+
+
+def fetch_cover(url: str) -> tuple[bytes, dict[str, Any]]:
+    _validate_cover_url(url)
     request = urllib.request.Request(
         url,
         headers={"User-Agent": "StrangeUtaGame-media-builder/1.0"},
     )
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
-            return None
-
-    opener = urllib.request.build_opener(NoRedirect)
+    opener = urllib.request.build_opener(_NoRedirect)
     with opener.open(request, timeout=20) as response:
         data = response.read(MAX_NETWORK_COVER_BYTES + 1)
         mime = response.headers.get_content_type() or "image/jpeg"
+    if len(data) > MAX_NETWORK_COVER_BYTES:
+        raise RuntimeError(
+            f"cover response exceeds {MAX_NETWORK_COVER_BYTES} bytes"
+        )
     if not data:
         raise RuntimeError(f"cover URL returned an empty response: {url}")
-    if len(data) > MAX_NETWORK_COVER_BYTES:
-        raise RuntimeError("cover URL response exceeds the 25 MiB limit")
     return data, {
         "present": True,
         "source": "network_url",
@@ -394,12 +419,6 @@ def _draw_background(cover: Any) -> Any:
         shade_draw.line((0, y, width, y), fill=(4, 6, 14, alpha))
     canvas.alpha_composite(shade)
 
-    # A quiet panel behind the right-hand record provides contrast for the
-    # rotating transparent PNG while keeping the source art visible.
-    panel = Image.new("RGBA", CANVAS_SIZE, (0, 0, 0, 0))
-    panel_draw = ImageDraw.Draw(panel)
-    panel_draw.rounded_rectangle((940, 80, 1840, 1000), radius=42, fill=(8, 11, 20, 42))
-    canvas.alpha_composite(panel)
     return canvas
 
 
@@ -409,7 +428,7 @@ def _draw_envelope(
     title: str,
     artist: str,
     font_info: dict[str, Any],
-    album_title: str = "Karaoke Album",
+    album_title: str = DEFAULT_SLUG,
 ) -> None:
     x, y = 125, 120
     envelope_width, envelope_height = 690, 730
@@ -510,7 +529,7 @@ def build_artwork(
     cover_url: str,
     fonts_dir: Path,
     allow_network: bool = False,
-    album_title: str = "Karaoke Album",
+    album_title: str = DEFAULT_SLUG,
 ) -> dict[str, Any]:
     if Image is None or ImageOps is None:
         raise RuntimeError("Pillow is required to build artwork")
@@ -518,7 +537,7 @@ def build_artwork(
     embedded, source_info = embedded_cover(audio_path)
     if embedded is not None:
         cover_bytes = embedded
-    elif allow_network and cover_url:
+    elif allow_network:
         cover_bytes, source_info = fetch_cover(cover_url)
     else:
         raise RuntimeError("no embedded cover and network fallback was disabled")
@@ -548,9 +567,27 @@ def build_artwork(
     vinyl = _draw_vinyl(cover)
     vinyl_path = artwork_dir / "vinyl.png"
     vinyl.save(vinyl_path, format="PNG", optimize=True)
+    renderer_source_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    vinyl_sha256 = hashlib.sha256(vinyl_path.read_bytes()).hexdigest()
 
     metadata = {
         "schema_version": 1,
+        "vinyl_style_version": VINYL_STYLE_VERSION,
+        "vinyl_generator_sha256": renderer_source_sha256,
+        # Compatibility alias for reports written before the shared direct-
+        # renderer provenance contract was finalized.
+        "render_vinyl_karaoke_sha256": renderer_source_sha256,
+        "vinyl_sha256": vinyl_sha256,
+        "vinyl_backplate": None,
+        "vinyl_backplate_present": False,
+        # Compatibility field for older report readers. False is intentional:
+        # the compact panel behind the rotating vinyl is no longer preserved.
+        "vinyl_backplate_preserved": False,
+        "vinyl_motion_contract": {
+            "default": "rotate",
+            "allowed": ["static", "rotate"],
+            "rotation_period_seconds": 8.0,
+        },
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "track": {
             "title": title,
@@ -754,8 +791,6 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
                 "font_size": float(fields[2].strip()),
                 "primary_color": fields[3].strip() if len(fields) > 3 else None,
                 "secondary_color": fields[4].strip() if len(fields) > 4 else None,
-                "scale_x": float(fields[11].strip()) if len(fields) > 11 else None,
-                "spacing": float(fields[13].strip()) if len(fields) > 13 else None,
                 "alignment": int(fields[18].strip()),
                 "margin_left": int(fields[19].strip()) if len(fields) > 19 else None,
                 "margin_right": int(fields[20].strip()) if len(fields) > 20 else None,
@@ -882,11 +917,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
 
     number_pattern = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
     fs_pattern = re.compile(rf"\\fs(?![A-Za-z])({number_pattern})")
-    fsp_pattern = re.compile(rf"\\fsp({number_pattern})")
     inline_font_sizes: list[dict[str, Any]] = []
     bad_inline_sizes: list[dict[str, Any]] = []
-    letter_spacing: list[dict[str, Any]] = []
-    bad_letter_spacing: list[dict[str, Any]] = []
     for dialogue in dialogues:
         style_name = dialogue["style"]
         text_value = dialogue["text"]
@@ -901,12 +933,6 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             inline_font_sizes.append(record)
             if allowed_range is not None and not allowed_range[0] <= value <= allowed_range[1]:
                 bad_inline_sizes.append({**record, "allowed": allowed_range})
-        for match in fsp_pattern.finditer(text_value):
-            value = float(match.group(1))
-            record = {"line": dialogue["line"], "style": style_name, "value": value}
-            letter_spacing.append(record)
-            if value < 0:
-                bad_letter_spacing.append(record)
     if bad_inline_sizes:
         errors.append(f"inline_font_size_outside_layout_role_range: {bad_inline_sizes}")
 
@@ -1174,8 +1200,6 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             f"{ {name: parsed['bgr'] for name, parsed in parsed_secondary_highlight_colors.items()} }"
         )
 
-    if bad_letter_spacing:
-        errors.append(f"letter_spacing_negative: {bad_letter_spacing}")
     highlight_color = None
     highlight_color_ass = None
     if "Main" in parsed_highlight_colors:
@@ -1186,7 +1210,6 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         with contextlib.suppress(ValueError, IndexError):
             start_times.append(_ass_time_seconds(dialogue["start"]))
     font_size_profile_ok = not bad_sizes and not bad_inline_sizes
-    letter_spacing_ok = not bad_letter_spacing
     return {
         "ok": not errors,
         "path": str(ass_path),
@@ -1205,14 +1228,6 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         "highlight_color_ass": highlight_color_ass,
         "highlight_colors": {
             name: parsed["rgb"] for name, parsed in parsed_highlight_colors.items()
-        },
-        "letter_spacing": {
-            "required": False,
-            "values": sorted({record["value"] for record in letter_spacing}),
-            "positive": bool(letter_spacing)
-            and all(record["value"] > 0 for record in letter_spacing),
-            "non_negative": letter_spacing_ok,
-            "scope": "none",
         },
         "secondary": {
             "present": secondary_declared,
@@ -1254,7 +1269,6 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             "secondary_styles": secondary_gate_ok,
             "highlight_color_consistency": highlight_color_consistent,
             "secondary_highlight_color_consistency": secondary_highlight_consistent,
-            "letter_spacing": letter_spacing_ok,
         },
     }
 
@@ -1377,6 +1391,18 @@ def probe_libass_font(
         }
 
 
+def _vinyl_filter(*, vinyl_motion: str, rotation_period: float) -> str:
+    if vinyl_motion == "static":
+        return "[1:v]format=rgba[vinyl]"
+    if vinyl_motion == "rotate":
+        return (
+            "[1:v]format=rgba,"
+            f"rotate=2*PI*t/{rotation_period:.6f}:ow=iw:oh=ih:"
+            "fillcolor=black@0:bilinear=1[vinyl]"
+        )
+    raise ValueError(f"unsupported vinyl motion: {vinyl_motion}")
+
+
 def burn_frame_probe(
     *,
     ffmpeg: Path,
@@ -1388,6 +1414,8 @@ def burn_frame_probe(
     font_family: str,
     subtitle_filter: str,
     probe_time: float,
+    vinyl_motion: str,
+    rotation_period: float,
 ) -> dict[str, Any]:
     """Burn one real ASS frame for visual review before full-length encoding."""
 
@@ -1399,7 +1427,7 @@ def burn_frame_probe(
     )
     filter_complex = (
         "[0:v]format=rgba[bg];"
-        "[1:v]format=rgba,rotate=2*PI*t/8:ow=iw:oh=ih:fillcolor=black@0:bilinear=1[vinyl];"
+        f"{_vinyl_filter(vinyl_motion=vinyl_motion, rotation_period=rotation_period)};"
         "[bg][vinyl]overlay=1030:110:format=auto[scene];"
         f"[scene]{subtitle}[v]"
     )
@@ -1446,6 +1474,10 @@ def burn_frame_probe(
         "path": str(output_path),
         "zoom_path": str(zoom_path) if zoom_path.exists() else None,
         "probe_time_seconds": probe_time,
+        "vinyl_motion": vinyl_motion,
+        "rotation_period_seconds": (
+            rotation_period if vinyl_motion == "rotate" else None
+        ),
         "fontselect": fontselect_lines[-1] if fontselect_lines else None,
         "returncode": result.returncode,
         "stderr_tail": result.stderr[-1200:],
@@ -1453,6 +1485,35 @@ def burn_frame_probe(
 
 
 def _video_codec_args(encoder: str) -> list[str]:
+    if encoder == "av1_nvenc":
+        return [
+            "-c:v",
+            encoder,
+            "-preset",
+            "p7",
+            "-tune",
+            "hq",
+            "-rc",
+            "vbr",
+            "-cq",
+            "38",
+            "-b:v",
+            "0",
+            "-multipass",
+            "fullres",
+            "-lookahead",
+            "32",
+            "-spatial-aq",
+            "1",
+            "-temporal-aq",
+            "1",
+            "-aq-strength",
+            "8",
+            "-g",
+            "240",
+        ]
+    if encoder == "libaom-av1":
+        return ["-c:v", encoder, "-crf", "30", "-b:v", "0", "-cpu-used", "4", "-row-mt", "1"]
     if encoder == "libx264":
         return ["-c:v", encoder, "-preset", "medium", "-crf", "19"]
     if encoder == "h264_nvenc":
@@ -1465,9 +1526,18 @@ def _video_codec_args(encoder: str) -> list[str]:
 
 
 def _audio_codec_args(encoder: str) -> list[str]:
-    if encoder == "copy":
-        return ["-c:a", "copy"]
-    return ["-c:a", encoder, "-b:a", "320k", "-ar", "44100", "-ac", "2"]
+    return [
+        "-c:a",
+        encoder,
+        "-profile:a",
+        "aac_low",
+        "-b:a",
+        "320k",
+        "-ar",
+        "44100",
+        "-ac",
+        "2",
+    ]
 
 
 def render_video(
@@ -1486,7 +1556,9 @@ def render_video(
     font_family: str,
     libass_font_probe: dict[str, Any],
     rotation_period: float,
+    vinyl_motion: str,
     force: bool,
+    video_encoder: str | None = None,
 ) -> dict[str, Any]:
     subtitle_filter = capabilities.get("subtitle_filter_selected")
     if not subtitle_filter:
@@ -1497,11 +1569,19 @@ def render_video(
         raise RuntimeError(f"output exists; pass --force to replace it: {output_path}")
 
     available_h264 = list(capabilities.get("h264_encoders", []))
-    video_candidates = available_h264 + ["mpeg4"]
+    available_av1 = list(capabilities.get("av1_encoders", []))
+    if video_encoder is not None:
+        if video_encoder not in {*available_h264, *available_av1, "mpeg4"}:
+            raise RuntimeError(f"requested video encoder is unavailable: {video_encoder}")
+        video_candidates = [video_encoder]
+    else:
+        video_candidates = available_h264 + ["mpeg4"]
     available_audio = list(capabilities.get("audio_encoders", []))
-    audio_candidates = [name for name in ("aac", "aac_mf", "libfdk_aac", "libmp3lame") if name in available_audio]
+    audio_candidates = [
+        name for name in ("aac", "aac_mf", "libfdk_aac") if name in available_audio
+    ]
     if not audio_candidates:
-        audio_candidates = ["copy"]
+        raise RuntimeError("formal MP4 delivery requires an AAC-LC encoder")
 
     if not libass_font_probe.get("ok") or libass_font_probe.get("probe_kind") != "real_lyrics":
         raise RuntimeError(
@@ -1515,7 +1595,7 @@ def render_video(
     )
     filter_complex = (
         "[0:v]format=rgba[bg];"
-        f"[1:v]format=rgba,rotate=2*PI*t/{rotation_period:.6f}:ow=iw:oh=ih:fillcolor=black@0:bilinear=1[vinyl];"
+        f"{_vinyl_filter(vinyl_motion=vinyl_motion, rotation_period=rotation_period)};"
         "[bg][vinyl]overlay=1030:110:format=auto[scene];"
         f"[scene]{subtitle}[v]"
     )
@@ -1599,6 +1679,10 @@ def render_video(
                         "fonts_dir": project_relative(fonts_dir, REPO_ROOT),
                         "font_family": font_family,
                         "libass_font_probe": libass_font_probe,
+                        "vinyl_motion": vinyl_motion,
+                        "rotation_period_seconds": (
+                            rotation_period if vinyl_motion == "rotate" else None
+                        ),
                     }
         raise RuntimeError("all video/audio encoder attempts failed; see attempts in command output")
     finally:
@@ -1633,7 +1717,7 @@ def make_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow an explicitly supplied manifest with fewer than five tracks",
     )
-    parser.add_argument("--audio", type=Path, default=DEFAULT_AUDIO, help="source audio for --single-track")
+    parser.add_argument("--audio", type=Path, default=DEFAULT_AUDIO, help="source MP3")
     parser.add_argument("--title", default=DEFAULT_TITLE)
     parser.add_argument("--artist", default=DEFAULT_ARTIST)
     parser.add_argument("--slug", default=DEFAULT_SLUG, help="deliverable directory name")
@@ -1641,15 +1725,26 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ass", type=Path, help="explicit ASS input; no ASS is generated")
     parser.add_argument("--artwork-dir", type=Path, help="defaults to deliverables/<slug>/artwork; --all-tracks adds one subdirectory per track")
     parser.add_argument("--output", type=Path, help="single-track output; --all-tracks uses video/<track>.mp4")
-    parser.add_argument("--fonts-dir", type=Path, help="HarmonyOS Sans directory used by Pillow and libass; defaults to artwork/fonts")
+    parser.add_argument(
+        "--fonts-dir",
+        type=Path,
+        default=SHARED_FONT_DIR,
+        help="HarmonyOS Sans directory used by Pillow and libass; defaults to assets/fonts/HarmonyOS-Sans",
+    )
     parser.add_argument("--cover-url", default=DEFAULT_COVER_URL)
     parser.add_argument(
         "--allow-network",
         action="store_true",
-        help="allow an HTTPS public-address cover fetch when no embedded cover exists",
+        help="allow an explicit HTTPS cover URL when no embedded cover exists",
     )
     parser.add_argument("--ffmpeg", type=Path, help="override imageio-ffmpeg binary")
     parser.add_argument("--rotation-period", type=float, default=8.0, help="seconds per vinyl revolution")
+    parser.add_argument(
+        "--vinyl-motion",
+        choices=("static", "rotate"),
+        default="rotate",
+        help="keep the vinyl still or rotate it (default: rotate)",
+    )
     parser.add_argument("--artwork-only", action="store_true", help="build artwork and stop before ASS/render checks")
     parser.add_argument("--frame-probe-only", action="store_true", help="burn review frames after ASS/font gates, but do not render full videos")
     parser.add_argument("--force", action="store_true", help="replace an existing output video")
@@ -1662,7 +1757,7 @@ def main(argv: list[str] | None = None) -> int:
         args.manifest,
         require_five_tracks=not args.allow_partial_manifest,
     )
-    if args.rotation_period <= 0:
+    if args.vinyl_motion == "rotate" and args.rotation_period <= 0:
         print("ERROR: --rotation-period must be positive", file=sys.stderr)
         return 1
     if args.all_tracks and args.ass:
@@ -1674,7 +1769,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         deliverable_root = (REPO_ROOT / "deliverables" / args.slug).resolve()
     artwork_root = (args.artwork_dir or deliverable_root / "artwork").resolve()
-    fonts_dir = (args.fonts_dir or artwork_root / "fonts").resolve()
+    fonts_dir = args.fonts_dir.resolve()
     video_root = (deliverable_root / "video").resolve()
     args.timing_dir = (
         args.timing_dir or album.deliverable_dir / "timing"
@@ -1682,9 +1777,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.all_tracks:
         track_specs = [track_dict(track) for track in album.tracks]
     else:
-        if args.audio is None:
-            print("ERROR: --audio is required with --single-track", file=sys.stderr)
-            return 1
         track_specs = [{
             "audio": args.audio,
             "title": args.title,
@@ -1833,6 +1925,8 @@ def main(argv: list[str] | None = None) -> int:
                 font_family=font_info["family"],
                 subtitle_filter=capabilities["subtitle_filter_selected"],
                 probe_time=max(0.0, float(probe_time or 0.0) + 0.05),
+                vinyl_motion=args.vinyl_motion,
+                rotation_period=args.rotation_period,
             )
             if not frame_probe["ok"]:
                 raise RuntimeError(f"ASS frame probe failed for {track['title']}: {frame_probe}")
@@ -1874,6 +1968,7 @@ def main(argv: list[str] | None = None) -> int:
                 font_family=font_info["family"],
                 libass_font_probe=track["libass_font_probe"],
                 rotation_period=args.rotation_period,
+                vinyl_motion=args.vinyl_motion,
                 force=args.force,
             )
             results.append({

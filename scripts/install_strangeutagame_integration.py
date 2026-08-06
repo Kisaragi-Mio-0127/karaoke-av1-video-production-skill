@@ -7,15 +7,18 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from pathlib import PurePosixPath
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = SKILL_ROOT / "integration" / "strangeutagame"
+DEPENDENCY_MANIFEST = BUNDLE_ROOT / "dependency-manifest.json"
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 
@@ -72,18 +75,77 @@ def validate_target(target: Path) -> None:
         raise SystemExit(f"Refusing backup directory reparse point: {backup_parent}")
 
 
+def _manifest_python_paths() -> list[Path]:
+    """Return the manifest-authorized Python paths below integration/scripts."""
+
+    try:
+        manifest = json.loads(DEPENDENCY_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise SystemExit(f"Cannot read dependency manifest: {DEPENDENCY_MANIFEST}") from error
+
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for section in ("scripts", "shared_modules", "package_files"):
+        records = manifest.get(section, [])
+        if not isinstance(records, list):
+            raise SystemExit(f"Dependency manifest section is not a list: {section}")
+        for index, record in enumerate(records):
+            if not isinstance(record, dict):
+                raise SystemExit(f"Dependency manifest record is not an object: {section}[{index}]")
+            raw_path = record.get("path")
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                raise SystemExit(f"Dependency manifest path is missing: {section}[{index}]")
+            normalized = raw_path.replace("\\", "/")
+            relative = PurePosixPath(normalized)
+            if (
+                normalized != raw_path
+                or relative.is_absolute()
+                or not relative.parts
+                or any(part in {"", ".", ".."} for part in relative.parts)
+                or re.match(r"^[A-Za-z]:$", relative.parts[0])
+                or relative.suffix.casefold() != ".py"
+            ):
+                raise SystemExit(
+                    f"Unsafe manifest Python path in {section}[{index}]: {raw_path!r}"
+                )
+            key = relative.as_posix().casefold()
+            if key in seen:
+                raise SystemExit(f"Duplicate manifest Python path: {raw_path}")
+            seen.add(key)
+            paths.append(Path(*relative.parts))
+
+    if not paths:
+        raise SystemExit("Dependency manifest authorizes no Python integration files")
+    return sorted(paths, key=lambda path: path.as_posix().casefold())
+
+
+def _assert_regular_bundle_source(source: Path, relative: Path) -> None:
+    """Reject missing files and reparse points in a manifest-authorized path."""
+
+    current = BUNDLE_ROOT / "scripts"
+    for part in relative.parts:
+        current = current / part
+        if _is_reparse_point(current):
+            raise SystemExit(f"Bundled source is a symlink or reparse point: {current}")
+    if not source.is_file():
+        raise SystemExit(f"Bundled source is not a regular file: {source}")
+
+
 def _mapping(target: Path) -> list[tuple[Path, Path]]:
-    sources = sorted((BUNDLE_ROOT / "scripts").glob("*.py"))
-    sources += sorted((BUNDLE_ROOT / "requirements").glob("*"))
     result: list[tuple[Path, Path]] = []
-    for source in sources:
+    scripts_root = BUNDLE_ROOT / "scripts"
+    for relative in _manifest_python_paths():
+        source = scripts_root / relative
+        _assert_regular_bundle_source(source, relative)
+        destination = target / "scripts" / relative
+        _assert_safe_destination(target, destination)
+        result.append((source, destination))
+
+    for source in sorted((BUNDLE_ROOT / "requirements").glob("*")):
         if not source.is_file() or _is_reparse_point(source):
             raise SystemExit(f"Bundled source is not a regular file: {source}")
-        if source.parent.name == "scripts":
-            destination = target / "scripts" / source.name
-        else:
-            suffix = source.name.removeprefix("requirements-karaoke")
-            destination = target / f"requirements-karaoke.skill{suffix}"
+        suffix = source.name.removeprefix("requirements-karaoke")
+        destination = target / f"requirements-karaoke.skill{suffix}"
         _assert_safe_destination(target, destination)
         result.append((source, destination))
     return result

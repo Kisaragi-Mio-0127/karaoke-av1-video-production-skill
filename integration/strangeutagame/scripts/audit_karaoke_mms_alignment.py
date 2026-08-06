@@ -11,7 +11,7 @@ Typical invocations from the repository root are::
 
     uv run --no-sync python scripts/audit_karaoke_mms_alignment.py
     uv run --no-sync python scripts/audit_karaoke_mms_alignment.py \
-        --song-id 34696376 34696377 34696378
+        --song-id SONG_ID [SONG_ID ...]
 
 With no ``--song-id`` the complete manifest is audited.  The report defaults
 to ``deliverables/<album>/sources/mms_alignment_audit.json`` and keeps
@@ -37,7 +37,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 try:
-    from scripts import karaoke_timing
     from scripts.karaoke_album import (
         DEFAULT_MANIFEST_PATH,
         AlbumManifest,
@@ -52,6 +51,8 @@ try:
         mms_granularity,
         normalize_language,
     )
+
+    from scripts import karaoke_timing
 except ImportError:  # pragma: no cover - direct execution fallback
     import karaoke_timing  # type: ignore[no-redef]
     from karaoke_album import (  # type: ignore[no-redef]
@@ -283,6 +284,17 @@ def allocate_chunk(
     return assignments
 
 
+def _filter_mms_unit(
+    value: str,
+    allowed_units: Iterable[str] | None = None,
+) -> str:
+    """Normalize one romanized mora to the MMS alphabet."""
+
+    allowed = set(allowed_units or _DEFAULT_ALLOWED_UNITS)
+    unit = "".join(character for character in str(value).lower() if character in allowed)
+    return unit or "x"
+
+
 def line_units(
     text: str,
     helper: Any,
@@ -299,7 +311,7 @@ def line_units(
     that module is automatically reused by this production script.
     """
 
-    normalize_language(language)
+    language = normalize_language(language)
 
     overrides = (
         reading_overrides
@@ -421,7 +433,7 @@ def inherit_display_group_candidates(
     three display glyphs must sweep as one lexical unit.
     """
 
-    language = normalize_language(language)
+    normalize_language(language)
     candidates = inherit_small_kana_candidates(text, units)
     index = 0
     while index < len(text):
@@ -626,8 +638,38 @@ class MmsRuntime:
     model_path: Path
 
 
-def load_mms_runtime(project_root: Path = ROOT) -> MmsRuntime:
-    """Configure the project cache and load the MMS model exactly once."""
+def _validate_mms_model_access(
+    model_path: Path | None,
+    *,
+    allow_network: bool,
+) -> Path | None:
+    """Require an existing checkpoint or explicit download authorization."""
+
+    if model_path is not None:
+        resolved = Path(model_path).expanduser().resolve()
+        if not resolved.is_file():
+            raise FileNotFoundError(f"MMS model checkpoint does not exist: {resolved}")
+        return resolved
+    if not allow_network:
+        raise RuntimeError(
+            "MMS model loading is offline by default; provide --model-path "
+            "or authorize downloads with --allow-network"
+        )
+    return None
+
+
+def load_mms_runtime(
+    project_root: Path = ROOT,
+    *,
+    model_path: Path | None = None,
+    allow_network: bool = False,
+) -> MmsRuntime:
+    """Configure the project cache and load one explicitly authorized model."""
+
+    local_model_path = _validate_mms_model_access(
+        model_path,
+        allow_network=allow_network,
+    )
 
     torch_home = configure_torch_home(project_root)
     import torch
@@ -635,8 +677,15 @@ def load_mms_runtime(project_root: Path = ROOT) -> MmsRuntime:
     from torchaudio.pipelines import MMS_FA
 
     torch.hub.set_dir(str(torch_home / "hub"))
-    model = MMS_FA.get_model().eval()
-    model_path = Path(torch.hub.get_dir()) / "checkpoints" / "model.pt"
+    checkpoint_dir = Path(torch.hub.get_dir()) / "checkpoints"
+    download_options = {"model_dir": str(checkpoint_dir)}
+    if local_model_path is not None:
+        download_options = {
+            "model_dir": str(local_model_path.parent),
+            "file_name": local_model_path.name,
+        }
+    model = MMS_FA.get_model(dl_kwargs=download_options).eval()
+    resolved_model_path = local_model_path or checkpoint_dir / "model.pt"
     return MmsRuntime(
         torch=torch,
         torchaudio=torchaudio,
@@ -645,7 +694,7 @@ def load_mms_runtime(project_root: Path = ROOT) -> MmsRuntime:
         aligner=MMS_FA.get_aligner(),
         allowed_units=frozenset(str(unit) for unit in MMS_FA.get_dict()),
         sample_rate=int(MMS_FA.sample_rate),
-        model_path=model_path,
+        model_path=resolved_model_path,
     )
 
 
@@ -987,6 +1036,8 @@ def run_audit(
     vocals_root: Path | None = None,
     reading_overrides: Mapping[str, str] | None = None,
     allow_partial_manifest: bool = False,
+    model_path: Path | None = None,
+    allow_network: bool = False,
 ) -> dict[str, Any]:
     """Load the manifest, audit selected tracks, and write the report."""
 
@@ -996,7 +1047,11 @@ def run_audit(
     )
     project_root = album.project_root
     tracks = select_tracks(album.tracks, song_ids)
-    runtime = load_mms_runtime(project_root)
+    runtime = load_mms_runtime(
+        project_root,
+        model_path=model_path,
+        allow_network=allow_network,
+    )
     resolved_vocals_root = (
         Path(vocals_root).expanduser().resolve()
         if vocals_root is not None
@@ -1130,6 +1185,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="optional JSON object merged over karaoke_timing contextual readings",
     )
+    parser.add_argument(
+        "--model-path",
+        type=Path,
+        help="existing local MMS checkpoint; validated before model loading",
+    )
+    parser.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="allow torchaudio to download MMS_FA when --model-path is absent",
+    )
     return parser
 
 
@@ -1161,6 +1226,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         vocals_root=vocals_root,
         reading_overrides=overrides,
         allow_partial_manifest=args.allow_partial_manifest,
+        model_path=args.model_path,
+        allow_network=args.allow_network,
     )
     return 0
 

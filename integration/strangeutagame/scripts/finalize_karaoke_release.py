@@ -26,7 +26,8 @@ except ImportError:  # pragma: no cover - direct script execution
     )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ROOT = REPO_ROOT / "deliverables" / "karaoke"
+DEFAULT_ALBUM = load_album_manifest(DEFAULT_MANIFEST_PATH)
+DEFAULT_ROOT = DEFAULT_ALBUM.deliverable_dir
 PROFILES = ("standard", "wide")
 
 
@@ -46,7 +47,7 @@ def track_record(track: Any) -> dict[str, Any]:
     }
 
 
-TRACKS: tuple[dict[str, Any], ...] = ()
+TRACKS = tuple(track_record(track) for track in DEFAULT_ALBUM.tracks)
 
 
 def sha256_file(path: Path) -> str:

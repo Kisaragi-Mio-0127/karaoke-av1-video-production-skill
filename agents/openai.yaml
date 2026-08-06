@@ -1,4 +1,4 @@
 interface:
   display_name: "Karaoke AV1 Video Production"
   short_description: "Validate editable karaoke projects and AV1 4:2:0 releases."
-  default_prompt: "Use $karaoke-av1-video-production to review editable-project parity, ruby, timing, actual audio loading, and AV1 4:2:0 release evidence for authorized karaoke media."
+  default_prompt: "Use $karaoke-av1-video-production for the explicit Japanese/general route, editable-project parity, rotating-vinyl and no-right-panel visual provenance, optional non-blocking Japanese pronunciation validation, and MP4-first AV1 4:2:0 release evidence for authorized karaoke media."

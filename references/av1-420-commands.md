@@ -49,7 +49,7 @@ Use this default for 1920x1080 30 fps SDR delivery when the local NVIDIA encoder
   $temporaryMp4
 ```
 
-Verify CQ, multipass, lookahead, AQ, GOP, dimensions, frame rate, pixel format, and BT.709 metadata with `ffprobe`. A separate lossless-audio MKV is optional when the selected source is genuinely lossless; the default compatibility MP4 remains AAC-LC 320k. For an explicitly requested 10-bit lane, use `p010le`/`yuv420p10le` and record that profile separately.
+Verify CQ, multipass, lookahead, AQ, GOP, dimensions, frame rate, pixel format, and BT.709 metadata with `ffprobe`. The default compatibility output is MP4 with AAC-LC 320k and no MKV. A lossless-audio MKV is strictly opt-in through `--lossless-companion` or an underlying explicit `--lossless-output`, and is accepted only for a probed FLAC or PCM WAV source; reject MP3/AAC. For an explicitly requested 10-bit lane, use `p010le`/`yuv420p10le` and record that profile separately.
 
 ## libaom 10-Bit 4:2:0
 
@@ -82,7 +82,7 @@ Set the real subtitle language and confirm the target player supports ASS render
 
 ## Paired Lossless-Audio Companion
 
-Keep the MP4 as the default delivery. After it passes its preliminary media gate, copy its video stream into MKV and take audio directly from the original lossless FLAC/PCM-WAV source over the exact same timeline:
+Keep the MP4 as the default delivery. Only after an explicit lossless-companion opt-in and after the MP4 passes its preliminary media gate, copy its video stream into MKV and take audio directly from the original lossless FLAC/PCM-WAV source over the exact same timeline:
 
 ```powershell
 & $ffmpeg -nostdin -n -i $temporaryMp4 -i $losslessSource `
@@ -91,7 +91,7 @@ Keep the MP4 as the default delivery. After it passes its preliminary media gate
   $temporaryLosslessMkv
 ```
 
-Do not add `-shortest`, `-ar`, or `-ac`. Reject MP3/AAC and probe the true source codec instead of trusting the extension. Before paired promotion, require matching encoded video-stream hashes and require decoded MKV PCM to match the equivalently trimmed source PCM.
+Do not add `-shortest`, `-ar`, or `-ac`. Reject MP3/AAC and probe the true source codec instead of trusting the extension. If the opt-in is absent, do not create or expect a lossless output. Before paired promotion, require matching encoded video-stream hashes and require decoded MKV PCM to match the equivalently trimmed source PCM.
 
 ## Timeline Decisions
 

@@ -21,7 +21,7 @@
 - Run `scripts/pitch_shift_audio.py` before timing and rendering when a key change is requested.
 - Use signed semitones, Rubber Band R3 Finer (`-3`), formant preservation (`-F`) by default for vocal material, and tempo ratio 1.0.
 - Require the probed source codec to be FLAC or PCM; reject MP3, AAC, and other lossy inputs so a lossy source cannot be relabeled as lossless. Decode to float WAV, retry with additional headroom on clipping, encode a verified FLAC/WAV, and publish the audio plus JSON report together.
-- Use the verified shifted FLAC as the selected post-mix source for alignment, previews, MP4 AAC-LC 320 kb/s, and the MKV FLAC companion. Never make FLAC from the MP4 AAC stream.
+- Use the verified shifted FLAC as the selected post-mix source for alignment, previews, and default MP4 AAC-LC 320 kb/s. Add an MKV FLAC companion only after explicit `--lossless-companion`/`--lossless-output` opt-in and a FLAC/PCM source probe; never make FLAC from the MP4 AAC stream, and reject MP3/AAC requests.
 
 ## 中文说明
 

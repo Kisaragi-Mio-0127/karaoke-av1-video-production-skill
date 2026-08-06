@@ -1,8 +1,9 @@
 """Shared album manifest loading for the karaoke build scripts.
 
-The karaoke pipeline has one source of track metadata: an explicit album
-manifest. Set ``KARAOKE_ALBUM_MANIFEST`` or pass ``--manifest`` to a command.
-No real album, lyric, audio, hash, font, or deliverable path is bundled here.
+The karaoke pipeline has one source of track metadata: the album manifest under
+``karaoke_sources``.  This module owns the small amount of path and validation
+logic needed by the timing, media and release stages so those stages cannot
+silently drift back to a hand-maintained subset of tracks.
 """
 
 from __future__ import annotations
@@ -25,12 +26,7 @@ except ImportError:  # pragma: no cover - direct script execution
     )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MANIFEST_PATH = Path(
-    os.environ.get(
-        "KARAOKE_ALBUM_MANIFEST",
-        str(PROJECT_ROOT / "karaoke_sources" / "album.json"),
-    )
-).expanduser()
+DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "karaoke_sources" / "album.json"
 EXPECTED_TRACK_COUNT = 5
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _WINDOWS_DELIVERY_TRANSLATION = str.maketrans(
@@ -338,7 +334,12 @@ def project_relative(path: Path | str, project_root: Path | str = PROJECT_ROOT) 
 
     resolved = Path(path).expanduser().resolve()
     root = Path(project_root).expanduser().resolve()
-    return Path(os.path.relpath(resolved, root)).as_posix()
+    try:
+        return Path(os.path.relpath(resolved, root)).as_posix()
+    except ValueError:
+        # Windows cannot form a relative path across drive letters.  Preserve
+        # an unambiguous stable path instead of aborting report generation.
+        return resolved.as_posix()
 
 
 def sha256_file(path: Path) -> str:

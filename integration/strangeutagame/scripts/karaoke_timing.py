@@ -12,8 +12,8 @@ The script is intentionally self-contained so a future run can use the frozen
 
     uv run --no-sync python scripts\\karaoke_timing.py
 
-Use ``--refresh-source`` to fetch NetEase again, or ``--alignment
-deterministic`` to rebuild without the optional alignment process.
+Use ``--refresh-source --allow-network`` to fetch NetEase again, or
+``--alignment deterministic`` to rebuild without the optional alignment process.
 """
 
 from __future__ import annotations
@@ -112,17 +112,20 @@ from strange_uta_game.backend.infrastructure.persistence.sug_io import (  # noqa
     SugProjectParser,
 )
 
-DEFAULT_DELIVERABLE_DIR = ROOT / "deliverables" / "karaoke"
-SOURCE_PATH = DEFAULT_DELIVERABLE_DIR / "sources" / "netease_lyrics.json"
-REPORT_PATH = DEFAULT_DELIVERABLE_DIR / "validation" / "timing_report.json"
-TIMING_DIR = DEFAULT_DELIVERABLE_DIR / "timing"
+DEFAULT_ALBUM_MANIFEST = load_album_manifest(DEFAULT_MANIFEST_PATH)
+SOURCE_PATH = DEFAULT_ALBUM_MANIFEST.deliverable_dir / "sources" / "netease_lyrics.json"
+REPORT_PATH = (
+    DEFAULT_ALBUM_MANIFEST.deliverable_dir / "validation" / "timing_report.json"
+)
+TIMING_DIR = DEFAULT_ALBUM_MANIFEST.deliverable_dir / "timing"
 DEFAULT_MODEL_CACHE = ROOT / ".cache" / "whisper"
 DEFAULT_VOCAL_STEMS_DIR = ROOT / ".cache" / "msst-vocals"
 DEFAULT_TIMING_OVERRIDES_PATH = SOURCE_PATH.parent / "timing_overrides.json"
-DEFAULT_FONT_FILE = DEFAULT_DELIVERABLE_DIR / "artwork" / "fonts" / "CJK-Regular.ttf"
+SHARED_FONT_DIR = ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
+DEFAULT_FONT_FILE = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Regular.ttf"
 NETEASE_ENDPOINT = "https://music.163.com/api/song/lyric"
 SUG_VERSION = "0.3.0"
-DEFAULT_FONT_NAME = "CJK Karaoke Font"
+DEFAULT_FONT_NAME = "HarmonyOS Sans SC"
 VOICE_ROLES = ("opera", "harmony", "secondary")
 
 # These are evidence-contract labels, not claims that either forced aligner is
@@ -142,8 +145,8 @@ ALIGNMENT_EVIDENCE_CONTRACT = {
         "independent_recognition": False,
         "units": {"ja": "mora"},
         "description": (
-            "MMS_FA aligns supplied Japanese mora tokens; it is not independent "
-            "phoneme recognition."
+            "MMS_FA aligns supplied mora tokens; it is not "
+            "independent phoneme recognition."
         ),
     },
     "visual_interpolation": {
@@ -223,10 +226,7 @@ def song_specs_from_manifest(
     return tuple(song_spec_from_track(track, album) for track in album.tracks)
 
 
-# Do not read private project data at import time. Commands load the explicitly
-# selected manifest in ``main``; this empty tuple only preserves old helper
-# defaults for callers that construct their own specs.
-SONGS: tuple[SongSpec, ...] = ()
+SONGS: tuple[SongSpec, ...] = song_specs_from_manifest()
 
 
 _LRC_TAG_RE = re.compile(r"\[(\d+):(\d{1,2})(?:[.:](\d{1,4}))?\]")
@@ -239,34 +239,16 @@ _END_MARKER_RE = re.compile(r"【\s*(?:おわり|完)\s*】", re.IGNORECASE)
 _SMALL_KANA = set("ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ")
 _MORA_JOINING_SMALL_KANA = _SMALL_KANA - {"っ", "ッ"}
 _EXTRA_PUNCTUATION = set('。、，．！？!?・:;；：—…~～（）()[]【】「」『』♪、"')
-
-
-def _load_timing_reading_overrides() -> dict[str, str]:
-    """Load private contextual readings from JSON or a JSON file path."""
-
-    raw_value = os.environ.get("KARAOKE_TIMING_READING_OVERRIDES", "").strip()
-    if not raw_value:
-        return {}
-    try:
-        document = json.loads(raw_value)
-    except json.JSONDecodeError:
-        try:
-            document = json.loads(Path(raw_value).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(
-                "KARAOKE_TIMING_READING_OVERRIDES must contain JSON or name a UTF-8 JSON file"
-            ) from error
-    if isinstance(document, dict) and set(document) == {"reading_overrides"}:
-        document = document["reading_overrides"]
-    if not isinstance(document, dict) or not all(
-        isinstance(surface, str) and isinstance(reading, str)
-        for surface, reading in document.items()
-    ):
-        raise ValueError("timing reading overrides must map strings to strings")
-    return dict(document)
-
-
-_CONTEXTUAL_READING_OVERRIDES = _load_timing_reading_overrides()
+_CONTEXTUAL_READING_OVERRIDES = {
+    "100": "ひゃく",
+    "愛し": "あいし",
+    "今年": "ことし",
+    "今日は": "きょうは",
+    "君": "きみ",
+    "佇む": "たたずむ",
+    "日": "ひ",
+    "後に": "あとに",
+}
 _PHRASE_GAP_MIN_EXCESS_MS = 600
 _PHRASE_GAP_MIN_RATIO = 1.6
 _LOCAL_MORA_MIN_MS = 180
@@ -448,6 +430,8 @@ def load_or_fetch_source(
     path: Path,
     refresh: bool,
     specs: Sequence[SongSpec] = SONGS,
+    *,
+    allow_network: bool = False,
 ) -> tuple[dict[str, Any], str]:
     if path.exists() and not refresh:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -458,10 +442,11 @@ def load_or_fetch_source(
                 raise ValueError(f"frozen lyric source misses song {spec.song_id}")
         return data, "frozen-cache"
 
-    if not refresh:
+    if not allow_network:
+        action = "refresh" if refresh else "create"
         raise FileNotFoundError(
-            f"frozen lyric source does not exist: {path}; provide an authorized "
-            "source file or explicitly pass --refresh-source to allow network access"
+            f"cannot {action} lyric source without network opt-in: {path}; "
+            "supply a complete frozen source or pass --allow-network"
         )
 
     song_records: dict[str, Any] = {}
@@ -685,11 +670,11 @@ def contextual_mora_weights(
     """Estimate per-character mora weights from whole-line readings.
 
     Per-character pykakasi lookup misreads context-sensitive kanji such as
-    context-sensitive kanji inside an inflected word. Whole-line conversion lets phrase-gap repair reserve a
+    ``佇`` in ``佇む``.  Whole-line conversion lets phrase-gap repair reserve a
     realistic amount of sung time for the first token after a visible space.
     """
 
-    language = normalize_language(language)
+    normalize_language(language)
     weights = {
         index: helper.weight(char)
         for index, char in enumerate(text)
@@ -719,10 +704,15 @@ def contextual_mora_weights(
         ]
         if not indices:
             continue
-        reading = _CONTEXTUAL_READING_OVERRIDES.get(
-            original,
-            str(item.get("hira") or original),
-        )
+        if original == "降り":
+            # Distinguish 駅で降りた (おりた) from weather uses such as
+            # 雨が降りそう (ふりそう) before assigning mora weights.
+            reading = "おり" if text[cursor : cursor + 1] == "た" else "ふり"
+        else:
+            reading = _CONTEXTUAL_READING_OVERRIDES.get(
+                original,
+                str(item.get("hira") or original),
+            )
         total_moras = max(1.0, float(len(split_moras(reading))))
         kana_indices = [index for index in indices if _is_kana(text[index])]
         fixed_kana = sum(max(0.0, weights.get(index, 1.0)) for index in kana_indices)
@@ -747,16 +737,27 @@ def _clamp_ms(value: float, start_ms: int, end_ms: int) -> int:
     return min(end_ms, max(start_ms, int(round(value))))
 
 
+def _language_timing_groups(
+    text: str,
+    timed_indices: Sequence[int],
+    language: str,
+) -> list[list[int]]:
+    """Return one Japanese fallback timing group per timed character."""
+
+    normalize_language(language)
+    return [[index] for index in timed_indices]
+
+
 def _fallback_language_onsets(
     line: LyricLine,
     text: str,
     helper: ReadingHelper,
     language: str,
 ) -> dict[int, int]:
-    normalize_language(language)
     timed_indices = [
         index for index, char in enumerate(text) if is_timed_character(char)
     ]
+    _language_timing_groups(text, timed_indices, language)
     weights = contextual_mora_weights(text, helper, language)
     return weighted_onsets(line.start_ms, line.end_ms, timed_indices, weights)
 
@@ -1698,6 +1699,10 @@ def build_project(
             )
             character = Character(
                 char=char,
+                # Ruby is filled once, after timing is canonicalized and just
+                # before SUG serialization.  Keeping construction ruby-free
+                # prevents a candidate generator from overwriting existing
+                # editable facts during rebuilds.
                 ruby=None,
                 check_count=1 if timed else 0,
                 is_line_end=index == len(line.text) - 1,
@@ -2989,6 +2994,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source", type=Path, default=None)
     parser.add_argument("--refresh-source", action="store_true")
     parser.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="allow an explicit NetEase request when creating or refreshing source data",
+    )
+    parser.add_argument(
         "--alignment",
         choices=("auto", "forced", "deterministic"),
         default="auto",
@@ -3058,7 +3068,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.font_file = args.font_file or (
         album.deliverable_dir / "artwork" / "fonts" / "HarmonyOS_Sans_SC_Regular.ttf"
     )
-    source, source_mode = load_or_fetch_source(args.source, args.refresh_source, specs)
+    source, source_mode = load_or_fetch_source(
+        args.source,
+        args.refresh_source,
+        specs,
+        allow_network=args.allow_network,
+    )
     overrides_document = (
         json.loads(args.timing_overrides.read_text(encoding="utf-8"))
         if args.timing_overrides.is_file()

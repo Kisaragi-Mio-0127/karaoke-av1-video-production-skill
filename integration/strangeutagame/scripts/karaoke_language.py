@@ -1,30 +1,21 @@
-"""Shared language policy for the reproducible karaoke production chain.
+"""Japanese language policy for the public karaoke production chain.
 
-The album manifest stores short language codes so every downstream stage can
-carry one identity from source lyrics through stable-ts, SUG, MMS and reports.
-The default is deliberately Japanese for compatibility with older manifests.
+The bundled integration intentionally exposes only its validated Japanese
+profile.  Additional languages belong in separately distributed adapters and
+must not be implemented in this shared module.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 DEFAULT_LANGUAGE = "ja"
-BUNDLED_LANGUAGE_PROFILES = frozenset({"ja"})
-# Compatibility name used by older integration scripts.  This is the set of
-# profiles bundled here, not a claim that the workflow itself is language-bound.
-SUPPORTED_LANGUAGES = BUNDLED_LANGUAGE_PROFILES
+SUPPORTED_LANGUAGES = frozenset({DEFAULT_LANGUAGE})
 
-LANGUAGE_NAMES = {"ja": "Japanese"}
-
-LANGUAGE_ALIASES = {
-    "ja": "ja",
-    "jp": "ja",
-    "jpn": "ja",
-    "japanese": "ja",
-    "ja-jp": "ja",
-    "ja_jp": "ja",
-}
+_JAPANESE_ALIASES = frozenset(
+    {"ja", "jp", "jpn", "japanese", "ja-jp"}
+)
 
 
 def normalize_language(
@@ -32,61 +23,75 @@ def normalize_language(
     *,
     default: str = DEFAULT_LANGUAGE,
 ) -> str:
-    """Return a bundled language-profile code, defaulting to Japanese."""
+    """Return ``ja`` or fail closed for an unbundled language adapter."""
 
     fallback = str(default or DEFAULT_LANGUAGE).strip().lower().replace("_", "-")
-    fallback = LANGUAGE_ALIASES.get(fallback, fallback)
-    if fallback not in SUPPORTED_LANGUAGES:
-        raise ValueError(f"unsupported default karaoke language: {default!r}")
-    if value is None or (isinstance(value, str) and not value.strip()):
-        return fallback
-    raw = str(value).strip().lower().replace("_", "-")
-    language = LANGUAGE_ALIASES.get(raw, raw)
-    if language not in SUPPORTED_LANGUAGES:
+    if fallback not in _JAPANESE_ALIASES:
         raise ValueError(
-            f"no validated bundled language profile for {value!r}; "
-            "the default profile is 'ja' and other languages require a "
-            "separately validated project adapter"
+            f"unsupported default karaoke language: {default!r}; "
+            "install a separately validated project adapter"
         )
-    return language
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return DEFAULT_LANGUAGE
+    raw = str(value).strip().lower().replace("_", "-")
+    if raw not in _JAPANESE_ALIASES:
+        raise ValueError(
+            f"unsupported karaoke language {value!r}; "
+            "the public integration bundles only Japanese"
+        )
+    return DEFAULT_LANGUAGE
 
 
 def stable_ts_language(language: Any = DEFAULT_LANGUAGE) -> str:
-    """Return the human-readable language name expected by stable-ts."""
+    """Return the validated stable-ts language name."""
 
-    return LANGUAGE_NAMES[normalize_language(language)]
+    normalize_language(language)
+    return "Japanese"
 
 
 def uses_ruby(language: Any = DEFAULT_LANGUAGE) -> bool:
-    """Whether the production chain may generate Japanese contextual ruby."""
+    """Return whether the validated public profile uses reviewed ruby."""
 
-    return normalize_language(language) == "ja"
+    normalize_language(language)
+    return True
 
 
 def timing_granularity(language: Any = DEFAULT_LANGUAGE) -> str:
-    """Return the acoustic unit defined by the selected bundled profile."""
+    """Return the validated fallback timing unit."""
 
     normalize_language(language)
     return "mora-character"
 
 
 def mms_granularity(language: Any = DEFAULT_LANGUAGE) -> str:
-    """Return the MMS source-unit policy defined by the selected profile."""
+    """Return the validated MMS alignment unit."""
 
     normalize_language(language)
     return "mora"
 
 
 def language_identity(language: Any = DEFAULT_LANGUAGE) -> dict[str, Any]:
-    """Return a stable report-shaped identity shared by all pipeline stages."""
+    """Return the stable Japanese identity shared by pipeline reports."""
 
     code = normalize_language(language)
     return {
         "code": code,
-        "name": LANGUAGE_NAMES[code],
-        "stable_ts_language": LANGUAGE_NAMES[code],
+        "name": "Japanese",
+        "stable_ts_language": "Japanese",
         "timing_granularity": timing_granularity(code),
         "mms_granularity": mms_granularity(code),
-        "ruby_enabled": uses_ruby(code),
+        "ruby_enabled": True,
         "ruby_policy": "japanese-contextual-only",
     }
+
+
+def iter_non_space_characters(texts: Iterable[str]) -> Iterator[str]:
+    """Yield unique visual characters in stable first-seen order."""
+
+    seen: set[str] = set()
+    for text in texts:
+        for character in str(text):
+            if character.isspace() or character in seen:
+                continue
+            seen.add(character)
+            yield character

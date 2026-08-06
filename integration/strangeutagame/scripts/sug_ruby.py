@@ -201,7 +201,7 @@ def candidate_ruby_tokens(
         from pykakasi import kakasi
 
         converted = kakasi().convert(text)
-    except Exception:  # noqa: BLE001 - optional candidates fail closed
+    except Exception:
         return []
     result: list[RubyToken] = []
     cursor = 0

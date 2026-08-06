@@ -126,8 +126,10 @@ class KaraokeReviewPreviewTests(unittest.TestCase):
         self.assertIn("_require_reviewed_canonical_ruby", source)
         self.assertIn("renderer requires canonical SUG ruby tokens; inference is disabled", source)
         self.assertIn('"ruby_source": "canonical-sug"', source)
-        self.assertNotIn("wide-zh", source)
-        self.assertNotIn("wide-en", source)
+        self.assertNotIn("scripts.karaoke_zh_en", source)
+        self.assertNotIn('"wide-zh"', source)
+        self.assertNotIn('"wide-en"', source)
+        self.assertIn("PRONUNCIATION_VALIDATION_MODES", source)
 
     def test_renderer_imports_when_pykakasi_is_unavailable(self) -> None:
         renderer = load_renderer_without_optional_ruby()

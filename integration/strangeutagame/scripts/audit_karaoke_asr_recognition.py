@@ -35,6 +35,7 @@ from scripts.karaoke_album import (  # noqa: E402
 )
 from scripts.karaoke_language import (  # noqa: E402
     DEFAULT_LANGUAGE,
+    SUPPORTED_LANGUAGES,
     language_identity,
     normalize_language,
 )
@@ -109,7 +110,7 @@ def _confidence(item: Any, fallback: Any = None) -> float | None:
 def normalize_token_text(text: Any, language: str = DEFAULT_LANGUAGE) -> str:
     """Normalize comparable text without changing the frozen lyric source."""
 
-    normalize_language(language)
+    language = normalize_language(language)
     value = unicodedata.normalize("NFKC", str(text or "")).casefold()
     return "".join(char for char in value if not char.isspace() and char.isalnum())
 
@@ -585,6 +586,27 @@ def _resolve_model_path(
     return candidate if candidate.is_file() else None
 
 
+def _validate_model_access(
+    model_path: Path | None,
+    *,
+    allow_network: bool,
+    model_loading_required: bool,
+) -> Path | None:
+    """Require an existing checkpoint or explicit download authorization."""
+
+    if model_path is not None:
+        resolved = Path(model_path).expanduser().resolve()
+        if not resolved.is_file():
+            raise FileNotFoundError(f"ASR model checkpoint does not exist: {resolved}")
+        return resolved
+    if model_loading_required and not allow_network:
+        raise RuntimeError(
+            "ASR model loading is offline by default; provide --model-path "
+            "or authorize downloads with --allow-network"
+        )
+    return None
+
+
 def _recognition_cache_key(
     *,
     audio_hash: str,
@@ -631,6 +653,7 @@ def run_recognition_audit(
     audio_loader: Callable[[Path], tuple[Any, int]] | None = None,
     transcribe_fn: Callable[[Any, int, str, str, Path | None], Any] | None = None,
     model_loader: Callable[..., Any] | None = None,
+    allow_network: bool = False,
 ) -> dict[str, Any]:
     """Run or load one cached independent recognition report."""
 
@@ -644,6 +667,11 @@ def run_recognition_audit(
     audio_path = Path(audio_path).expanduser().resolve()
     if not audio_path.is_file():
         raise FileNotFoundError(audio_path)
+    model_path = _validate_model_access(
+        model_path,
+        allow_network=allow_network,
+        model_loading_required=transcribe_fn is None,
+    )
     audio_hash = sha256_file(audio_path)
     lyric_hash = _lyrics_hash(lyric_lines, language)
     inspect_model_artifact = (
@@ -896,6 +924,7 @@ def run_manifest_audit(
     force: bool = False,
     window_tolerance_ms: int = DEFAULT_WINDOW_TOLERANCE_MS,
     allow_partial_manifest: bool = False,
+    allow_network: bool = False,
 ) -> dict[str, Any]:
     album = load_album_manifest(
         manifest_path, require_five_tracks=not allow_partial_manifest
@@ -914,7 +943,7 @@ def run_manifest_audit(
     if len(selected_languages) != 1:
         raise ValueError(
             "one manifest ASR run must select tracks in exactly one language; "
-            "split different language profiles into separate runs"
+            "use --song-id to split tracks into separate runs"
         )
     selected_language = next(iter(selected_languages))
     resolved_vocals_root = (
@@ -943,6 +972,7 @@ def run_manifest_audit(
             window_tolerance_ms=window_tolerance_ms,
             song_id=track.song_id,
             title=track.title,
+            allow_network=allow_network,
         )
         song_reports.extend(single["songs"])
         recognition_audits.append(
@@ -1067,14 +1097,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lyrics", type=Path, help="direct frozen LRC/JSON input")
     parser.add_argument(
         "--language",
-        choices=(DEFAULT_LANGUAGE,),
-        default=DEFAULT_LANGUAGE,
-        help="bundled language profile for direct mode (default: ja)",
+        choices=tuple(sorted(SUPPORTED_LANGUAGES)),
+        default=None,
+        help="bundled language profile for direct audio/lyrics mode",
     )
     parser.add_argument("--audio-kind", choices=tuple(sorted(SUPPORTED_AUDIO_KINDS)), default="mix")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--model-cache", type=Path)
     parser.add_argument("--model-path", type=Path)
+    parser.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="allow stable-whisper to download a named model when --model-path is absent",
+    )
     parser.add_argument("--vocals-root", type=Path)
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument(
@@ -1099,11 +1134,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if bool(args.audio) != bool(args.lyrics):
         raise SystemExit("--audio and --lyrics must be supplied together")
     if args.audio is not None:
-        language = normalize_language(args.language)
+        if args.language not in SUPPORTED_LANGUAGES:
+            raise SystemExit("--language must select the bundled profile with direct audio")
         report = run_recognition_audit(
             audio_path=args.audio,
             lyric_lines=_load_direct_lines(args.lyrics),
-            language=language,
+            language=args.language,
             audio_kind=args.audio_kind,
             model_name=args.model,
             model_cache=args.model_cache,
@@ -1112,6 +1148,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_path=args.output,
             force=args.force,
             window_tolerance_ms=args.window_tolerance_ms,
+            allow_network=args.allow_network,
         )
     else:
         report = run_manifest_audit(
@@ -1128,6 +1165,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             force=args.force,
             window_tolerance_ms=args.window_tolerance_ms,
             allow_partial_manifest=args.allow_partial_manifest,
+            allow_network=args.allow_network,
         )
     disposition = str(report.get("disposition") or "unresolved")
     structural_ok = report.get("structural_gate_ok", report.get("gate_ok")) is True

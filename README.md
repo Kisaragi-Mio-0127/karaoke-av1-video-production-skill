@@ -6,11 +6,14 @@ A Codex skill and a sanitized StrangeUtaGame integration for producing,
 reviewing, rendering, validating, and packaging karaoke videos with editable
 timing provenance and AV1 4:2:0 release checks.
 
-The bundled default language profile is Japanese (`ja`); other languages can
-be connected through separately validated adapters.
+The generic profile remains Japanese (`ja`) for legacy manifests. Use
+`run_karaoke_japanese_workflow.py` for the bundled Japanese route. Any other
+language requires a separately validated adapter; never silently fall back to
+another language profile or workflow.
 
 Start with [SKILL.md](SKILL.md); the [中文 README](README.zh-CN.md) and the
-English/Chinese reference pairs below are maintained together.
+bilingual reference pairs below are maintained together as documentation
+translations.
 
 ## Included
 
@@ -18,27 +21,51 @@ English/Chinese reference pairs below are maintained together.
 - Semantic phrase segmentation, ruby word-boundary QA, editable SUG parity,
   MMS and independent-ASR evidence, and lyric visual-fit gates.
 - Wide-layout `vinyl` and `spectrum` templates; choose exactly one per render.
+- The current wide composition follows `wide-layout-v5/no-right-panels`: a rotating
+  vinyl card at `(40,30,340,402)`, footer bottom padding `12`, and the lower
+  subtitle panel starting at `y=576`. Both the extra outer right-panel overlay
+  and the compact dark backplate behind/below the record are absent; the album
+  card, card footer, and bottom subtitle panel remain. The report exposes
+  `right_panel_visible=false`, `outer_right_panel_visible=false`,
+  `vinyl_backplate_present=false`, and
+  `vinyl_backplate_preserved=false`. The spectrum variant uses the clip-safe
+  geometry documented in [wide-visual-templates.md](references/wide-visual-templates.md)
+  so top peaks and bottom glow are not clipped.
 - Default video delivery at 1920x1080 30 fps yuv420p BT.709:
   AV1 NVENC CQ38 with preset fixed at p7, tune hq, VBR, full-resolution multipass,
   lookahead32, spatial/temporal AQ, strength8, GOP240; default MP4 audio is
-  AAC-LC 320 kb/s, with an optional lossless-audio version from a genuinely
-  lossless source.
+  AAC-LC 320 kb/s. MKV is a separate, explicit opt-in from a genuinely
+  lossless source, never an implicit companion.
 - Complete-mix pitch shifting through `scripts/pitch_shift_audio.py`, using
   Rubber Band R3 Finer with formant preservation by default; formal runs reject
   MP3/AAC sources instead of relabeling lossy audio as FLAC.
+- Japanese pronunciation validation has explicit `optional`, `required`, and
+  `off` modes, with `optional` as the default. In `optional` mode a missing
+  pronunciation sidecar is recorded as not performed and does not block by
+  default; structural ruby and SUG/ASS/frame agreement remain mandatory.
+- Every formal or test run rebuilds the current rotating vinyl asset with style
+  `direction-neutral-concentric-grooves/v3/backplate-absent`, records its generator and asset
+  SHA-256, and passes the generated path explicitly to the renderer. A
+  canonical/old `vinyl.png` is identity-only and is never silently reused.
+- The workflow accepts a separate `cover-source-audio` identity from the
+  delivery audio when cover extraction and delivery intentionally use different
+  inputs.
 - Required and tested versions: StrangeUtaGame 1.4.5 and SUG storage format
   0.3.0. The application version must match in `__version__.py` and
   `pyproject.toml`.
-- Nineteen distinct sanitized production entry-script implementations plus the
-  shared `sug_ruby.py` canonical-facts module. The pitch tool
-  is also mirrored at `scripts/pitch_shift_audio.py` for standalone use, plus a guarded installer, an editor/audio
-  probe, environment checks, the read-only top-level
+- A sanitized, manifest-authorized production integration plus the shared
+  `sug_ruby.py` canonical-facts module. The pitch tool is also mirrored at
+  `scripts/pitch_shift_audio.py` for standalone use, plus a guarded installer,
+  an editor/audio probe, environment checks, the read-only top-level
   `scripts/check_sug_compatibility.py` validator, manifests, and
-  private-override examples.
+  private-override examples. The public documentation describes the
+  Japanese/general route; the dependency manifest remains authoritative for
+  the installed file set.
 
-The dependency manifest keeps the 19 entry scripts in `scripts` and records
-`sug_ruby.py` separately under `shared_modules`; the shared module is not an
-additional entry point.
+The dependency manifest records the installed entry scripts, shared modules,
+and recursive package files. The installer copies only those
+manifest-authorized Python paths recursively, so imports cannot depend on an
+uninstalled package directory.
 
 No recordings, lyrics, album metadata, fonts, cover art, models, credentials,
 rendered media, or real project reports are included.
@@ -61,29 +88,41 @@ The integration depends on an authorized StrangeUtaGame checkout. Preview the
 copy plan, then install it:
 
 ```powershell
+$skillRoot = (Resolve-Path .).Path
 $projectRoot = (Resolve-Path .\private-project).Path
-python scripts/install_strangeutagame_integration.py --target $projectRoot --dry-run
-python scripts/install_strangeutagame_integration.py --target $projectRoot
+python "$skillRoot/scripts/install_strangeutagame_integration.py" --target $projectRoot --dry-run
+python "$skillRoot/scripts/install_strangeutagame_integration.py" --target $projectRoot
 ```
 
-Create the checkout's project-local environment:
+Reuse a complete project-local `.venv` by default. Only create or refresh the
+environment when it is missing or the dependency files changed; ordinary
+commands use `uv run --no-sync` and do not need a new `UV_CACHE_DIR`:
 
 ```powershell
+$skillRoot = (Resolve-Path .).Path
 $projectRoot = (Resolve-Path .\private-project).Path
 Set-Location $projectRoot
-winget install astral-sh.uv
-uv python install 3.12
-uv venv --python 3.12
-uv pip install -r requirements-karaoke.skill.lock.txt
+if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
+  uv sync
+}
+# If pyproject.toml, uv.lock, or the dependency lock changed, run: uv sync
+uv run --no-sync python --version
 ```
+
+Install `uv` once if it is not already available; do not recreate the
+environment or set a per-task `UV_CACHE_DIR`. Use task-owned temporary
+directories/caches and remove them after retaining required reports and
+artifacts.
 
 Install `ffmpeg`/`ffprobe` separately and provide a licensed CJK font. Rubber
 Band is needed only for pitch shifting; Whisper/MMS and external MSST are
 optional evidence lanes. Run:
 
 ```powershell
+$skillRoot = (Resolve-Path .).Path
 $projectRoot = (Resolve-Path .\private-project).Path
-python scripts/check_karaoke_environment.py --target $projectRoot
+Set-Location $projectRoot
+uv run --no-sync python "$skillRoot/scripts/check_karaoke_environment.py" --target $projectRoot
 ```
 
 See the [integration guide](references/strangeutagame-integration.md) for
@@ -96,22 +135,30 @@ official links, script routing, private manifests, and network boundaries.
    a required right is missing or uncertain.
 2. Probe every input and define the output matrix before encoding. Preserve
    source media and write to a temporary output until all mandatory gates pass.
-3. Use the configured language profile for the documented ASR and alignment
-   path; require a validated adapter for any non-default profile. Independent
-   ASR is a separate evidence lane, never a silent
-   fallback for failed forced alignment; an unavailable or failed lane is
-   recorded as `unresolved`.
+3. Use the configured language profile for the documented ASR/alignment path;
+   the bundled public workflow is Japanese via
+   `run_karaoke_japanese_workflow.py`. Any non-default language requires a
+   separately validated adapter, and no route may silently fall back. Keep
+   independent ASR as a separate evidence lane, never a silent fallback for
+   failed forced alignment; an unavailable or failed lane is recorded as
+   `unresolved`.
 4. When pitch shifting is requested, shift the complete mix before timing and
    rendering. Feed the verified shifted FLAC into alignment evidence, previews,
-   MP4 AAC-LC 320 kb/s, and the paired MKV FLAC track.
+   and the default MP4 AAC-LC 320 kb/s. Generate or report an MKV only when
+   the user explicitly requests `--lossless-companion` (or the underlying
+   `--lossless-output`) and the probed source is FLAC or PCM WAV; reject MP3,
+   AAC, and every other lossy source. Tests and re-renders are MP4-only unless
+   that opt-in is present.
 5. Use the default AV1 release profile: NVENC CQ38, preset p7,
    tune hq, VBR, full-resolution multipass, lookahead32, spatial/temporal AQ,
    strength8, GOP240, 1920x1080 30 fps, yuv420p, and BT.709. Keep MP4 as the
    AAC-LC 320k compatibility version; make a separate lossless version only
    from a genuinely lossless source.
-6. Validate MP4 and MKV as one generation: AAC-LC/320k metadata, FLAC-only MKV
-   audio, identical encoded video-stream hashes, matching timeline bounds, and
-   decoded MKV PCM equal to the selected lossless source slice.
+6. Validate the default MP4 generation on its own. When the explicit MKV
+   companion opt-in is present, validate MP4 and MKV as one generation:
+   AAC-LC/320k metadata, FLAC-only MKV audio, identical encoded video-stream
+   hashes, matching timeline bounds, and decoded MKV PCM equal to the selected
+   lossless source slice.
    Complete null decoding of the final output remains an optional diagnostic,
    never a mandatory release gate; its absence alone cannot block promotion.
 7. Generate ruby candidates only for missing spans and write them to canonical
@@ -120,13 +167,11 @@ official links, script routing, private manifests, and network boundaries.
    context and can approve or write corrections back. If unchanged, retain the
    default ruby. Escalate only ambiguity, proper nouns, artistic readings,
    evidence conflicts, low confidence, or `unresolved`; the renderer reads only
-   the reviewed SUG and cannot infer or overwrite ruby. Its review sidecar must
-   match the current SUG hash and contain an approved exact-span record for every
-   stored ruby span; missing, stale, machine-only, low-confidence, conflicting,
-   or unresolved records fail closed. Publish the SUG atomically before its
-   sidecar so an interrupted write cannot certify a SUG that was never stored.
-   Require SUG, ASS/report, and final-frame agreement, with per-span status,
-   confidence, evidence, model/prompt version, and before/after SUG hashes.
+   the reviewed SUG and cannot infer or overwrite ruby. Japanese pronunciation
+   validation is `optional` by default: a missing sidecar is not performed and
+   does not block, while a supplied sidecar must be current and valid. Use
+   `required` only for an explicitly requested pronunciation gate. Structural
+   ruby boundaries and SUG/ASS/final-frame agreement remain mandatory.
 8. Keep source text, applicable ruby, and contextual readings traceable from
    the editable SUG through ASS and the rendered output.
 9. Confirm the installed application and `SugMigrator.CURRENT_VERSION`; do not
@@ -152,7 +197,7 @@ placeholder, and pass it explicitly:
 
 ```powershell
 $env:KARAOKE_ALBUM_MANIFEST = (Resolve-Path .\private\album.json).Path
-uv run python scripts/karaoke_timing.py --manifest $env:KARAOKE_ALBUM_MANIFEST --allow-partial-manifest
+uv run --no-sync python scripts/karaoke_timing.py --manifest $env:KARAOKE_ALBUM_MANIFEST --allow-partial-manifest
 ```
 
 Keep song-specific display, ruby, and contextual reading decisions in private
@@ -164,9 +209,10 @@ by default; source refresh and public cover retrieval require explicit opt-in.
 
 ## Script provenance and dependency boundary
 
-The 19 production entry scripts are later-developed integration scripts; the
-shared `sug_ruby.py` module is recorded separately under `shared_modules` and
-is not an entry. They were
+The manifest-authorized production entry scripts are later-developed
+integration scripts; the shared `sug_ruby.py` module is recorded separately
+under `shared_modules`, and recursive package files are required imports.
+Neither is an entry. They were
 untracked additions in the production working tree before sanitization and are
 not files from StrangeUtaGame's upstream Git history. “Direct upstream import”
 means importing tracked modules from a separately obtained application;
@@ -195,6 +241,14 @@ bundled script.
 | `package_karaoke_numbered_archives.py` | No upstream-code import | Numbered release archives. |
 | `karaoke_release_snapshot.py` | No upstream-code import | Release-file snapshots. |
 | `pitch_shift_audio.py` | No upstream-code import | Complete-mix pitch shifting and its verification report. |
+| `build_karaoke_mms_overrides.py` | Transitive runtime dependency | Freezes reviewed MMS timing into display-character overrides. |
+| `karaoke_workflow.py` | Transitive runtime dependency | Regenerates current rotating vinyl and runs the isolated MP4-first workflow. |
+| `run_karaoke_japanese_workflow.py` | Transitive runtime dependency | Explicit Japanese workflow entry; pronunciation defaults to optional. |
+
+The recursive package files are:
+`karaoke_common/__init__.py`, `karaoke_common/layout.py`,
+`karaoke_common/pronunciation.py`, `karaoke_japanese/__init__.py`, and
+`karaoke_japanese/layout.py`.
 
 The audio probe dynamically imports the application's GUI, persistence, and
 audio-loading modules. The installer and environment checker operate on an
@@ -226,8 +280,8 @@ is `integration/strangeutagame/dependency-manifest.json`.
 ```
 
 ```powershell
-python -m unittest discover -s scripts -p "test_*.py" -v
-python -m unittest discover -s tests -p "test_*.py" -v
+uv run --no-sync python -m unittest discover -s scripts -p "test_*.py" -v
+uv run --no-sync python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 These packaging and safety tests do not claim that a full media render succeeds

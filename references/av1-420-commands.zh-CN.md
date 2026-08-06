@@ -35,11 +35,11 @@ NVENC探测成功时，默认1920x1080、30fps、SDR发布档使用AV1 NVENC CQ3
   $temporaryMp4
 ```
 
-用`ffprobe`验证CQ、multipass、lookahead、AQ、GOP、尺寸、帧率、像素格式和BT.709元数据。不确定目标设备是否支持AV1时，另产H.264兼容版本。默认兼容MP4保持AAC-LC 320k；选定源确实无损时，可另产无损音频MKV，不得把MP4 AAC转成无损音轨。
+用`ffprobe`验证CQ、multipass、lookahead、AQ、GOP、尺寸、帧率、像素格式和BT.709元数据。不确定目标设备是否支持AV1时，另产H.264兼容版本。默认兼容输出只有AAC-LC 320k的MP4，不生成MKV。MKV必须通过`--lossless-companion`或底层显式`--lossless-output`主动选择，并且只接受探测确认为FLAC或PCM WAV的源；MP3/AAC必须拒绝，不得把MP4 AAC转成无损音轨。
 
 ## ASS软字幕与FLAC-MKV配对
 
-需要保留ASS软字幕或多音轨时使用MKV；复杂ASS样式不要承诺在MP4中生效。正式AV1 4:2:0交付若源音频确为无损FLAC或PCM WAV，应从通过验证的MP4复制视频流，并从同一裁剪时间段的无损源直接编码FLAC：
+需要保留ASS软字幕或多音轨时使用MKV；复杂ASS样式不要承诺在MP4中生效。只有显式请求无损伴侣且MP4已通过初步门禁时，若源音频确为无损FLAC或PCM WAV，才从通过验证的MP4复制视频流，并从同一裁剪时间段的无损源直接编码FLAC：
 
 ```powershell
 & $ffmpeg -nostdin -n -i $temporaryMp4 -i $losslessSource `
@@ -48,7 +48,7 @@ NVENC探测成功时，默认1920x1080、30fps、SDR发布档使用AV1 NVENC CQ3
   $temporaryLosslessMkv
 ```
 
-不要添加`-shortest`、`-ar`或`-ac`。真实源编码为MP3/AAC或其他有损格式时拒绝无损配对，即使文件扩展名写成FLAC/WAV。MKV保留无损源的采样率和声道结构，不强行套用MP4的44.1 kHz立体声转换。发布前要求MP4为AAC-LC/320k、MKV仅含FLAC音频、两者视频流哈希一致、MKV解码PCM等于源音频切片，时间轴在容差内一致，并具备可回滚的成对发布记录。
+不要添加`-shortest`、`-ar`或`-ac`。未显式请求时不要创建或期待无损输出；真实源编码为MP3/AAC或其他有损格式时拒绝无损配对，即使文件扩展名写成FLAC/WAV。MKV保留无损源的采样率和声道结构，不强行套用MP4的44.1 kHz立体声转换。发布前要求MP4为AAC-LC/320k、MKV仅含FLAC音频、两者视频流哈希一致、MKV解码PCM等于源音频切片，时间轴在容差内一致，并具备可回滚的成对发布记录。
 
 ## 时间轴、验证与发布
 

@@ -54,6 +54,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PREVIEW_SCRIPT = REPO_ROOT / "scripts" / "karaoke_review_preview.py"
 PROFILES = ("standard", "wide")
 FONT_FAMILY = "HarmonyOS Sans SC"
+SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
 PROFILE_LAYOUTS = {
     "standard": "standard-v7",
     "wide": "wide-bottom",
@@ -320,7 +321,7 @@ def resolve_font_paths(
 ) -> tuple[Path, Path]:
     """Resolve the project-local HarmonyOS Sans directory and measurement font."""
 
-    resolved_fonts_dir = (fonts_dir or root / "artwork" / "fonts").resolve()
+    resolved_fonts_dir = (fonts_dir or SHARED_FONT_DIR).resolve()
     if not resolved_fonts_dir.is_dir():
         package_hint = f"; font package: {font_package}" if font_package else ""
         raise FileNotFoundError(

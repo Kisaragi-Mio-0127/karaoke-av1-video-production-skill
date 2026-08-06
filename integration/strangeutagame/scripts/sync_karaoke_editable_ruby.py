@@ -178,12 +178,11 @@ def synchronize_document(
 
 
 def album_sug_paths() -> list[Path]:
-    paths: list[Path] = []
     if not SONGS:
-        # Public bundles deliberately omit private album manifests.
         raise RuntimeError(
-            "no public album manifest is loaded; pass canonical SUG paths explicitly"
+            "no public album manifest is bundled; pass canonical SUG paths explicitly"
         )
+    paths: list[Path] = []
     for song in SONGS:
         candidates = sorted((song.deliverable_dir / "timing").glob(f"{song.song_id}_*.sug"))
         if len(candidates) != 1:

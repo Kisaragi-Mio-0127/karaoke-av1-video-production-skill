@@ -20,7 +20,7 @@ Do not hardcode one project's song counts, cue counts, CQ values, sizes, or file
 - Require renderer and encoder processes to finish before promotion.
 - Fail when partial files, stale outputs, unverified profiles, or mixed generation identities remain.
 - Compare per-song and total output sizes with the previous accepted release. Pause on unexplained order-of-magnitude or asymmetric drift; file size is a signal, not a quality proof.
-- Treat full-output null decoding as an optional diagnostic, not a default batch gate. Run it only on user request or when probe, mux, transport, or corruption evidence warrants it. If any decode is executed, map the intended streams and record every real exit code; never synthesize success for an unperformed diagnostic.
+- Treat full-output null decoding as an optional diagnostic, never a mandatory batch or release gate. Missing full-decode evidence alone must not block promotion, lower verification status, or require every artifact to carry a decoder exit code. Run it only on user request or when probe, mux, transport, or corruption evidence warrants it. If any decode is executed, map the intended streams and record every real exit code; never synthesize success for an unperformed diagnostic.
 - Extract boundary frames for cues, longest phrases, ruby exceptions, and release-overlap conflicts.
 
 ## Multi-File Promotion

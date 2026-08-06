@@ -119,7 +119,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 ## Verification Gate
 
 1. Use ffprobe to verify video codec, pixel format, dimensions, frame rate, color metadata, audio codec, channel layout, duration, and subtitle tracks.
-2. Do not run a complete null decode by default. Use it only when the user requests it or when probe, mux, transport, or corruption evidence makes it a useful diagnostic. An unperformed optional decode does not lower verification status and must be reported as `performed: false`, never as a successful decode.
+2. Do not run a complete null decode by default. Use it only when the user requests it or when probe, mux, transport, or corruption evidence makes it a useful diagnostic. Full decode is never a mandatory release gate: missing full-decode evidence alone must not block promotion, lower verification status, or create a requirement that every artifact carry a decoder exit code. Report an unperformed diagnostic as `performed: false`, never as a successful decode; only an executed diagnostic can pass or fail.
 3. Inspect frames at the beginning, representative lyric changes, longest subtitle, and ending.
 4. Check audio/video synchronization near both the start and end, not only the first lyric.
 5. Confirm dimensions are even, timestamps are monotonic, ASS events remain within the output timeline, and first/last audio-video timestamps differ by no more than the stricter project tolerance or `max(1 frame, 2 audio frames, 50 ms)`.

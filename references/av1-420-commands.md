@@ -131,7 +131,7 @@ Run these only on user request or when probe, mux, transport, or corruption evid
 & $ffmpeg -v error -xerror -i $output -map 0:a -f null -
 ```
 
-By default, accept only `av1` video with the intended 4:2:0 pixel format, expected streams, duration, and generation hashes. Full-output null decoding is optional and should run only on user request or when probe, mux, transport, or corruption evidence warrants it. If any full or sampled decode is executed, map every intended stream and record each real exit code; an unperformed diagnostic is neither success nor failure. For soft subtitles, require the expected `ass` stream and verify its first and final packet timestamps remain within the approved program timeline.
+By default, accept only `av1` video with the intended 4:2:0 pixel format, expected streams, duration, and generation hashes. Full-output null decoding is optional and should run only on user request or when probe, mux, transport, or corruption evidence warrants it. Its absence alone must never block release or require decoder-exit-code evidence for every artifact. If any full or sampled decode is executed, map every intended stream and record each real exit code; an unperformed diagnostic is neither success nor failure. For soft subtitles, require the expected `ass` stream and verify its first and final packet timestamps remain within the approved program timeline.
 
 ## Promote The Verified Output
 

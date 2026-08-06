@@ -112,6 +112,8 @@ official links, script routing, private manifests, and network boundaries.
 6. Validate MP4 and MKV as one generation: AAC-LC/320k metadata, FLAC-only MKV
    audio, identical encoded video-stream hashes, matching timeline bounds, and
    decoded MKV PCM equal to the selected lossless source slice.
+   Complete null decoding of the final output remains an optional diagnostic,
+   never a mandatory release gate; its absence alone cannot block promotion.
 7. Generate ruby candidates only for missing spans and write them to canonical
    SUG, preserving human-reviewed or legacy ruby. The Agent audits every span
    in full lyric, grammar, inflection, lexical-boundary, and contextual-reading

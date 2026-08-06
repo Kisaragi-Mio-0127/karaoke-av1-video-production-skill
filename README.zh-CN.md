@@ -71,7 +71,7 @@ python scripts/check_karaoke_environment.py --target $projectRoot
 3. 文档化的ASR和对齐流程使用已配置的语言 profile；任何非默认 profile 都必须有经过验证的 adapter。独立ASR是独立证据链，绝不是强制对齐失败后的静默后备；不可用或失败时记录为`unresolved`。
 4. 请求升降调时，在时间轴和渲染前处理完整混音。验证后的变调FLAC同时用于时间证据、预览、MP4 AAC-LC 320 kb/s和配对MKV FLAC音轨。
 5. 默认使用发布视频参数：AV1 NVENC CQ38、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240、1920x1080、30fps、yuv420p、BT.709。MP4保持AAC-LC/320k兼容音频；只有源确实无损时才另产无损版。
-6. 把MP4和MKV作为同一代一起验证：MP4为AAC-LC/320k，MKV只有FLAC音频，编码视频流哈希一致，时间轴一致，MKV解码PCM等于选定的无损源切片。
+6. 把MP4和MKV作为同一代一起验证：MP4为AAC-LC/320k，MKV只有FLAC音频，编码视频流哈希一致，时间轴一致，MKV解码PCM等于选定的无损源切片。最终成品的完整空解码始终是可选诊断，不是发布强制门禁；仅因未执行不得阻止提升。
 7. 候选注音生成器只填补缺失项并先写入规范SUG，保护已有人工或legacy注音。Agent按整句歌词、语法、词形、词边界和上下文自动审核每条注音，可自动批准或直接回写修正；无修改时沿用默认注音并记录批准状态。仅歧义、专名/艺术读音、证据冲突、低置信或`unresolved`升级人工。renderer只读审核后的规范SUG，渲染阶段禁止再推断或覆盖。审核sidecar必须匹配当前SUG哈希，并为每个已存注音span提供范围精确的已批准记录；缺失、陈旧、仅机器填补、低置信、冲突或未解决记录一律失败关闭。发布时先原子写入SUG，再原子写入sidecar，避免中断后sidecar错误证明一个从未落盘的SUG。SUG、ASS/报告和最终帧必须一致，并为每个span记录状态、置信度、evidence、model/prompt版本及SUG修改前后哈希。
 8. 保持源文本、适用的注音和上下文读音从可编辑SUG到ASS及渲染输出的可追溯性。
 9. 以实际安装应用和`SugMigrator.CURRENT_VERSION`为准；不要把过时的`pyproject.toml`包版本当作SUG契约。

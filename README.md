@@ -6,6 +6,9 @@ A Codex skill and a sanitized StrangeUtaGame integration for producing,
 reviewing, rendering, validating, and packaging karaoke videos with editable
 timing provenance and AV1 4:2:0 release checks.
 
+The bundled default language profile is Japanese (`ja`); other languages can
+be connected through separately validated adapters.
+
 Start with [SKILL.md](SKILL.md); the [中文 README](README.zh-CN.md) and the
 English/Chinese reference pairs below are maintained together.
 
@@ -13,7 +16,7 @@ English/Chinese reference pairs below are maintained together.
 
 - An inspect → preview → encode → verify workflow in `SKILL.md`.
 - Semantic phrase segmentation, Japanese ruby word-boundary QA, editable SUG
-  parity, MMS and independent-ASR evidence, and CJK visual-fit gates.
+  parity, MMS and independent-ASR evidence, and lyric visual-fit gates.
 - Wide-layout `vinyl` and `spectrum` templates; choose exactly one per render.
 - Default MP4 delivery with AAC-LC 320 kb/s, plus a paired FLAC-audio MKV when
   the selected source is genuinely lossless FLAC or PCM WAV.
@@ -23,7 +26,7 @@ English/Chinese reference pairs below are maintained together.
 - StrangeUtaGame 1.4.5 / SUG storage format 0.3.0 as the current tested
   baseline. The `pyproject.toml` package version may still say 1.2.6; it is
   not the application or parser version authority.
-- Twenty distinct sanitized production script implementations. The pitch tool
+- Nineteen distinct sanitized production script implementations. The pitch tool
   is also mirrored at `scripts/pitch_shift_audio.py` for standalone use, plus a guarded installer, an editor/audio
   probe, environment checks, the read-only top-level
   `scripts/check_sug_compatibility.py` validator, manifests, and
@@ -82,19 +85,19 @@ official links, script routing, private manifests, and network boundaries.
    a required right is missing or uncertain.
 2. Probe every input and define the output matrix before encoding. Preserve
    source media and write to a temporary output until all mandatory gates pass.
-3. For every ASR/alignment run, select exactly one language: `ja`, `zh`, or
-   `en`. Independent ASR is a separate evidence lane, never a silent fallback
-   for failed forced alignment; an unavailable or failed lane is recorded as
-   `unresolved`. Simplified/traditional conversion is only a comparison
-   normalization within `zh`, not a language fallback.
+3. Use the configured language profile for the documented ASR and alignment
+   path; require a validated adapter for any non-default profile. Independent
+   ASR is a separate evidence lane, never a silent
+   fallback for failed forced alignment; an unavailable or failed lane is
+   recorded as `unresolved`.
 4. When pitch shifting is requested, shift the complete mix before timing and
    rendering. Feed the verified shifted FLAC into alignment evidence, previews,
    MP4 AAC-LC 320 kb/s, and the paired MKV FLAC track.
 5. Validate MP4 and MKV as one generation: AAC-LC/320k metadata, FLAC-only MKV
    audio, identical encoded video-stream hashes, matching timeline bounds, and
    decoded MKV PCM equal to the selected lossless source slice.
-6. Do not insert spaces between Chinese lyric characters for character timing
-   or display segmentation. Use semantic and acoustic evidence instead.
+6. Keep source text, applicable ruby, and contextual readings traceable from
+   the editable SUG through ASS and the rendered output.
 7. Confirm the installed application and `SugMigrator.CURRENT_VERSION`; do not
    use the stale `pyproject.toml` package version as the SUG contract.
 
@@ -128,7 +131,7 @@ refresh and public cover retrieval require explicit opt-in.
 
 ## Script provenance and dependency boundary
 
-The 20 production scripts are later-developed integration scripts. They were
+The 19 production scripts are later-developed integration scripts. They were
 untracked additions in the production working tree before sanitization and are
 not files from StrangeUtaGame's upstream Git history. “Direct upstream import”
 means importing tracked modules from a separately obtained application;
@@ -139,7 +142,6 @@ bundled script.
 |---|---|---|
 | `karaoke_timing.py` | Direct upstream import | Domain entities, exporters, and `SugProjectParser`. |
 | `karaoke_review_preview.py` | Direct upstream import | `Character`, `Sentence`, and `SugProjectParser`. |
-| `convert_english_sug_word_tokens.py` | Direct upstream import | `SugProjectParser` and SUG timing conversion. |
 | `sync_karaoke_editable_ruby.py` | Transitive runtime dependency | Contextual ruby and album timing data. |
 | `audit_karaoke_asr_recognition.py` | Transitive runtime dependency | LRC helpers and application-backed timing. |
 | `audit_karaoke_mms_alignment.py` | Transitive runtime dependency | Timing helpers and SUG evidence. |
@@ -148,7 +150,7 @@ bundled script.
 | `render_karaoke_direct_av1_420_album.py` | Transitive runtime dependency | Ruby synchronization and SUG preview rendering. |
 | `finalize_karaoke_release.py` | SUG artifact/layout dependency | Checks `.sug` files and release layout. |
 | `karaoke_album.py` | No upstream-code import | Sanitized manifest and path model. |
-| `karaoke_language.py` | No upstream-code import | Language normalization and tokenization. |
+| `karaoke_language.py` | No upstream-code import | Language normalization and tokenization for validated profiles. |
 | `build_karaoke_wide_artwork.py` | No upstream-code import | Pillow artwork construction. |
 | `render_vinyl_karaoke.py` | No upstream-code import | Vinyl visual layer construction. |
 | `inspect_karaoke_media.py` | No upstream-code import | Encoded-media and render-metadata inspection. |

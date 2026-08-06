@@ -51,14 +51,19 @@ except ImportError:  # pragma: no cover - direct script execution
     )
 
 try:
-    from .karaoke_language import language_identity as _shared_language_identity
+    from .karaoke_language import (
+        language_identity as _shared_language_identity,
+        normalize_language as _shared_normalize_language,
+    )
 except ImportError:  # pragma: no cover - direct script execution/compatibility
     try:
         from karaoke_language import (
             language_identity as _shared_language_identity,  # type: ignore[no-redef]
+            normalize_language as _shared_normalize_language,  # type: ignore[no-redef]
         )
     except ImportError:  # pragma: no cover - reduced standalone bundle
         _shared_language_identity = None  # type: ignore[assignment]
+        _shared_normalize_language = None  # type: ignore[assignment]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -344,6 +349,10 @@ def _normalise_language_identity(
 ) -> dict[str, Any]:
     if isinstance(value, Mapping):
         payload = dict(value)
+        for key in ("code", "language", "language_code", "locale"):
+            raw_code = payload.get(key)
+            if raw_code not in (None, ""):
+                _normalize_bundled_language(raw_code)
         code = next(
             (
                 payload.get(key)
@@ -358,17 +367,33 @@ def _normalise_language_identity(
         code = value if value not in (None, "") else fallback_language
         payload = {"code": code} if code not in (None, "") else {}
         identity = _identity_digest(payload)
+    code = _normalize_bundled_language(code)
     result = {
-        "code": str(code) if code not in (None, "") else None,
+        "code": code,
         "identity": identity,
         "source": source,
     }
     if isinstance(value, Mapping):
         result.update(payload)
-        result["code"] = str(code) if code not in (None, "") else None
+        result["code"] = code
         result["identity"] = identity
         result["source"] = source
     return result
+
+
+def _normalize_bundled_language(value: Any) -> str:
+    """Normalize a bundled language profile with a fail-closed fallback."""
+
+    if callable(_shared_normalize_language):
+        return _shared_normalize_language(value)
+    normalized = str(value or "ja").strip().casefold().replace("_", "-")
+    if normalized in {"ja", "jp", "jpn", "japanese", "ja-jp"}:
+        return "ja"
+    raise ValueError(
+        f"no validated bundled language profile for {value!r}; "
+        "the default profile is 'ja' and other languages require a "
+        "separately validated project adapter"
+    )
 
 
 def language_identity(
@@ -384,7 +409,10 @@ def language_identity(
         and report is not None
         and isinstance(report.get("language_identity"), Mapping)
     ):
-        return dict(report["language_identity"])
+        return _normalise_language_identity(
+            report["language_identity"],
+            source="render-report",
+        )
     document = _read_sug_document(task.sug_path)
     metadata = document.get("metadata") if isinstance(document, Mapping) else None
     fallback_language = (

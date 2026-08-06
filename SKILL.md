@@ -1,6 +1,6 @@
 ---
 name: karaoke-av1-video-production
-description: Use when producing, re-encoding, debugging, packaging, or reviewing karaoke and lyric videos or opening editable karaoke timing projects with attached audio, including semantic phrase segmentation, source-line overrides, cue/lane behavior, Japanese ruby, editable-source/render parity, media restoration, MMS timing evidence, ASS highlight release, CJK visual fit, AV1 4:2:0 encoding, batch promotion, archives, and media-structure verification. Do not use for TTS, voice cloning, music generation, vocal separation, or lyric transcription.
+description: Use when producing, re-encoding, debugging, packaging, or reviewing karaoke and lyric videos or opening editable karaoke timing projects with attached audio, including semantic phrase segmentation, source-line overrides, cue/lane behavior, Japanese ruby, editable-source/render parity, media restoration, MMS timing evidence, ASS highlight release, lyric visual fit, AV1 4:2:0 encoding, batch promotion, archives, and media-structure verification. Do not use for TTS, voice cloning, music generation, vocal separation, or lyric transcription.
 ---
 
 # Karaoke AV1 Video Production
@@ -12,6 +12,9 @@ map.
 ## Overview
 
 Produce karaoke videos through an inspect, preview, encode, and verify workflow. Keep subtitle timing, AV1 4:2:0 output, audio integrity, and playback compatibility independently testable.
+
+When no language profile is specified, use the bundled Japanese default
+(`ja`); other languages require separately validated project adapters.
 
 Use `tts-voice-workflow-ops` separately when generating or cloning voices, separating vocals, or converting a singer. This skill starts from authorized media, lyrics, subtitles, fonts, and audio stems.
 
@@ -61,7 +64,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) b
 - Use ASS karaoke timing tags only when syllable timing is intentional; do not invent timing from untimed lyrics without review.
 - Keep one traceable fact chain from canonical source through overrides, renderer output, ASS/report, encoded media, and promoted or packaged artifacts. Record a hash or equivalent generation identity at every reproducible layer.
 - Preserve source-line semantics when creating display phrases. Require exact override reachability, lossless phrase recomposition, and reuse of original character timing objects.
-- Treat source whitespace as breath evidence, not an authoritative display boundary. Resolve it against Japanese syntax, measured acoustic pauses, minimum phrase length, and visual fit; document reviewed exceptions where a sung breath splits a grammatical dependency.
+- Treat source whitespace as breath evidence, not an authoritative display boundary. Resolve it against source-language syntax, measured acoustic pauses, minimum phrase length, and visual fit; document reviewed exceptions where a sung breath splits a grammatical dependency.
 - Treat Japanese ruby word boundaries as a mandatory release gate, independently from reading correctness. Do not force one ruby group per kanji: keep a multi-kanji lexical word or jukujikun such as `今年→ことし`, `来年→らいねん`, or `一番→いちばん` together. Do not merge adjacent lexical words merely because their readings are contiguous; for example, keep `一番|好|き` as `一番→いちばん`, `好→す`, and unannotated okurigana `き`, rather than `一番好→いちばんす`. For StrangeUtaGame, inspect every ruby-bearing line's canonical SUG `linked_to_next` chain, compare the same surface spans and readings in the ASS/report, and inspect a rendered frame to confirm each ruby is centered over the intended word. Treat tokenizer or dictionary output as evidence only and require human review for ambiguous boundaries. Fail release when source, editable, rendered, or visible grouping disagrees, even if the concatenated reading text is correct; record a focused ruby-word-boundary QA result and preserve character timing unless timing is the explicit task.
 - Apply extra in-line semantic spacing only at approved breath or semantic boundaries. Record the boundary character indices and one configured pixel/em value, then verify coordinate deltas independently from perceived spacing caused by glyph shape, highlight state, or ruby.
 - Treat cue pairing, lane reset, countdown anchoring, ruby, target font sizes, display preload, per-character sweep onset/release, line release, event end, and outro visibility as separate explicit contracts rather than incidental renderer behavior. A report that a red sweep is early or short does not authorize moving the lyric display preload; change preload only when the user reports that lyric visibility itself is wrong.
@@ -70,10 +73,10 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) b
 - When the user requests a cover-derived highlight colour, record one approved RGB hex and its extraction or selection basis. Synchronize it across the editable singer colour, ASS `Main`/`Glow` primary colour, and active cue colour while retaining the approved unhighlighted, outline, alpha, and ruby colours; verify the RGB-to-ASS BGR conversion and inspect a partial-sweep frame.
 - For wide-layout karaoke output, fix the default typography at `1.5x` the project's established `1x` baseline for main lyrics, ruby, and countdown cues. For the current 72/34/26 px baseline, require 108/51/39 px respectively. Use a 35 px ruby-to-main anchor gap and place countdown cues 16 px above the ruby anchor. Apply both spacing values consistently to upper, lower, outro, and cue layouts. Do not switch to `2x`, silently shrink, or change only one of these layers unless the user explicitly requests it or measured overflow is accepted as a recorded, rollback-safe exception.
 - Treat original-mix and separated-vocal MMS results as timing evidence, not delivery tracks. Resolve conflicts with recorded confidence and human A/B review.
-- For every ASR/alignment run, select exactly one language: `ja`, `zh`, or `en`. Keep independent ASR separate from stable-ts and MMS forced alignment; it may support, veto, or remain unresolved, but is never a silent fallback that replaces failed alignment. If ASR is unavailable or errors, record `unresolved` and require other evidence or human review. Simplified/traditional conversion is only a comparison normalization within `zh`, not a language fallback; never rewrite Japanese kanji during normalization.
+- Use the configured language profile for the documented ASR and alignment path; require a validated adapter for any non-default profile. Keep independent ASR separate from stable-ts and MMS forced alignment; it may support, veto, or remain unresolved, but is never a silent fallback that replaces failed alignment. If ASR is unavailable or errors, record `unresolved` and require other evidence or human review.
 - Resolve CJK fonts explicitly and inspect missing-glyph or fallback-font warnings.
 - Correct odd dimensions by an explicit pad or scale decision before subtitle rendering; prefer padding when cropping would discard content.
-- Render a short preview covering the title, first lyric, longest line, language changes, dense timing, and ending before the full encode.
+- Render a short preview covering the title, first lyric, longest line, representative lyric changes, dense timing, and ending before the full encode.
 - When a rotating disc or other periodic artwork is generated, require rotationally continuous source art: no unintended transparent wedge, partial shadow/highlight arc, colour sector, or seam that sweeps around as the asset rotates. For an opaque disc on a transparent square canvas, verify that every pixel safely inside the disc is fully opaque and the surrounding canvas remains transparent; semi-transparent details must be alpha-composited over the opaque surface instead of replacing its alpha. Inspect the source PNG with alpha visible and compare frames at four quarter-period phases. Bind the render report to the exact artwork path and SHA-256; reusing the same filename is allowed only after regenerating the image and refreshing its identity, never as proof that the pixels are unchanged or correct.
 - Check safe margins, line wrapping, outline/shadow, contrast, and whether lyrics cover faces or essential content.
 - Preserve source timing unless a deliberate constant-frame-rate conversion or offset correction is documented.
@@ -107,15 +110,15 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) b
 
 - 先确认应用真实版本和SUG格式版本。不要把`pyproject.toml`中的旧包版本当作应用版本；当前已验证基线是StrangeUtaGame 1.4.5和SUG 0.3.0。
 - 独立ASR不是强制对齐失败后的自动替代方案。ASR失败时必须记录为未解决，不能悄悄改用插值后宣称ASR通过。
-- 每次ASR/对齐运行都必须恰好选择`ja`、`zh`或`en`之一。繁简转换只用于`zh`内部比较，不是语言后备，也不能转换日语汉字。
+- 文档化的ASR和对齐流程使用已配置的语言 profile；任何非默认 profile 都必须有经过验证的 adapter，不对未经验证的中文或英文实现作承诺。
 - 升降调时直接处理完整混音，默认使用Rubber Band R3 Finer和共振峰保持。变调后的无损FLAC必须同时作为时间轴证据和最终MKV无损音轨来源。
-- 中文歌词按词义和声学证据分段；不要为了逐字计时在汉字之间插入空格，空格不是分字工具。
+- 歌词按源语言句法、词边界和声学证据审查分段；适用的注音词边界必须在SUG、ASS/报告和渲染帧之间一致。
 
 ## Verification Gate
 
 1. Use ffprobe to verify video codec, pixel format, dimensions, frame rate, color metadata, audio codec, channel layout, duration, and subtitle tracks.
 2. Do not run a complete null decode by default. Use it only when the user requests it or when probe, mux, transport, or corruption evidence makes it a useful diagnostic. An unperformed optional decode does not lower verification status and must be reported as `performed: false`, never as a successful decode.
-3. Inspect frames at the beginning, representative lyric changes, longest subtitle, language transitions, and ending.
+3. Inspect frames at the beginning, representative lyric changes, longest subtitle, and ending.
 4. Check audio/video synchronization near both the start and end, not only the first lyric.
 5. Confirm dimensions are even, timestamps are monotonic, ASS events remain within the output timeline, and first/last audio-video timestamps differ by no more than the stricter project tolerance or `max(1 frame, 2 audio frames, 50 ms)`.
 6. Confirm the output duration is expected, file size is plausible, and no stream disappeared during muxing. When an optional full or sampled decode is performed, map every intended stream and record its exact window and exit code.

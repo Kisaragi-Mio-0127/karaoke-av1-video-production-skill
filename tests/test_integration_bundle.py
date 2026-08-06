@@ -8,6 +8,7 @@ import json
 import re
 import sys
 import tempfile
+import types
 import unittest
 import urllib.error
 from pathlib import Path
@@ -124,13 +125,140 @@ class IntegrationBundleTests(unittest.TestCase):
         source = (SCRIPTS / "audit_karaoke_asr_recognition.py").read_text(
             encoding="utf-8"
         )
-        language_source = (SCRIPTS / "karaoke_language.py").read_text(encoding="utf-8")
-        self.assertIn('SUPPORTED_LANGUAGES = frozenset({"ja", "zh", "en"})', language_source)
-        self.assertIn('if language == "zh" else comparable', source)
-        self.assertIn("--language ja, zh, or en is required with direct audio", source)
+        language = load_module(
+            "public_karaoke_language_default_profile",
+            SCRIPTS / "karaoke_language.py",
+        )
+        self.assertEqual(language.SUPPORTED_LANGUAGES, frozenset({"ja"}))
+        self.assertEqual(language.normalize_language("ja"), "ja")
+        self.assertEqual(language.normalize_language(None), "ja")
+        for rejected in ("zh", "en"):
+            with self.subTest(language=rejected):
+                with self.assertRaisesRegex(ValueError, "project adapter"):
+                    language.normalize_language(rejected)
+        self.assertIn('"--language"', source)
+        self.assertIn("bundled language profile for direct mode", source)
         self.assertIn("one manifest ASR run must select tracks in exactly one language", source)
+        self.assertNotIn("_TRADITIONAL_FALLBACK", source)
+        self.assertNotIn("_simplify_chinese", source)
+        self.assertNotIn('language == "zh"', source)
+        self.assertNotIn('language == "en"', source)
         self.assertIn('"--allow-unresolved"', source)
         self.assertIn('report.get("support_gate_ok") is True', source)
+
+        sys.path.insert(0, str(BUNDLE))
+        try:
+            asr = load_module(
+                "public_asr_parser_default_profile",
+                SCRIPTS / "audit_karaoke_asr_recognition.py",
+            )
+        finally:
+            sys.path.remove(str(BUNDLE))
+        language_action = asr.build_parser()._option_string_actions["--language"]
+        self.assertEqual(tuple(language_action.choices), ("ja",))
+        self.assertEqual(
+            [unit["token"] for unit in asr.lyric_token_units("今年", "ja")],
+            ["今", "年"],
+        )
+
+        for script_name in (
+            "karaoke_review_preview.py",
+            "render_vinyl_karaoke.py",
+            "karaoke_timing.py",
+        ):
+            script_source = (SCRIPTS / script_name).read_text(encoding="utf-8")
+            with self.subTest(script=script_name):
+                self.assertNotIn("wide-zh", script_source)
+                self.assertNotIn("wide-en", script_source)
+                self.assertNotIn("wide-bottom-zh", script_source)
+                self.assertNotIn("wide-bottom-en", script_source)
+
+        preview_source = (SCRIPTS / "karaoke_review_preview.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('choices=("vinyl", "spectrum")', preview_source)
+        self.assertIn('COMPATIBILITY_AUDIO_BITRATE = "320k"', preview_source)
+
+    def test_unbundled_language_profiles_fail_closed(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        try:
+            language = load_module(
+                "public_language_policy_for_boundaries",
+                SCRIPTS / "karaoke_language.py",
+            )
+            album = load_module(
+                "public_album_language_boundary",
+                SCRIPTS / "karaoke_album.py",
+            )
+        finally:
+            sys.path.remove(str(SCRIPTS))
+
+        example = json.loads(
+            (ROOT / "examples" / "album.example.json").read_text(encoding="utf-8")
+        )
+        with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
+            temporary_root = Path(temporary)
+            for code in ("ja", "zh", "en"):
+                payload = json.loads(json.dumps(example))
+                payload["tracks"][0]["language"] = code
+                manifest_path = temporary_root / f"album-{code}.json"
+                manifest_path.write_text(
+                    json.dumps(payload, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                if code == "ja":
+                    loaded = album.load_album_manifest(
+                        manifest_path,
+                        require_five_tracks=False,
+                    )
+                    self.assertEqual(loaded.tracks[0].language, "ja")
+                else:
+                    with self.assertRaisesRegex(
+                        album.AlbumManifestError,
+                        "project adapter",
+                    ):
+                        album.load_album_manifest(
+                            manifest_path,
+                            require_five_tracks=False,
+                        )
+
+        render_core = types.ModuleType("render_karaoke_direct_av1_album")
+        vinyl = types.ModuleType("render_vinyl_karaoke")
+        vinyl.probe_libass_font = lambda *args, **kwargs: {}
+        ruby_sync = types.ModuleType("sync_karaoke_editable_ruby")
+        ruby_sync.synchronize_document = lambda document: ([], [])
+        with mock.patch.dict(
+            sys.modules,
+            {
+                "render_karaoke_direct_av1_album": render_core,
+                "karaoke_album": album,
+                "karaoke_language": language,
+                "render_vinyl_karaoke": vinyl,
+                "sync_karaoke_editable_ruby": ruby_sync,
+            },
+        ):
+            renderer = load_module(
+                "public_renderer_language_boundary",
+                SCRIPTS / "render_karaoke_direct_av1_420_album.py",
+            )
+
+        self.assertEqual(renderer._normalize_bundled_language("ja"), "ja")
+        for code in ("zh", "en"):
+            with self.subTest(renderer_shared=code):
+                with self.assertRaisesRegex(ValueError, "project adapter"):
+                    renderer._normalize_bundled_language(code)
+                with self.assertRaisesRegex(ValueError, "project adapter"):
+                    renderer._normalise_language_identity(
+                        {"code": code},
+                        source="test-report",
+                    )
+
+        renderer._shared_normalize_language = None
+        self.assertEqual(renderer._normalize_bundled_language("ja"), "ja")
+        for code in ("zh", "en"):
+            with self.subTest(renderer_reduced=code):
+                with self.assertRaisesRegex(ValueError, "project adapter"):
+                    renderer._normalize_bundled_language(code)
 
     def test_pitch_tool_and_dual_audio_contract_are_bundled(self) -> None:
         top_level = ROOT / "scripts" / "pitch_shift_audio.py"
@@ -289,13 +417,12 @@ class IntegrationBundleTests(unittest.TestCase):
         self.assertIn("allow_network=args.allow_network", renderer)
         self.assertNotIn("not args.no_network", renderer)
 
-    def test_english_converter_supports_direct_script_execution(self) -> None:
-        converter = (SCRIPTS / "convert_english_sug_word_tokens.py").read_text(
-            encoding="utf-8"
+    def test_english_converter_is_not_bundled(self) -> None:
+        self.assertFalse(
+            (SCRIPTS / "convert_english_sug_word_tokens.py").exists()
         )
-        self.assertIn("from .karaoke_language import", converter)
-        self.assertIn("from karaoke_language import", converter)
-        self.assertNotIn("from scripts.karaoke_language import", converter)
+        manifest = DEPENDENCY_MANIFEST.read_text(encoding="utf-8")
+        self.assertNotIn("convert_english_sug_word_tokens.py", manifest)
 
     def test_cover_network_guard_rejects_unsafe_redirects_and_oversize(self) -> None:
         sys.path.insert(0, str(SCRIPTS))

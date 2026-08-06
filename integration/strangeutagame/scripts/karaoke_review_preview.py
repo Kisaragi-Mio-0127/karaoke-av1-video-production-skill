@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 from types import SimpleNamespace
@@ -32,7 +32,7 @@ from scripts.karaoke_language import (  # noqa: E402
 )
 from scripts.karaoke_timing import ms_to_ass_time, verify_font  # noqa: E402
 from scripts.render_vinyl_karaoke import escape_filter_path  # noqa: E402
-from strange_uta_game.backend.domain import Character, Sentence  # noqa: E402
+from strange_uta_game.backend.domain import Sentence  # noqa: E402
 from strange_uta_game.backend.infrastructure.persistence.sug_io import (  # noqa: E402
     SugProjectParser,
 )
@@ -49,18 +49,6 @@ MAIN_GLOW_BLUR = 8
 RUBY_GLOW_BLUR = 5
 WIDE_SEMANTIC_GAP_EM = 0.14
 WIDE_RUBY_TO_MAIN_ANCHOR_GAP_PX = 35
-ENGLISH_WIDE_MAIN_FONT_SIZE = 96
-ENGLISH_WIDE_MIN_MAIN_FONT_SIZE = 54
-ENGLISH_WIDE_LETTER_SPACING_EM = 0.0
-# Pillow's 96 px advances are wider than libass's visible HarmonyOS Sans SC
-# word runs by roughly 1 / 0.735.  English words are emitted as intact ASS
-# runs, so this scale changes only their block placement, never letter spacing.
-ENGLISH_WIDE_RENDER_ADVANCE_SCALE = 0.735
-# HarmonyOS Sans SC's natural ASCII space is about 0.27 em at this size,
-# which reads too loose once every word is rendered as an outlined ASS run.
-# Keep the font's kerning inside words, but use a calibrated total word gap.
-ENGLISH_WIDE_WORD_GAP_EM = 0.25
-ENGLISH_WIDE_MIN_SPLIT_WORDS = 3
 SECONDARY_FONT_SIZE = 51
 SECONDARY_MIN_FONT_SIZE = 36
 SECONDARY_OUTLINE_PX = 3
@@ -221,8 +209,7 @@ class SubtitleLayout:
     ruby_font_size: int = RUBY_FONT_SIZE
     max_phrase_chars: int | None = None
     # ``fit_advance_scale`` and ``fit_outline_px`` are the exact metrics used
-    # by the fit gate.  Japanese keeps the historical wide contract; English
-    # wide selects a separate natural-advance layout below.
+    # by the fit gate.
     fit_advance_scale: float = 1.0
     fit_outline_px: int = 0
     semantic_gap_em: float = 0.0
@@ -287,30 +274,9 @@ WIDE_LAYOUT = SubtitleLayout(
     main_glow_blur=12,
     ruby_glow_blur=8,
 )
-CHINESE_WIDE_LAYOUT = replace(
-    WIDE_LAYOUT,
-    name="wide-bottom-zh",
-    max_phrase_chars=None,
-    enforce_main_font_size=False,
-)
-ENGLISH_WIDE_LAYOUT = replace(
-    WIDE_LAYOUT,
-    name="wide-bottom-en",
-    max_phrase_chars=None,
-    main_font_size=ENGLISH_WIDE_MAIN_FONT_SIZE,
-    min_main_font_size=ENGLISH_WIDE_MIN_MAIN_FONT_SIZE,
-    advance_scale=ENGLISH_WIDE_RENDER_ADVANCE_SCALE,
-    fit_advance_scale=ENGLISH_WIDE_RENDER_ADVANCE_SCALE,
-    letter_spacing_em=ENGLISH_WIDE_LETTER_SPACING_EM,
-    semantic_gap_em=0.0,
-    word_gap_em=ENGLISH_WIDE_WORD_GAP_EM,
-    enforce_main_font_size=False,
-)
 SUBTITLE_LAYOUTS = {
     "standard": STANDARD_LAYOUT,
     "wide": WIDE_LAYOUT,
-    "wide-zh": CHINESE_WIDE_LAYOUT,
-    "wide-en": ENGLISH_WIDE_LAYOUT,
 }
 LANES = STANDARD_LAYOUT.lanes
 
@@ -605,18 +571,6 @@ def _text_width(font_file: Path, size: int, text: str) -> float:
     return float(font.getlength(text))
 
 
-_ENGLISH_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['\u2018\u2019][A-Za-z0-9]+)*")
-
-
-def _english_letter_spacing_after_indices(text: str) -> frozenset[int]:
-    """Return character positions that receive positive word-internal spacing."""
-
-    positions: set[int] = set()
-    for match in _ENGLISH_WORD_RE.finditer(text):
-        positions.update(range(match.start(), match.end() - 1))
-    return frozenset(positions)
-
-
 def _measured_text_span(
     font_file: Path,
     text: str,
@@ -640,12 +594,11 @@ def _measured_text_span(
             for character in text
             if character.isspace()
         )
-    letter_spacing_count = len(_english_letter_spacing_after_indices(text))
     return float(
         natural_width
         + word_gap_adjustment
         + semantic_gap_count * font_size * semantic_gap_em
-        + letter_spacing_count * font_size * letter_spacing_em
+        + 0 * font_size * letter_spacing_em
     )
 
 
@@ -735,7 +688,7 @@ def text_geometry(
     gap_px = font_size * semantic_gap_em
     letter_spacing_px = font_size * letter_spacing_em
     target_word_gap_px = font_size * word_gap_em if word_gap_em is not None else None
-    letter_spacing_after_indices = _english_letter_spacing_after_indices(text)
+    letter_spacing_after_indices = frozenset()
     gap_before = tuple(
         sum(1 for gap_index in semantic_gap_after_indices if gap_index < index)
         * gap_px
@@ -911,93 +864,6 @@ def _character_onsets(
     return result
 
 
-def expand_english_word_tokens_for_render(
-    sentence: Sentence,
-) -> tuple[Sentence, tuple[int, ...]]:
-    """Expand editable English word tokens only in renderer memory.
-
-    The SUG remains one checkpoint per word for human timing work.  This
-    renderer-only view distributes strictly ordered visual onsets across the
-    visible codepoints of each timed word and records the owning source-token
-    index for every expanded character.
-    """
-
-    if all(len(character.char) == 1 for character in sentence.characters):
-        return sentence, tuple(range(len(sentence.characters)))
-
-    expanded: list[Character] = []
-    source_token_indices: list[int] = []
-    for token_index, token in enumerate(sentence.characters):
-        token_text = token.char
-        if len(token_text) == 1:
-            expanded.append(token)
-            source_token_indices.append(token_index)
-            continue
-
-        onset = int(token.timestamps[0]) if token.timestamps else None
-        next_onset = next(
-            (
-                int(candidate.timestamps[0])
-                for candidate in sentence.characters[token_index + 1 :]
-                if candidate.timestamps
-            ),
-            None,
-        )
-        release = (
-            int(token.sentence_end_ts)
-            if token.is_sentence_end and token.sentence_end_ts is not None
-            else next_onset
-        )
-        if onset is not None:
-            release = max(
-                onset + 10 * len(token_text),
-                int(release) if release is not None else onset + 120 * len(token_text),
-            )
-
-        for character_index, visible_character in enumerate(token_text):
-            timed = onset is not None and not visible_character.isspace()
-            timestamp = (
-                onset
-                + round(
-                    (int(release) - onset)
-                    * character_index
-                    / max(1, len(token_text))
-                )
-                if timed
-                else None
-            )
-            is_last = character_index == len(token_text) - 1
-            character = Character(
-                char=visible_character,
-                check_count=1 if timed else 0,
-                timestamps=[] if timestamp is None else [timestamp],
-                sentence_end_ts=(
-                    token.sentence_end_ts
-                    if is_last and token.is_sentence_end
-                    else None
-                ),
-                linked_to_next=False,
-                is_line_end=is_last and token.is_line_end,
-                is_sentence_end=is_last and token.is_sentence_end,
-                is_rest=token.is_rest,
-                singer_id=token.singer_id,
-                needs_guide=token.needs_guide,
-                is_guide=token.is_guide,
-                force_singer_tag=token.force_singer_tag and character_index == 0,
-            )
-            expanded.append(character)
-            source_token_indices.append(token_index)
-
-    rendered = Sentence(
-        id=sentence.id,
-        singer_id=sentence.singer_id,
-        characters=expanded,
-    )
-    if rendered.text != sentence.text:
-        raise ValueError("English renderer expansion changed the source text")
-    return rendered, tuple(source_token_indices)
-
-
 def _character_releases(
     onsets: list[int],
     *,
@@ -1159,80 +1025,6 @@ def main_glyph_events(
             f"Dialogue: {main_layer},"
             f"{ms_to_ass_time(event_start_ms)},{ms_to_ass_time(event_end_ms)},"
             f"{main_style},,0,0,0,,{common_override}{escaped}"
-        )
-    return result
-
-
-def english_word_karaoke_events(
-    sentence: Sentence,
-    *,
-    event_start_ms: int,
-    event_end_ms: int,
-    release_ms: int,
-    lane: Lane,
-    font_size: int,
-    geometry: TextGeometry,
-    outline_px: int,
-    glow_blur: int,
-    offset_ms: int = 0,
-    onset_overrides: dict[int, int] | None = None,
-    release_overrides: dict[int, int] | None = None,
-) -> list[str]:
-    """Render each English word as one naturally kerned karaoke text run.
-
-    Keeping all letters of a word in one ASS event lets the selected font own
-    its normal kerning.  Per-letter ``\\kf`` tags still drive the colour sweep,
-    while the fill, outline, and glow all share the exact same word geometry.
-    """
-
-    onsets = _character_onsets(
-        sentence,
-        offset_ms=offset_ms,
-        onset_overrides=onset_overrides,
-        release_ms=release_ms,
-    )
-    if not onsets:
-        return []
-    releases = _character_releases(
-        onsets,
-        release_ms=release_ms,
-        offset_ms=offset_ms,
-        release_overrides=release_overrides,
-    )
-
-    result: list[str] = []
-    for match in re.finditer(r"\S+", sentence.text):
-        start, end = match.span()
-        if end <= start:
-            continue
-        x = (geometry.glyph_starts[start] + geometry.glyph_ends[end - 1]) / 2.0
-        common = (
-            f"{{\\an8\\pos({int(round(x))},{lane.main_y})"
-            f"\\fs{font_size}\\bord{outline_px}\\fad(80,120)"
-        )
-        lead_in_cs = max(0, onsets[start] - event_start_ms) // 10
-        timed_text = [f"\\k{lead_in_cs}}}"]
-        for index in range(start, end):
-            duration_cs = max(
-                1,
-                int(round((releases[index] - onsets[index]) / 10)),
-            )
-            timed_text.append(
-                f"{{\\kf{duration_cs}}}"
-                f"{_escape_ass_text(sentence.characters[index].char)}"
-            )
-        karaoke_run = "".join(timed_text)
-        glow_override = common + f"\\blur{glow_blur}{karaoke_run}"
-        main_override = common + karaoke_run
-        result.append(
-            f"Dialogue: 1,"
-            f"{ms_to_ass_time(event_start_ms)},{ms_to_ass_time(event_end_ms)},"
-            f"Glow,WordKaraoke,0,0,0,,{glow_override}"
-        )
-        result.append(
-            f"Dialogue: 2,"
-            f"{ms_to_ass_time(event_start_ms)},{ms_to_ass_time(event_end_ms)},"
-            f"Main,WordKaraoke,0,0,0,,{main_override}"
         )
     return result
 
@@ -1425,14 +1217,6 @@ def _semantic_gap_after_indices(
             for character in source_sentence.characters[left_index + 1 : right_index]
         ):
             result.add(display_index)
-    if normalize_language(language, default=DEFAULT_LANGUAGE) == "en":
-        last_visible_index: int | None = None
-        for display_index, character in enumerate(display_sentence.characters):
-            if character.char.isspace():
-                if last_visible_index is not None:
-                    result.add(last_visible_index)
-            else:
-                last_visible_index = display_index
     return frozenset(result)
 
 
@@ -1546,23 +1330,6 @@ def _split_sentence_by_display_override(
             "display override slices do not cover the complete source line: "
             f"{normalized_source_text!r}"
         )
-    if normalize_language(language) == "en":
-        visible_positions = [
-            index
-            for index, character in enumerate(sentence.characters)
-            if not character.char.isspace()
-        ]
-        cursor = 0
-        for phrase in override[:-1]:
-            cursor += len(phrase)
-            left_index = visible_positions[cursor - 1]
-            right_index = visible_positions[cursor]
-            between = sentence.characters[left_index + 1 : right_index]
-            if not any(character.char.isspace() for character in between):
-                raise ValueError(
-                    "English display override splits inside a word: "
-                    f"{normalized_source_text!r} at {cursor}"
-                )
     return result
 
 
@@ -1703,115 +1470,6 @@ def _coalesce_display_runs_that_fit(
     return result
 
 
-def _english_word_spans(sentence: Sentence) -> list[tuple[int, int]]:
-    spans: list[tuple[int, int]] = []
-    start: int | None = None
-    for index, character in enumerate(sentence.characters):
-        if character.char.isspace():
-            if start is not None:
-                spans.append((start, index))
-                start = None
-        elif start is None:
-            start = index
-    if start is not None:
-        spans.append((start, len(sentence.characters)))
-    return spans
-
-
-def _english_word_slice(
-    sentence: Sentence,
-    spans: list[tuple[int, int]],
-    start_word: int,
-    end_word: int,
-) -> Sentence:
-    start = spans[start_word][0]
-    end = spans[end_word - 1][1]
-    return Sentence(
-        singer_id=sentence.singer_id,
-        characters=list(sentence.characters[start:end]),
-    )
-
-
-def _english_phrase_width_at_target(
-    sentence: Sentence,
-    *,
-    font_file: Path,
-    layout: SubtitleLayout,
-) -> float:
-    semantic_gaps = _semantic_gap_after_indices(
-        sentence,
-        sentence,
-        language="en",
-    )
-    return _measured_text_span(
-        font_file,
-        sentence.text,
-        font_size=layout.main_font_size,
-        advance_scale=layout.fit_advance_scale,
-        semantic_gap_count=len(semantic_gaps),
-        semantic_gap_em=layout.semantic_gap_em,
-        letter_spacing_em=layout.letter_spacing_em,
-        word_gap_em=layout.word_gap_em,
-    ) + 2 * layout.fit_outline_px
-
-
-def _split_english_sentence_for_wide_fit(
-    sentence: Sentence,
-    *,
-    font_file: Path,
-    layout: SubtitleLayout,
-) -> list[Sentence]:
-    """Split an overflowing English line at balanced whole-word boundaries."""
-
-    if _english_phrase_width_at_target(
-        sentence,
-        font_file=font_file,
-        layout=layout,
-    ) <= layout.slot_width:
-        return [sentence]
-
-    spans = _english_word_spans(sentence)
-    if len(spans) < 2 * ENGLISH_WIDE_MIN_SPLIT_WORDS:
-        return [sentence]
-
-    candidates: list[tuple[float, int, Sentence, Sentence]] = []
-    for split_at in range(
-        ENGLISH_WIDE_MIN_SPLIT_WORDS,
-        len(spans) - ENGLISH_WIDE_MIN_SPLIT_WORDS + 1,
-    ):
-        left = _english_word_slice(sentence, spans, 0, split_at)
-        right = _english_word_slice(sentence, spans, split_at, len(spans))
-        left_width = _english_phrase_width_at_target(
-            left,
-            font_file=font_file,
-            layout=layout,
-        )
-        right_width = _english_phrase_width_at_target(
-            right,
-            font_file=font_file,
-            layout=layout,
-        )
-        if left_width > layout.slot_width or right_width > layout.slot_width:
-            continue
-        punctuation_bonus = (
-            layout.slot_width * 0.08
-            if left.text.rstrip().endswith((",", ";", ":", ".", "!", "?"))
-            else 0.0
-        )
-        candidates.append(
-            (
-                abs(left_width - right_width) - punctuation_bonus,
-                split_at,
-                left,
-                right,
-            )
-        )
-    if candidates:
-        _, _, left, right = min(candidates, key=lambda item: (item[0], item[1]))
-        return [left, right]
-    return [sentence]
-
-
 def split_sentence_for_display(
     sentence: Sentence,
     *,
@@ -1827,7 +1485,7 @@ def split_sentence_for_display(
         raise ValueError(
             f"max_chars must be at least {MIN_DISPLAY_PHRASE_CHARS}, got {max_chars}"
         )
-    if max_chars is None and language == "ja":
+    if max_chars is None:
         return [sentence]
     override_runs = _split_sentence_by_display_override(
         sentence,
@@ -1841,20 +1499,6 @@ def split_sentence_for_display(
             )
             for run in override_runs
         ]
-    if language == "en":
-        if (
-            font_file is not None
-            and layout is not None
-            and layout.name == ENGLISH_WIDE_LAYOUT.name
-        ):
-            return _split_english_sentence_for_wide_fit(
-                sentence,
-                font_file=font_file,
-                layout=layout,
-            )
-        return [sentence]
-    if language == "zh":
-        return [sentence]
     if max_chars is None:
         return [sentence]
     runs: list[list] = []
@@ -1884,15 +1528,9 @@ def layout_for_language(
     layout: SubtitleLayout,
     language: str,
 ) -> SubtitleLayout:
-    """Select language-specific wide typography without changing Japanese."""
+    """Validate the language and return the selected Japanese layout."""
 
-    language = normalize_language(language)
-    if not layout.name.startswith("wide"):
-        return layout
-    if language == "en":
-        return ENGLISH_WIDE_LAYOUT
-    if language == "zh":
-        return CHINESE_WIDE_LAYOUT
+    normalize_language(language)
     return layout
 
 
@@ -2306,13 +1944,8 @@ def build_review_ass(
     latest_secondary_block_release_ms: int | None = None
     for source_line_index, source_sentence in enumerate(project.sentences):
         voice_role, singer_group = sentence_voice_metadata(source_sentence, project)
-        if language == "en":
-            sentence, source_token_indices = expand_english_word_tokens_for_render(
-                source_sentence
-            )
-        else:
-            sentence = source_sentence
-            source_token_indices = tuple(range(len(sentence.characters)))
+        sentence = source_sentence
+        source_token_indices = tuple(range(len(sentence.characters)))
         source_character_indices = {
             id(character): source_token_indices[index]
             for index, character in enumerate(sentence.characters)
@@ -2607,46 +2240,28 @@ def build_review_ass(
             letter_spacing_em=layout.letter_spacing_em,
             word_gap_em=layout.word_gap_em,
         )
-        if language == "en":
-            events.extend(
-                english_word_karaoke_events(
-                    sentence,
-                    event_start_ms=event_start_ms,
-                    event_end_ms=event_end_ms,
-                    release_ms=release_ms,
-                    lane=lane,
-                    font_size=font_size,
-                    geometry=geometry,
-                    outline_px=layout.main_outline_px,
-                    glow_blur=layout.main_glow_blur,
-                    offset_ms=offset_ms,
-                    onset_overrides=item["visual_onset_overrides"],
-                    release_overrides=item["visual_release_overrides"],
-                )
+        events.extend(
+            main_glyph_events(
+                sentence,
+                event_start_ms=event_start_ms,
+                event_end_ms=event_end_ms,
+                release_ms=release_ms,
+                lane=lane,
+                font_file=font_file,
+                font_size=font_size,
+                advance_scale=layout.advance_scale,
+                semantic_gap_after_indices=item["semantic_gap_after_indices"],
+                semantic_gap_em=layout.semantic_gap_em,
+                letter_spacing_em=layout.letter_spacing_em,
+                word_gap_em=layout.word_gap_em,
+                offset_ms=offset_ms,
+                onset_overrides=item["visual_onset_overrides"],
+                release_overrides=item["visual_release_overrides"],
+                outline_px=layout.main_outline_px,
+                glow_blur=layout.main_glow_blur,
+                geometry=geometry,
             )
-        else:
-            events.extend(
-                main_glyph_events(
-                    sentence,
-                    event_start_ms=event_start_ms,
-                    event_end_ms=event_end_ms,
-                    release_ms=release_ms,
-                    lane=lane,
-                    font_file=font_file,
-                    font_size=font_size,
-                    advance_scale=layout.advance_scale,
-                    semantic_gap_after_indices=item["semantic_gap_after_indices"],
-                    semantic_gap_em=layout.semantic_gap_em,
-                    letter_spacing_em=layout.letter_spacing_em,
-                    word_gap_em=layout.word_gap_em,
-                    offset_ms=offset_ms,
-                    onset_overrides=item["visual_onset_overrides"],
-                    release_overrides=item["visual_release_overrides"],
-                    outline_px=layout.main_outline_px,
-                    glow_blur=layout.main_glow_blur,
-                    geometry=geometry,
-                )
-            )
+        )
         events.extend(
             ruby_events(
                 sentence,
@@ -2742,15 +2357,7 @@ def build_review_ass(
                     item["semantic_gap_after_indices"]
                 ),
                 "semantic_gap_px": round(font_size * layout.semantic_gap_em, 2),
-                "word_gap_px": round(
-                    font_size * layout.word_gap_em
-                    if layout.word_gap_em is not None
-                    else ImageFont.truetype(str(font_file), font_size).getlength(" ")
-                    + font_size * layout.semantic_gap_em,
-                    2,
-                )
-                if language == "en"
-                else 0.0,
+                "word_gap_px": 0.0,
                 "geometry": {
                     "left": round(geometry.left, 3),
                     "right": round(geometry.right, 3),
@@ -2900,11 +2507,7 @@ def build_review_ass(
     if prepared and project_duration_ms > int(prepared[-1]["event_end_ms"]):
         marker_start_ms = int(prepared[-1]["event_end_ms"])
         marker_end_ms = project_duration_ms
-        marker_text = {
-            "ja": "終わり",
-            "zh": "结束",
-            "en": "The End",
-        }[language]
+        marker_text = "\u7d42\u308f\u308a"
         marker_sentence = Sentence.from_text(marker_text, "outro")
         marker_fill_duration_ms = marker_end_ms - marker_start_ms
         marker_character_onsets_ms = [
@@ -2945,7 +2548,7 @@ def build_review_ass(
                 glow_blur=layout.main_glow_blur,
             )
         )
-        marker_ruby = "お" if language == "ja" else None
+        marker_ruby = "\u304a\u308f\u308a"
         if marker_ruby:
             events.extend(
                 ruby_events(
@@ -3023,11 +2626,7 @@ def build_review_ass(
                 layout.main_font_size * layout.letter_spacing_em,
                 3,
             ),
-            "scope": (
-                "english-word-internal"
-                if layout.letter_spacing_em > 0
-                else "none"
-            ),
+            "scope": "global" if layout.letter_spacing_em > 0 else "none",
             "positive": layout.letter_spacing_em > 0,
         },
         "word_gap": {
@@ -3049,35 +2648,8 @@ def build_review_ass(
                 ).getlength(" "),
                 3,
             ),
-            "natural_space_only": (
-                language == "en"
-                and layout.semantic_gap_em == 0.0
-                and layout.word_gap_em is None
-            ),
-            "narrowed_from_natural": (
-                language == "en"
-                and layout.word_gap_em is not None
-                and layout.main_font_size * layout.word_gap_em
-                < ImageFont.truetype(
-                    str(font_file),
-                    layout.main_font_size,
-                ).getlength(" ")
-            ),
-            "strategy": (
-                "fixed-em-renderer-geometry"
-                if language == "en" and layout.word_gap_em is not None
-                else "font-natural-plus-semantic-gap"
-            ),
-            "word_run_positioning_advance_scale": (
-                layout.advance_scale if language == "en" else None
-            ),
+            "strategy": "font-natural-plus-semantic-gap",
             "word_internal_spacing_affected": False,
-            "native_frame_visible_white_gap_target_px": (
-                {"minimum": 18, "maximum": 32}
-                if language == "en"
-                else None
-            ),
-            "native_frame_measurement_required": language == "en",
             "greater_than_letter_spacing": (
                 (
                     layout.main_font_size * layout.word_gap_em

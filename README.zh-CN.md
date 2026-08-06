@@ -4,17 +4,19 @@
 
 这是一个面向Codex的卡拉OK视频制作Skill，同时提供经过脱敏的StrangeUtaGame集成，用于制作、审核、渲染、验证和打包带有可编辑时间轴来源和AV1 4:2:0发布检查的卡拉OK视频。
 
+内置默认语言profile为日语（`ja`）；其他语言可通过经过单独验证的适配器接入。
+
 请先阅读[SKILL.md](SKILL.md)；[English README](README.md)以及下方的中英文参考文档会同步维护。
 
 ## 包含内容
 
 - `SKILL.md`中的检查→预览→编码→验证流程。
-- 语义分段、日语注音词边界QA、可编辑SUG一致性、MMS与独立ASR证据以及CJK视觉适配门禁。
+- 语义分段、日语注音词边界QA、可编辑SUG一致性、MMS与独立ASR证据以及歌词视觉适配门禁。
 - 宽屏`vinyl`和`spectrum`模板；每次渲染只能选择一个。
 - 默认MP4交付，音频为AAC-LC 320 kb/s；选定源确实是无损FLAC或PCM WAV时，另提供配对的FLAC音频MKV。
 - 通过`scripts/pitch_shift_audio.py`处理完整混音，默认使用带共振峰保持的Rubber Band R3 Finer；正式流程拒绝MP3/AAC源，不能把有损音频重新标记为FLAC。
 - 当前已验证基线为StrangeUtaGame 1.4.5和SUG存储格式0.3.0。`pyproject.toml`中的包版本可能仍为1.2.6；它不是应用版本或解析器格式的真源。
-- 20个不同的脱敏生产脚本实现。变调工具另在顶层`scripts/pitch_shift_audio.py`保留一份完全相同的独立入口；此外还包含带保护的安装器、编辑器/音频探针、环境检查器、只读的顶层`scripts/check_sug_compatibility.py`验证器、清单和私有覆盖示例。
+- 19个不同的脱敏生产脚本实现。变调工具另在顶层`scripts/pitch_shift_audio.py`保留一份完全相同的独立入口；此外还包含带保护的安装器、编辑器/音频探针、环境检查器、只读的顶层`scripts/check_sug_compatibility.py`验证器、清单和私有覆盖示例。
 
 仓库不包含录音、歌词、专辑信息、字体、封面、模型、凭据、渲染媒体或真实项目报告。
 
@@ -61,10 +63,10 @@ python scripts/check_karaoke_environment.py --target D:\path\to\StrangeUtaGame
 
 1. 为录音、歌词、同步/展示、字体、封面、模型和最终分发建立权利清单；任何必要权利缺失或不确定时停止公开交付。
 2. 探测每个输入并在编码前确定输出矩阵。所有强制门禁通过前保留源媒体并写入临时输出。
-3. 每次ASR/对齐运行都必须恰好选择一种语言：`ja`、`zh`或`en`。独立ASR是独立证据链，绝不是强制对齐失败后的静默后备；不可用或失败时记录为`unresolved`。繁简转换只用于`zh`内部比较，不是语言后备。
+3. 文档化的ASR和对齐流程使用已配置的语言 profile；任何非默认 profile 都必须有经过验证的 adapter。独立ASR是独立证据链，绝不是强制对齐失败后的静默后备；不可用或失败时记录为`unresolved`。
 4. 请求升降调时，在时间轴和渲染前处理完整混音。验证后的变调FLAC同时用于时间证据、预览、MP4 AAC-LC 320 kb/s和配对MKV FLAC音轨。
 5. 把MP4和MKV作为同一代一起验证：MP4为AAC-LC/320k，MKV只有FLAC音频，编码视频流哈希一致，时间轴一致，MKV解码PCM等于选定的无损源切片。
-6. 不要为了逐字计时或显示分段在中文歌词汉字之间插入空格；使用词义和声学证据。
+6. 保持源文本、适用的注音和上下文读音从可编辑SUG到ASS及渲染输出的可追溯性。
 7. 以实际安装应用和`SugMigrator.CURRENT_VERSION`为准；不要把过时的`pyproject.toml`包版本当作SUG契约。
 
 ## 参考文档
@@ -93,13 +95,12 @@ uv run python scripts/karaoke_timing.py --manifest $env:KARAOKE_ALBUM_MANIFEST -
 
 ## 脚本来源与依赖边界
 
-20个生产脚本都是后来开发的集成脚本。它们在脱敏前是生产工作树中的未跟踪新增文件，不是从StrangeUtaGame上游Git历史取出的文件。“直接依赖上游模块”表示导入另行获取的应用中由Git跟踪的模块；“传递运行依赖”表示通过其他集成脚本加载这些模块。
+19个生产脚本都是后来开发的集成脚本。它们在脱敏前是生产工作树中的未跟踪新增文件，不是从StrangeUtaGame上游Git历史取出的文件。“直接依赖上游模块”表示导入另行获取的应用中由Git跟踪的模块；“传递运行依赖”表示通过其他集成脚本加载这些模块。
 
 | 脚本 | 边界 | 用途或依赖 |
 |---|---|---|
 | `karaoke_timing.py` | 直接依赖上游模块 | 领域实体、导出器和`SugProjectParser`。 |
 | `karaoke_review_preview.py` | 直接依赖上游模块 | `Character`、`Sentence`和`SugProjectParser`。 |
-| `convert_english_sug_word_tokens.py` | 直接依赖上游模块 | `SugProjectParser`和SUG时间轴转换。 |
 | `sync_karaoke_editable_ruby.py` | 传递运行依赖 | 上下文注音和专辑时间轴数据。 |
 | `audit_karaoke_asr_recognition.py` | 传递运行依赖 | LRC工具和应用支持的时间轴。 |
 | `audit_karaoke_mms_alignment.py` | 传递运行依赖 | 时间轴工具和SUG证据。 |
@@ -108,7 +109,7 @@ uv run python scripts/karaoke_timing.py --manifest $env:KARAOKE_ALBUM_MANIFEST -
 | `render_karaoke_direct_av1_420_album.py` | 传递运行依赖 | 注音同步和SUG预览渲染。 |
 | `finalize_karaoke_release.py` | SUG成品/目录依赖 | 检查`.sug`文件和发布目录。 |
 | `karaoke_album.py` | 不导入上游代码 | 脱敏清单和路径模型。 |
-| `karaoke_language.py` | 不导入上游代码 | 语言规范化和分词。 |
+| `karaoke_language.py` | 不导入上游代码 | 已验证 profile 使用的语言规范化和分词。 |
 | `build_karaoke_wide_artwork.py` | 不导入上游代码 | 使用Pillow构图。 |
 | `render_vinyl_karaoke.py` | 不导入上游代码 | 生成黑胶视觉层。 |
 | `inspect_karaoke_media.py` | 不导入上游代码 | 检查编码媒体和渲染元数据。 |

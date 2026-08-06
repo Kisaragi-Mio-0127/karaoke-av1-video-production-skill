@@ -54,10 +54,8 @@ storage format 0.3.0. Verify those values from the application source and
 `SugMigrator.CURRENT_VERSION`; the `pyproject.toml` package version may still
 read 1.2.6 and is not the version authority. Run
 `scripts/check_sug_compatibility.py` against representative projects after an
-application update. Every ASR/alignment run must select exactly one of `ja`,
-`zh`, or `en`; simplified/traditional conversion is only comparison
-normalization within `zh`, never a language fallback. Require unchanged
-before/after project hashes.
+application update. Use the configured language profile for the documented
+ASR/alignment path. Require unchanged before/after project hashes.
 
 ## Native tools
 
@@ -112,8 +110,8 @@ them before sharing. Do not commit probe, audit, validation, or snapshot JSON.
 
 | Stage | Installed entry points |
 |---|---|
-| Manifest/language | `karaoke_album.py`, `karaoke_language.py` |
-| Timing and editable SUG | `karaoke_timing.py`, `karaoke_review_preview.py`, `sync_karaoke_editable_ruby.py`, `convert_english_sug_word_tokens.py` |
+| Manifest/text | `karaoke_album.py`, `karaoke_language.py` |
+| Timing and editable SUG | `karaoke_timing.py`, `karaoke_review_preview.py`, `sync_karaoke_editable_ruby.py` |
 | Alignment evidence | `audit_karaoke_asr_recognition.py`, `audit_karaoke_mms_alignment.py` |
 | Optional separation evidence | `prepare_karaoke_msst_vocals.py` |
 | Artwork/render | `build_karaoke_wide_artwork.py`, `render_vinyl_karaoke.py`, `render_karaoke_direct_av1_album.py`, `render_karaoke_direct_hevc444_album.py`, `render_karaoke_direct_av1_420_album.py` |
@@ -131,8 +129,9 @@ key change is requested, run `scripts/pitch_shift_audio.py` on the complete mix
 before timing and rendering; use the verified shifted FLAC for timing evidence,
 the default MP4 AAC-LC 320 kb/s output, and the paired MKV FLAC output. Do not
 use deterministic interpolation as an independent-ASR fallback; an unavailable
-or failed independent ASR lane is `unresolved`. Explicitly select Japanese,
-Chinese, or English, and never insert spaces between Chinese lyric characters.
+or failed independent ASR lane is `unresolved`. Use the configured language
+profile and keep source text, applicable ruby, and readings unchanged except
+for reviewed profile-specific normalization.
 
 ## Production order
 

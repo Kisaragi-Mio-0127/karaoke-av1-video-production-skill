@@ -31,7 +31,7 @@ uv pip install -r requirements-karaoke.skill.lock.txt
 python scripts/check_karaoke_environment.py --target D:\path\to\StrangeUtaGame
 ```
 
-当前已验证应用基线是StrangeUtaGame 1.4.5，SUG存储格式是0.3.0。应用版本应从`src/strange_uta_game/__version__.py`确认，格式应从`SugMigrator.CURRENT_VERSION`确认；`pyproject.toml`中的1.2.6不是版本真源。升级后用`scripts/check_sug_compatibility.py`检查代表性项目，并要求前后哈希不变。每次ASR/对齐运行都必须恰好选择`ja`、`zh`或`en`之一；繁简转换只用于`zh`内部比较，不是语言后备。
+当前已验证应用基线是StrangeUtaGame 1.4.5，SUG存储格式是0.3.0。应用版本应从`src/strange_uta_game/__version__.py`确认，格式应从`SugMigrator.CURRENT_VERSION`确认；`pyproject.toml`中的1.2.6不是版本真源。升级后用`scripts/check_sug_compatibility.py`检查代表性项目，并要求前后哈希不变。文档化的ASR/对齐流程使用已配置的语言 profile。
 
 ## 私有数据与脚本流程
 
@@ -47,7 +47,7 @@ python scripts/check_karaoke_environment.py --target D:\path\to\StrangeUtaGame
 
 本仓库的支持工具包括用于只读SUG验证的`scripts/check_sug_compatibility.py`，以及用于处理完整混音变调的`scripts/pitch_shift_audio.py`。后者也会随生产脚本快照安装；验证后的FLAC和JSON报告必须作为一组保留。
 
-人工调轴默认跳过；确需人工检查时，先用编辑器音频探针确认真实项目和音频加载，再以正常可编辑模式打开同一规范SUG。最终可编辑时间轴源是`.sug`，探针JSON只是证据。独立ASR不可用或失败时记录`unresolved`，不能用插值或强制对齐冒充；显式选择日语、中文或英语，中文歌词字间不插空格。
+人工调轴默认跳过；确需人工检查时，先用编辑器音频探针确认真实项目和音频加载，再以正常可编辑模式打开同一规范SUG。最终可编辑时间轴源是`.sug`，探针JSON只是证据。独立ASR不可用或失败时记录`unresolved`，不能用插值或强制对齐冒充；使用已配置的语言 profile，并保持源文本、适用的注音和读音不变（经过审查的 profile 专用规范化除外）。
 
 请求升降调时，在时间轴和渲染之前对完整混音运行`scripts/pitch_shift_audio.py`。验证后的FLAC同时供时间证据、默认MP4的AAC-LC 320 kb/s和配对MKV的FLAC使用；不能从MP4 AAC制作无损音轨。
 

@@ -737,8 +737,6 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     role_aware_layout = layout in {
         "standard-v7",
         "wide-bottom",
-        "wide-bottom-zh",
-        "wide-bottom-en",
     }
 
     styles: list[dict[str, Any]] = []
@@ -812,19 +810,10 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     )
 
     if role_aware_layout:
-        if layout in {"wide-bottom", "wide-bottom-zh"}:
+        if layout == "wide-bottom":
             size_ranges = {
                 "Glow": (108.0, 108.0),
                 "Main": (108.0, 108.0),
-                "RubyGlow": (51.0, 51.0),
-                "Ruby": (51.0, 51.0),
-                "CueDim": (39.0, 39.0),
-                "CueHot": (39.0, 39.0),
-            }
-        elif layout == "wide-bottom-en":
-            size_ranges = {
-                "Glow": (96.0, 96.0),
-                "Main": (96.0, 96.0),
                 "RubyGlow": (51.0, 51.0),
                 "Ruby": (51.0, 51.0),
                 "CueDim": (39.0, 39.0),
@@ -880,10 +869,6 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
 
     if role_aware_layout:
         inline_size_ranges = dict(size_ranges)
-        if layout == "wide-bottom-zh":
-            inline_size_ranges.update({"Glow": (75.0, 108.0), "Main": (75.0, 108.0)})
-        elif layout == "wide-bottom-en":
-            inline_size_ranges.update({"Glow": (54.0, 96.0), "Main": (54.0, 96.0)})
         if secondary_declared:
             inline_size_ranges.update(
                 {"SecondaryGlow": (36.0, 51.0), "Secondary": (36.0, 51.0)}
@@ -898,13 +883,10 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     number_pattern = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
     fs_pattern = re.compile(rf"\\fs(?![A-Za-z])({number_pattern})")
     fsp_pattern = re.compile(rf"\\fsp({number_pattern})")
-    fscx_pattern = re.compile(rf"\\fscx({number_pattern})")
     inline_font_sizes: list[dict[str, Any]] = []
     bad_inline_sizes: list[dict[str, Any]] = []
-    missing_dynamic_sizes: list[dict[str, Any]] = []
     letter_spacing: list[dict[str, Any]] = []
     bad_letter_spacing: list[dict[str, Any]] = []
-    inline_scale_x: list[dict[str, Any]] = []
     for dialogue in dialogues:
         style_name = dialogue["style"]
         text_value = dialogue["text"]
@@ -919,33 +901,14 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             inline_font_sizes.append(record)
             if allowed_range is not None and not allowed_range[0] <= value <= allowed_range[1]:
                 bad_inline_sizes.append({**record, "allowed": allowed_range})
-        if (
-            layout in {"wide-bottom-zh", "wide-bottom-en"}
-            and style_name in {"Glow", "Main"}
-            and not fs_values
-        ):
-            missing_dynamic_sizes.append(
-                {"line": dialogue["line"], "style": style_name}
-            )
         for match in fsp_pattern.finditer(text_value):
             value = float(match.group(1))
             record = {"line": dialogue["line"], "style": style_name, "value": value}
             letter_spacing.append(record)
             if value < 0:
                 bad_letter_spacing.append(record)
-        for match in fscx_pattern.finditer(text_value):
-            inline_scale_x.append(
-                {
-                    "line": dialogue["line"],
-                    "style": style_name,
-                    "value": float(match.group(1)),
-                }
-            )
-
     if bad_inline_sizes:
         errors.append(f"inline_font_size_outside_layout_role_range: {bad_inline_sizes}")
-    if missing_dynamic_sizes:
-        errors.append(f"missing_dynamic_main_font_size_override: {missing_dynamic_sizes}")
 
     def right_middle_or_lower(style: dict[str, Any]) -> bool:
         if style["name"] in secondary_style_names:
@@ -1211,51 +1174,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             f"{ {name: parsed['bgr'] for name, parsed in parsed_secondary_highlight_colors.items()} }"
         )
 
-    natural_advance_violations: list[dict[str, Any]] = []
-    if layout == "wide-bottom-en":
-        for style_name in ("Main", "Glow"):
-            style = styles_by_name.get(style_name)
-            if style is None or style["scale_x"] != 100.0 or style["spacing"] != 0.0:
-                natural_advance_violations.append(
-                    {
-                        "style": style_name,
-                        "scale_x": style["scale_x"] if style else None,
-                        "spacing": style["spacing"] if style else None,
-                    }
-                )
-        natural_advance_violations.extend(
-            record for record in inline_scale_x if record["value"] != 100.0
-        )
-    natural_advance_ok = not natural_advance_violations
-    if natural_advance_violations:
-        errors.append(
-            "english_wide_requires_natural_advance: "
-            f"{natural_advance_violations}"
-        )
-
-    english_main_events = [
-        dialogue for dialogue in dialogues if dialogue["style"] in {"Main", "Glow"}
-    ]
-    english_bad_spacing_scope = [
-        record for record in letter_spacing if record["style"] not in {"Main", "Glow"}
-    ]
-    english_spacing_ok = True
-    if layout == "wide-bottom-en":
-        english_spacing_ok = bool(english_main_events) and not (
-            bad_letter_spacing or english_bad_spacing_scope
-        )
-        if bad_letter_spacing:
-            errors.append(f"english_wide_letter_spacing_negative: {bad_letter_spacing}")
-        if english_bad_spacing_scope:
-            errors.append(
-                "english_wide_letter_spacing_outside_main_glyphs: "
-                f"{english_bad_spacing_scope}"
-            )
-        if not english_main_events:
-            errors.append("english_wide_has_no_main_glyph_events")
-    elif bad_letter_spacing:
+    if bad_letter_spacing:
         errors.append(f"letter_spacing_negative: {bad_letter_spacing}")
-
     highlight_color = None
     highlight_color_ass = None
     if "Main" in parsed_highlight_colors:
@@ -1265,8 +1185,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     for dialogue in dialogues:
         with contextlib.suppress(ValueError, IndexError):
             start_times.append(_ass_time_seconds(dialogue["start"]))
-    font_size_profile_ok = not bad_sizes and not bad_inline_sizes and not missing_dynamic_sizes
-    letter_spacing_ok = english_spacing_ok and not bad_letter_spacing
+    font_size_profile_ok = not bad_sizes and not bad_inline_sizes
+    letter_spacing_ok = not bad_letter_spacing
     return {
         "ok": not errors,
         "path": str(ass_path),
@@ -1292,18 +1212,7 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             "positive": bool(letter_spacing)
             and all(record["value"] > 0 for record in letter_spacing),
             "non_negative": letter_spacing_ok,
-            "scope": (
-                "english-word-internal-main-glyphs"
-                if layout == "wide-bottom-en" and letter_spacing
-                else "natural-font-advance"
-                if layout == "wide-bottom-en"
-                else "none"
-            ),
-        },
-        "natural_advance": {
-            "required": layout == "wide-bottom-en",
-            "ok": natural_advance_ok,
-            "violations": natural_advance_violations,
+            "scope": "none",
         },
         "secondary": {
             "present": secondary_declared,
@@ -1340,13 +1249,12 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             "no_forbidden_karaoke_tokens": not forbidden_tokens,
             "harmonyos_sans_sc": not wrong_fonts and not bad_inline_fonts,
             "font_size_profile": font_size_profile_ok,
-            "inline_font_size_profile": not bad_inline_sizes and not missing_dynamic_sizes,
+            "inline_font_size_profile": not bad_inline_sizes,
             "layout_geometry": not bad_alignment and not bad_positions,
             "secondary_styles": secondary_gate_ok,
             "highlight_color_consistency": highlight_color_consistent,
             "secondary_highlight_color_consistency": secondary_highlight_consistent,
             "letter_spacing": letter_spacing_ok,
-            "natural_advance": natural_advance_ok,
         },
     }
 

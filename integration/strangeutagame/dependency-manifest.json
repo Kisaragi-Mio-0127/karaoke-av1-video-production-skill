@@ -24,11 +24,6 @@
       "reason": "Builds artwork with Pillow only."
     },
     {
-      "path": "convert_english_sug_word_tokens.py",
-      "category": "direct-upstream-import",
-      "reason": "Imports StrangeUtaGame SugProjectParser and timing-domain conversion helpers."
-    },
-    {
       "path": "finalize_karaoke_release.py",
       "category": "artifact-layout",
       "reason": "Does not import StrangeUtaGame code, but verifies expected .sug files and the integration release layout."

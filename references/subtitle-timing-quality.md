@@ -42,6 +42,7 @@ canonical source -> timing/phrase overrides -> renderer output
 ## Ruby And Visual Fit
 
 - Review Japanese ruby in whole-word and sentence context; do not mechanically apply isolated kanji readings.
+- Treat homographs as phrase-level decisions, not global surface replacements. For example, `雨が降りそう` uses `ふ`, while `駅で降りた` uses `お`; verify the canonical SUG and final ASS independently, and record an occurrence- or phrase-specific override whenever automatic ruby disagrees with the reviewed source.
 - Check reading correctness and lexical grouping as two independent properties. A concatenated reading can be correct while its ruby span is wrong.
 - Prefer lexical-word ruby groups, not uniformly per-kanji groups. Keep multi-kanji compounds and jukujikun together when one contextual reading belongs to the whole word, such as `今年→ことし`, `来年→らいねん`, and `一番→いちばん`. A one-kanji group remains valid when that kanji is the actual annotated lexical span.
 - Stop a ruby group at every real lexical boundary. Do not merge adjacent words because their kana can be concatenated; reject `一番好→いちばんす` and require `一番→いちばん`, `好→す`, with `き` left as unannotated okurigana. Normally keep kana okurigana outside the ruby span unless a documented renderer or dictionary contract requires otherwise.
@@ -80,9 +81,9 @@ canonical source -> timing/phrase overrides -> renderer output
 
 Treat MMS as project-provided machine alignment or timestamp evidence, not as a universal algorithm. Record the tool, model, version, input lane, configuration, and generation identity that produced it.
 
-Keep independent ASR outside this fallback path. Every ASR/alignment run must select exactly one language, `ja`, `zh`, or `en`. stable-ts and MMS are known-text forced alignment; deterministic interpolation is display timing. If independent ASR is unavailable, fails, or cannot confidently match the frozen lyric window, record an unresolved ASR disposition instead of substituting interpolation or forced-alignment tokens. Simplified/traditional conversion is only comparison normalization within `zh`, never a language fallback; preserve Japanese kanji and kana.
+Keep independent ASR outside this fallback path. Use the configured language profile for the documented ASR/alignment path. stable-ts and MMS are known-text forced alignment; deterministic interpolation is display timing. If independent ASR is unavailable, fails, or cannot confidently match the frozen lyric window, record an unresolved ASR disposition instead of substituting interpolation or forced-alignment tokens.
 
-中文说明：独立ASR不属于插值后备流程。stable-ts和MMS使用已知文本做强制对齐，确定性插值只负责显示时间。独立ASR无法运行、执行失败或无法可靠匹配冻结歌词窗口时，必须记录为未解决，不能用插值或强制对齐结果冒充ASR。日语比对必须保留汉字和假名，繁简转换只用于中文。中文歌词的字间不能为了计时而插入空格。
+中文说明：独立ASR不属于插值后备流程。stable-ts和MMS使用已知文本做强制对齐，确定性插值只负责显示时间。独立ASR无法运行、执行失败或无法可靠匹配冻结歌词窗口时，必须记录为未解决，不能用插值或强制对齐结果冒充ASR。文档化流程使用已配置的语言 profile。
 
 Compare, when available:
 

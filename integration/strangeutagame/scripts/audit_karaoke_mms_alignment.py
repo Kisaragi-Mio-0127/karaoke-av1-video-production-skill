@@ -48,12 +48,9 @@ try:
     )
     from scripts.karaoke_language import (
         DEFAULT_LANGUAGE,
-        english_word_spans,
-        is_chinese_character,
         language_identity,
         mms_granularity,
         normalize_language,
-        pinyin_for_character,
     )
 except ImportError:  # pragma: no cover - direct execution fallback
     import karaoke_timing  # type: ignore[no-redef]
@@ -67,12 +64,9 @@ except ImportError:  # pragma: no cover - direct execution fallback
     )
     from karaoke_language import (  # type: ignore[no-redef]
         DEFAULT_LANGUAGE,
-        english_word_spans,
-        is_chinese_character,
         language_identity,
         mms_granularity,
         normalize_language,
-        pinyin_for_character,
     )
 
 
@@ -289,17 +283,6 @@ def allocate_chunk(
     return assignments
 
 
-def _filter_mms_unit(
-    value: str,
-    allowed_units: Iterable[str] | None = None,
-) -> str:
-    """Normalize a pinyin/word token to the MMS alphabet."""
-
-    allowed = set(allowed_units or _DEFAULT_ALLOWED_UNITS)
-    unit = "".join(character for character in str(value).lower() if character in allowed)
-    return unit or "x"
-
-
 def line_units(
     text: str,
     helper: Any,
@@ -316,37 +299,7 @@ def line_units(
     that module is automatically reused by this production script.
     """
 
-    language = normalize_language(language)
-    if language == "zh":
-        units: list[tuple[str, int]] = []
-        covered_word_characters: set[int] = set()
-        for start, end, word in english_word_spans(text):
-            unit = _filter_mms_unit(word, allowed_units)
-            if unit == "x":
-                for index in range(start, end):
-                    if karaoke_timing.is_timed_character(text[index]):
-                        units.append((unit, index))
-            else:
-                units.append((unit, start))
-            covered_word_characters.update(range(start, end))
-        for index, character in enumerate(text):
-            if index in covered_word_characters or not is_chinese_character(character):
-                continue
-            unit = _filter_mms_unit(pinyin_for_character(character), allowed_units)
-            if unit == "x":
-                raise ValueError(
-                    f"pypinyin produced no MMS unit for Chinese character "
-                    f"{character!r} at index {index}"
-                )
-            units.append((unit, index))
-        units.sort(key=lambda item: item[1])
-        return units
-    if language == "en":
-        units = [
-            (_filter_mms_unit(word, allowed_units), start)
-            for start, _end, word in english_word_spans(text)
-        ]
-        return units
+    normalize_language(language)
 
     overrides = (
         reading_overrides
@@ -470,36 +423,6 @@ def inherit_display_group_candidates(
 
     language = normalize_language(language)
     candidates = inherit_small_kana_candidates(text, units)
-    if language == "en":
-        for start, end, _word in english_word_spans(text):
-            group = [
-                (candidate_index, candidates[candidate_index])
-                for candidate_index in range(start, end)
-                if candidate_index in candidates
-            ]
-            if not group:
-                continue
-            source_index, source = min(
-                group,
-                key=lambda item: (int(item[1]["start_ms"]), item[0]),
-            )
-            grouped = {
-                "start_ms": int(source["start_ms"]),
-                "end_ms": max(int(item[1]["end_ms"]) for item in group),
-                "score": round(
-                    sum(float(item[1]["score"]) for item in group) / len(group),
-                    6,
-                ),
-            }
-            for word_index in range(start, end):
-                candidates[word_index] = {
-                    **grouped,
-                    **(
-                        {"inherited_from_character_index": source_index}
-                        if word_index != source_index
-                        else {}
-                    ),
-                }
     index = 0
     while index < len(text):
         if not text[index].isdigit():

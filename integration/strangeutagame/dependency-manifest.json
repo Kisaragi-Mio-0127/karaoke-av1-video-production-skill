@@ -5,8 +5,17 @@
     "direct-upstream-import": "Imports strange_uta_game Python modules directly.",
     "transitive-runtime": "Imports or executes another bundled script that imports strange_uta_game.",
     "artifact-layout": "Does not import strange_uta_game, but expects StrangeUtaGame SUG artifacts or repository layout.",
-    "no-upstream-code-import": "Does not import strange_uta_game directly or transitively; installed with the integration for the shared manifest and release workflow."
+    "no-upstream-code-import": "Does not import strange_uta_game directly or transitively; installed with the integration for the shared manifest and release workflow.",
+    "shared-internal-module": "Shared implementation module imported by bundled entry scripts; not a standalone command."
   },
+  "shared_modules": [
+    {
+      "path": "sug_ruby.py",
+      "category": "shared-internal-module",
+      "upstream_dependency": "direct-upstream-import",
+      "reason": "Shared canonical SUG ruby module; object writeback dynamically imports StrangeUtaGame Character and Sentence. It is not a standalone command."
+    }
+  ],
   "scripts": [
     {
       "path": "audit_karaoke_asr_recognition.py",
@@ -41,7 +50,7 @@
     {
       "path": "karaoke_language.py",
       "category": "no-upstream-code-import",
-      "reason": "Provides language normalization and tokenization helpers."
+      "reason": "Provides language normalization and validated-profile gates."
     },
     {
       "path": "karaoke_release_snapshot.py",
@@ -51,7 +60,7 @@
     {
       "path": "karaoke_review_preview.py",
       "category": "direct-upstream-import",
-      "reason": "Imports StrangeUtaGame Character, Sentence, and SugProjectParser."
+      "reason": "Imports StrangeUtaGame Sentence and SugProjectParser."
     },
     {
       "path": "karaoke_timing.py",
@@ -96,7 +105,7 @@
     {
       "path": "sync_karaoke_editable_ruby.py",
       "category": "transitive-runtime",
-      "reason": "Imports contextual ruby and album timing data from StrangeUtaGame-backed scripts."
+      "reason": "Applies reviewed SUG-first ruby patches through the bundled canonical ruby module, which operates on StrangeUtaGame project data."
     },
     {
       "path": "transcode_karaoke_av1.py",

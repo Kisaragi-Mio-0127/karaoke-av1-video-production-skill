@@ -74,6 +74,21 @@ except ImportError:  # pragma: no cover - direct script execution
         uses_ruby,
     )
 
+try:
+    from .sug_ruby import (
+        fill_missing_project_ruby,
+        sug_hash,
+        timing_fingerprint,
+        write_review_sidecar,
+    )
+except ImportError:  # pragma: no cover - direct script execution
+    from sug_ruby import (  # type: ignore[no-redef]
+        fill_missing_project_ruby,
+        sug_hash,
+        timing_fingerprint,
+        write_review_sidecar,
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
@@ -1683,7 +1698,7 @@ def build_project(
             )
             character = Character(
                 char=char,
-                ruby=helper.ruby(char, language=language),
+                ruby=None,
                 check_count=1 if timed else 0,
                 is_line_end=index == len(line.text) - 1,
                 is_sentence_end=index == len(line.text) - 1,
@@ -2400,9 +2415,22 @@ def export_song(
     ass_path = base.with_suffix(".ass")
     lrc_path = base.with_suffix(".lrc")
     srt_path = base.with_suffix(".srt")
+    ruby_review_path = base.with_suffix(".ruby-review.json")
 
     relative_audio = os.path.relpath(audio_path, sug_path.parent)
+    timing_before_ruby = timing_fingerprint(project)
+    sug_hash_before_ruby = sug_hash(project)
+    ruby_fill_records = fill_missing_project_ruby(project, ReadingHelper())
+    if timing_fingerprint(project) != timing_before_ruby:
+        raise ValueError("ruby fill changed canonical timing fields")
+    sug_hash_after_ruby = sug_hash(project)
     SugProjectParser.save(project, str(sug_path), media_path=relative_audio)
+    ruby_sidecar = write_review_sidecar(
+        ruby_review_path,
+        sug_hash_before=sug_hash_before_ruby,
+        sug_hash_after=sug_hash_after_ruby,
+        records=ruby_fill_records,
+    )
     LRCExporter().export(project, str(lrc_path))
     ASSDirectExporter().export(project, str(ass_path))
     SRTExporter().export(project, str(srt_path))
@@ -2432,6 +2460,13 @@ def export_song(
             "srt": project_relative(srt_path, project_root),
         },
         "sug_version": raw_sug.get("version"),
+        "ruby_review": {
+            "path": project_relative(ruby_review_path, project_root),
+            "sug_hash_before": ruby_sidecar["sug_hash_before"],
+            "sug_hash_after": ruby_sidecar["sug_hash_after"],
+            "record_count": len(ruby_sidecar["records"]),
+            "source": "canonical-sug",
+        },
         "sug_metadata": {
             "language": sug_language,
             "language_identity": language_identity(sug_language),

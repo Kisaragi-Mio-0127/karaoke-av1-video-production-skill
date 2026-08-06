@@ -16,22 +16,26 @@ pad=ceil(iw/2)*2:ceil(ih/2)*2,subtitles=...,format=p010le
 
 10位软件路径使用`yuv420p10le`，NVENC输入使用`p010le`，8位兼容路径使用`yuv420p`。不要静默裁剪源画面。
 
-## AV1编码与默认MP4
+## AV1编码与默认兼容MP4
 
-NVENC探测成功时可使用`av1_nvenc`做预览或交付；CPU质量路径使用`libaom-av1`。质量参数必须由代表性预览和交付要求决定，不能把示例CQ/CRF当作固定标准。
+NVENC探测成功时，默认1920x1080、30fps、SDR兼容档使用AV1 NVENC CQ44、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、AQ strength8、GOP240、yuv420p和BT.709。CPU质量路径使用`libaom-av1`；10位路径另行记录，不能把示例CQ/CRF当作默认标准。
 
 默认主交付是MP4，音频使用AAC-LC，目标码率为320 kb/s，并显式映射视频和选定音轨：
 
 ```powershell
 & $ffmpeg -nostdin -n -i $input `
   -map 0:v:0 -map 0:a:0? -map_metadata -1 -map_chapters -1 `
-  -vf "subtitles='$ass':fontsdir='$fonts',format=p010le" `
-  -c:v av1_nvenc -preset p6 -tune hq -rc vbr -cq 28 -b:v 0 `
+  -vf "subtitles='$ass':fontsdir='$fonts',format=yuv420p" `
+  -s 1920x1080 -r 30 -pix_fmt yuv420p `
+  -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 44 -b:v 0 `
+  -multipass fullres -lookahead 32 -spatial-aq 1 -temporal-aq 1 `
+  -aq-strength 8 -g 240 `
+  -colorspace bt709 -color_primaries bt709 -color_trc bt709 `
   -c:a aac -profile:a aac_low -b:a 320k -movflags +faststart `
   $temporaryMp4
 ```
 
-不确定目标设备是否支持AV1时，另产H.264兼容版本。普通SDR不要添加冲突HDR标签，并用`ffprobe`验证最终像素格式和色彩元数据。
+用`ffprobe`验证CQ、multipass、lookahead、AQ、GOP、尺寸、帧率、像素格式和BT.709元数据。不确定目标设备是否支持AV1时，另产H.264兼容版本。默认兼容MP4保持AAC-LC 320k；选定源确实无损时，可另产无损音频MKV，不得把MP4 AAC转成无损音轨。
 
 ## ASS软字幕与FLAC-MKV配对
 

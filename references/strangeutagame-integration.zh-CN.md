@@ -40,14 +40,16 @@ python scripts/check_karaoke_environment.py --target D:\path\to\StrangeUtaGame
 脚本流程为：
 
 ```text
-清单 -> 可选MSST证据 -> ASR/MMS审计 -> 审核覆盖
--> SUG/ASS/LRC/SRT时间轴 -> 注音同步/预览 -> 构图
+清单 -> 可选MSST证据 -> ASR/MMS审计 -> 源歌词
+-> 候选注音填入规范SUG -> Agent按整句上下文审核/回写
+-> 时间/短语决定 -> 只读renderer -> ASS/报告/最终帧 -> 构图
 -> HEVC/AV1渲染 -> 媒体检查 -> 最终化 -> 归档/快照
 ```
 
 本仓库的支持工具包括用于只读SUG验证的`scripts/check_sug_compatibility.py`，以及用于处理完整混音变调的`scripts/pitch_shift_audio.py`。后者也会随生产脚本快照安装；验证后的FLAC和JSON报告必须作为一组保留。
 
-人工调轴默认跳过；确需人工检查时，先用编辑器音频探针确认真实项目和音频加载，再以正常可编辑模式打开同一规范SUG。最终可编辑时间轴源是`.sug`，探针JSON只是证据。独立ASR不可用或失败时记录`unresolved`，不能用插值或强制对齐冒充；使用已配置的语言 profile，并保持源文本、适用的注音和读音不变（经过审查的 profile 专用规范化除外）。
+歌曲专用显示和注音决定只放在私有JSON中，用于已批准例外或歧义、专名、艺术读音、证据冲突、低置信、`unresolved`升级；保护已有人工或legacy注音。候选生成器只填补缺失注音并先写入规范SUG，Agent按整句歌词、语法、词形、词边界和上下文自动审核每条注音，可批准或直接回写修正；无修改时沿用默认注音。renderer只读审核后的规范SUG，渲染阶段禁止再推断或覆盖。每个span记录状态、置信度、evidence、model/prompt版本和SUG修改前后哈希，SUG、ASS/报告和最终帧必须一致。
+人工调轴默认跳过；确需人工检查时，先用编辑器音频探针确认真实项目和音频加载，再以正常可编辑模式打开同一规范SUG。最终可编辑时间轴源是`.sug`，探针JSON只是证据。独立ASR不可用或失败时记录`unresolved`，不能用插值或强制对齐冒充；使用已配置的语言profile，并保持源文本不变（经过审查的profile专用规范化除外）。
 
 请求升降调时，在时间轴和渲染之前对完整混音运行`scripts/pitch_shift_audio.py`。验证后的FLAC同时供时间证据、默认MP4的AAC-LC 320 kb/s和配对MKV的FLAC使用；不能从MP4 AAC制作无损音轨。
 

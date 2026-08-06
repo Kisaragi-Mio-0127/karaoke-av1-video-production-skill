@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "integration" / "strangeutagame"
 SCRIPTS = BUNDLE / "scripts"
 DEPENDENCY_MANIFEST = BUNDLE / "dependency-manifest.json"
+INTERNAL_MODULES = {"sug_ruby.py"}
 
 
 def load_module(name: str, path: Path):
@@ -47,7 +48,20 @@ class IntegrationBundleTests(unittest.TestCase):
         records = manifest["scripts"]
         recorded_paths = {record["path"] for record in records}
         bundled_paths = {path.name for path in SCRIPTS.glob("*.py")}
-        self.assertEqual(recorded_paths, bundled_paths)
+        self.assertEqual(recorded_paths, bundled_paths - INTERNAL_MODULES)
+        self.assertEqual(len(recorded_paths), 19)
+        shared_records = manifest.get("shared_modules", [])
+        self.assertEqual(
+            {record["path"] for record in shared_records}, INTERNAL_MODULES
+        )
+        self.assertTrue(
+            all(
+                record.get("category") == "shared-internal-module"
+                and record.get("reason", "").strip()
+                for record in shared_records
+            )
+        )
+        self.assertTrue((SCRIPTS / "sug_ruby.py").is_file())
         self.assertTrue(
             all(record.get("reason", "").strip() for record in records),
             "every dependency record must explain its classification",
@@ -55,6 +69,8 @@ class IntegrationBundleTests(unittest.TestCase):
 
         actual_direct_imports: set[str] = set()
         for path in SCRIPTS.glob("*.py"):
+            if path.name in INTERNAL_MODULES:
+                continue
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             if any(
                 isinstance(node, ast.ImportFrom)
@@ -77,13 +93,13 @@ class IntegrationBundleTests(unittest.TestCase):
 
         for readme_name in ("README.md", "README.zh-CN.md"):
             readme = (ROOT / readme_name).read_text(encoding="utf-8")
-            for path in recorded_paths:
+            for path in sorted(recorded_paths | INTERNAL_MODULES):
                 with self.subTest(readme=readme_name, script=path):
                     self.assertIn(f"`{path}`", readme)
 
     def test_all_bundled_python_parses(self) -> None:
         files = sorted(SCRIPTS.glob("*.py"))
-        self.assertGreaterEqual(len(files), 15)
+        self.assertEqual(len(files) - len(INTERNAL_MODULES), 19)
         for path in files:
             with self.subTest(path=path.name):
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -178,6 +194,8 @@ class IntegrationBundleTests(unittest.TestCase):
         )
         self.assertIn('choices=("vinyl", "spectrum")', preview_source)
         self.assertIn('COMPATIBILITY_AUDIO_BITRATE = "320k"', preview_source)
+        self.assertNotIn("wide-zh", preview_source)
+        self.assertNotIn("wide-en", preview_source)
 
     def test_unbundled_language_profiles_fail_closed(self) -> None:
         sys.path.insert(0, str(SCRIPTS))
@@ -298,7 +316,7 @@ class IntegrationBundleTests(unittest.TestCase):
             path.read_text(encoding="utf-8") for path in sorted(SCRIPTS.glob("*.py"))
         )
         forbidden_patterns = (
-            r"[A-Za-z]:\\(?:Users|ProgramData)\\",
+            r"(?i)\b[A-Za-z]:[\\/][A-Za-z0-9_.-]+[\\/][A-Za-z0-9_.-]+",
             r"karaoke_sources[\\/](?!album\.json)[^\r\n]+[\\/]album\.json",
             r"DEFAULT_COVER_URL\s*=\s*[\"']https?://",
             r"(?i)(?:api[_-]?key|password|access[_-]?token)\s*[:=]\s*[\"'][^\"']+",
@@ -411,7 +429,7 @@ class IntegrationBundleTests(unittest.TestCase):
     def test_network_access_is_explicit_opt_in(self) -> None:
         timing = (SCRIPTS / "karaoke_timing.py").read_text(encoding="utf-8")
         renderer = (SCRIPTS / "render_vinyl_karaoke.py").read_text(encoding="utf-8")
-        self.assertIn("if not refresh:", timing)
+        self.assertTrue("if not refresh:" in timing or "and not refresh" in timing)
         self.assertIn("--refresh-source", timing)
         self.assertIn('"--allow-network"', renderer)
         self.assertIn("allow_network=args.allow_network", renderer)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render short review clips with contextual furigana and smooth karaoke."""
+"""Render short review clips from canonical SUG ruby facts."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 from statistics import median
 from types import SimpleNamespace
@@ -18,7 +18,6 @@ from typing import Any
 
 import imageio_ffmpeg
 from PIL import ImageFont
-from pykakasi import kakasi
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -32,10 +31,55 @@ from scripts.karaoke_language import (  # noqa: E402
 )
 from scripts.karaoke_timing import ms_to_ass_time, verify_font  # noqa: E402
 from scripts.render_vinyl_karaoke import escape_filter_path  # noqa: E402
+from scripts.sug_ruby import (  # noqa: E402
+    RubyToken,
+    RubyValidationError,
+    iter_sug_ruby_spans,
+    load_review_sidecar,
+    sug_hash,
+    validate_sug_ruby,
+)
+
+try:  # noqa: E402
+    from scripts.sug_ruby import validate_review_sidecar
+except ImportError:  # pragma: no cover - supplied by the ruby-review lane
+    validate_review_sidecar = None
 from strange_uta_game.backend.domain import Sentence  # noqa: E402
 from strange_uta_game.backend.infrastructure.persistence.sug_io import (  # noqa: E402
     SugProjectParser,
 )
+
+
+def _require_reviewed_canonical_ruby(
+    project: Any,
+    sidecar: Mapping[str, Any] | None,
+    canonical_spans: list[Any],
+) -> None:
+    """Require the reviewed sidecar before rendering any canonical ruby."""
+
+    if not canonical_spans:
+        return
+    if sidecar is None:
+        raise RubyValidationError(
+            "canonical ruby spans require a reviewed ruby sidecar"
+        )
+    if not callable(validate_review_sidecar):
+        raise RubyValidationError(
+            "canonical ruby review validator is unavailable"
+        )
+    try:
+        errors = validate_review_sidecar(project, sidecar)
+    except RubyValidationError:
+        raise
+    except Exception as error:
+        raise RubyValidationError(
+            f"canonical ruby review validation failed: {error}"
+        ) from error
+    if errors:
+        raise RubyValidationError(
+            "canonical ruby review sidecar rejected: "
+            + "; ".join(str(error) for error in errors)
+        )
 
 FONT_FAMILY = "HarmonyOS Sans SC"
 CANVAS_WIDTH = 1920
@@ -85,104 +129,6 @@ STANDARD_RIGHT_AVAILABLE_WIDTH = (
 # derived from the two standard lane anchors rather than the former 810px
 # estimate.
 SLOT_WIDTH = STANDARD_RIGHT_AVAILABLE_WIDTH
-
-
-def _load_external_json(name: str) -> object:
-    """Load optional inline JSON or a UTF-8 JSON file named by an env var."""
-
-    raw_value = os.environ.get(name, "").strip()
-    if not raw_value:
-        return {}
-    try:
-        return json.loads(raw_value)
-    except json.JSONDecodeError:
-        try:
-            return json.loads(Path(raw_value).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(
-                f"{name} must contain JSON or name a UTF-8 JSON file"
-            ) from error
-
-
-def _load_ruby_group_overrides() -> dict[str, Any]:
-    """Load reviewed ruby rules without embedding song-specific mappings."""
-
-    document = _load_external_json("KARAOKE_RUBY_GROUP_OVERRIDES")
-    if not document:
-        return {
-            "reading_overrides": {},
-            "span_splits": {},
-            "multi_kanji_splits": {},
-            "linked_spans": frozenset(),
-        }
-    if not isinstance(document, dict):
-        raise ValueError("KARAOKE_RUBY_GROUP_OVERRIDES must be a JSON object")
-
-    reading_overrides = document.get("reading_overrides", {})
-    if not isinstance(reading_overrides, dict) or not all(
-        isinstance(surface, str) and isinstance(reading, str)
-        for surface, reading in reading_overrides.items()
-    ):
-        raise ValueError("ruby reading_overrides must map strings to strings")
-
-    span_splits: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {}
-    raw_span_splits = document.get("span_splits", {})
-    if not isinstance(raw_span_splits, dict):
-        raise ValueError("ruby span_splits must be an object")
-    for surface, readings in raw_span_splits.items():
-        if not isinstance(surface, str) or not isinstance(readings, dict):
-            raise ValueError("ruby span_splits must be nested string objects")
-        for reading, parts in readings.items():
-            if not isinstance(reading, str) or not isinstance(parts, list):
-                raise ValueError("ruby span split readings must be string lists")
-            converted_parts: list[tuple[str, str]] = []
-            for part in parts:
-                if (
-                    not isinstance(part, list)
-                    or len(part) != 2
-                    or not all(isinstance(value, str) for value in part)
-                ):
-                    raise ValueError(
-                        "ruby span split parts must be [surface, reading] pairs"
-                    )
-                converted_parts.append((part[0], part[1]))
-            if not converted_parts:
-                raise ValueError("ruby span split parts must not be empty")
-            span_splits[(surface, reading)] = tuple(converted_parts)
-
-    multi_kanji_splits: dict[tuple[str, str], tuple[str, ...]] = {}
-    raw_multi_kanji_splits = document.get("multi_kanji_splits", {})
-    if not isinstance(raw_multi_kanji_splits, dict):
-        raise ValueError("ruby multi_kanji_splits must be an object")
-    for surface, readings in raw_multi_kanji_splits.items():
-        if not isinstance(surface, str) or not isinstance(readings, dict):
-            raise ValueError("ruby multi_kanji_splits must be nested string objects")
-        for reading, parts in readings.items():
-            if not isinstance(reading, str) or not isinstance(parts, list):
-                raise ValueError("ruby multi-kanji split readings must be string lists")
-            if not all(isinstance(part, str) for part in parts):
-                raise ValueError("ruby multi-kanji split parts must be strings")
-            multi_kanji_splits[(surface, reading)] = tuple(parts)
-
-    linked_spans = document.get("linked_spans", [])
-    if not isinstance(linked_spans, list) or not all(
-        isinstance(surface, str) for surface in linked_spans
-    ):
-        raise ValueError("ruby linked_spans must be a string list")
-
-    return {
-        "reading_overrides": dict(reading_overrides),
-        "span_splits": span_splits,
-        "multi_kanji_splits": multi_kanji_splits,
-        "linked_spans": frozenset(linked_spans),
-    }
-
-
-RUBY_GROUP_OVERRIDES = _load_ruby_group_overrides()
-READING_OVERRIDES = RUBY_GROUP_OVERRIDES["reading_overrides"]
-REVIEWED_RUBY_SPAN_SPLITS = RUBY_GROUP_OVERRIDES["span_splits"]
-
-
 @dataclass(frozen=True)
 class Lane:
     """One of two staggered slots inside the existing lower-right panel."""
@@ -282,14 +228,6 @@ LANES = STANDARD_LAYOUT.lanes
 
 
 @dataclass(frozen=True)
-class RubyToken:
-    text: str
-    reading: str
-    start: int
-    end: int
-
-
-@dataclass(frozen=True)
 class TextGeometry:
     """Measured line boundaries shared by base glyphs and ruby."""
 
@@ -344,140 +282,139 @@ def lane_for_line(line_index: int, lanes: tuple[Lane, Lane] = LANES) -> Lane:
     return lanes[line_index % len(lanes)]
 
 
-def _contains_kanji(text: str) -> bool:
-    return any(
-        0x3400 <= ord(char) <= 0x4DBF
-        or 0x4E00 <= ord(char) <= 0x9FFF
-        or 0xF900 <= ord(char) <= 0xFAFF
-        or char == "々"
-        for char in text
-    )
+def _ruby_record_for_span(
+    span,
+    sidecar: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    if not isinstance(sidecar, Mapping):
+        return None
+    records = sidecar.get("records", [])
+    if not isinstance(records, list):
+        return None
+    matching = [
+        record
+        for record in records
+        if isinstance(record, Mapping)
+        and str(record.get("sentence_id", "")) == span.sentence_id
+        and int(record.get("start", -1)) >= span.start
+        and int(record.get("end", -1)) <= span.end
+    ]
+    exact = [
+        record
+        for record in matching
+        if int(record.get("start", -1)) == span.start
+        and int(record.get("end", -1)) == span.end
+    ]
+    if exact:
+        return exact[-1]
+    if not matching:
+        return None
+    sources = {str(record.get("source", "")) for record in matching}
+    statuses = {str(record.get("review_status", "")) for record in matching}
+    evidence = [
+        evidence_item
+        for record in matching
+        for evidence_item in (record.get("evidence", []) or [])
+    ]
+    return {
+        "source": next(iter(sources)) if len(sources) == 1 else "mixed",
+        "review_status": next(iter(statuses)) if len(statuses) == 1 else "mixed",
+        "confidence": min(
+            (float(record["confidence"]) for record in matching if record.get("confidence") is not None),
+            default=None,
+        ),
+        "evidence": evidence,
+        "model_prompt_version": next(
+            (
+                record.get("model_prompt_version")
+                for record in reversed(matching)
+                if record.get("model_prompt_version")
+            ),
+            None,
+        ),
+        "before_hash": None,
+        "after_hash": None,
+    }
 
 
-def _is_kanji(char: str) -> bool:
-    return _contains_kanji(char)
-
-
-def _kana_to_hiragana(text: str) -> str:
-    return "".join(
-        chr(ord(char) - 0x60) if 0x30A1 <= ord(char) <= 0x30F6 else char
-        for char in text
-    )
-
-
-def _kanji_ruby_spans(
-    original: str,
-    reading: str,
+def canonical_ruby_tokens(
+    sentence: Sentence,
     *,
-    start: int,
+    sidecar: Mapping[str, Any] | None = None,
+    start_offset: int = 0,
 ) -> list[RubyToken]:
-    """Remove visible okurigana and return ruby only for the matching kanji spans."""
+    """Convert stored SUG ruby spans into renderer tokens without inference."""
 
-    runs: list[tuple[bool, int, int, str]] = []
-    run_start = 0
-    for index in range(1, len(original) + 1):
-        if index == len(original) or _is_kanji(original[index]) != _is_kanji(
-            original[run_start]
-        ):
-            runs.append(
-                (
-                    _is_kanji(original[run_start]),
-                    run_start,
-                    index,
-                    original[run_start:index],
-                )
+    tokens: list[RubyToken] = []
+    for span in iter_sug_ruby_spans(sentence):
+        record = _ruby_record_for_span(span, sidecar)
+        record = record or {}
+        tokens.append(
+            RubyToken(
+                text=span.surface,
+                reading=span.reading,
+                start=span.start + start_offset,
+                end=span.end + start_offset,
+                sentence_id=span.sentence_id,
+                source=str(record.get("source", span.source) or span.source),
+                review_status=str(
+                    record.get("review_status", span.review_status)
+                    or span.review_status
+                ),
+                confidence=(
+                    float(record["confidence"])
+                    if record.get("confidence") is not None
+                    else span.confidence
+                ),
+                evidence=tuple(record.get("evidence", span.evidence) or ()),
+                model_prompt_version=record.get(
+                    "model_prompt_version", span.model_prompt_version
+                ),
+                before_hash=record.get("before_hash"),
+                after_hash=record.get("after_hash"),
             )
-            run_start = index
-
-    result: list[RubyToken] = []
-    reading_cursor = 0
-    for run_index, (is_kanji, local_start, local_end, run_text) in enumerate(runs):
-        if not is_kanji:
-            literal = _kana_to_hiragana(run_text)
-            if reading.startswith(literal, reading_cursor):
-                reading_cursor += len(literal)
-                continue
-            found = reading.find(literal, reading_cursor)
-            if found < 0:
-                return [RubyToken(original, reading, start, start + len(original))]
-            reading_cursor = found + len(literal)
-            continue
-
-        next_literal = ""
-        if run_index + 1 < len(runs):
-            next_literal = _kana_to_hiragana(runs[run_index + 1][3])
-        reading_end = (
-            reading.find(next_literal, reading_cursor) if next_literal else len(reading)
         )
-        if reading_end < reading_cursor:
-            return [RubyToken(original, reading, start, start + len(original))]
-        ruby = reading[reading_cursor:reading_end]
-        if ruby:
-            reviewed_split = REVIEWED_RUBY_SPAN_SPLITS.get((run_text, ruby))
-            if reviewed_split is None:
-                result.append(
-                    RubyToken(
-                        text=run_text,
-                        reading=ruby,
-                        start=start + local_start,
-                        end=start + local_end,
-                    )
-                )
-            else:
-                split_cursor = start + local_start
-                for split_text, split_reading in reviewed_split:
-                    split_end = split_cursor + len(split_text)
-                    result.append(
-                        RubyToken(
-                            text=split_text,
-                            reading=split_reading,
-                            start=split_cursor,
-                            end=split_end,
-                        )
-                    )
-                    split_cursor = split_end
-                if split_cursor != start + local_end:
-                    raise ValueError(
-                        f"reviewed ruby split width mismatch for {run_text!r}"
-                    )
-        reading_cursor = reading_end
-    return result
+    return tokens
 
 
-def contextual_ruby_tokens(
-    text: str,
-    language: str = DEFAULT_LANGUAGE,
+def _canonical_tokens_for_phrase(
+    source_sentence: Sentence,
+    phrase: Sentence,
+    *,
+    sidecar: Mapping[str, Any] | None = None,
 ) -> list[RubyToken]:
-    """Return context-aware ruby attached only to the kanji it annotates."""
+    """Project canonical source spans onto a display-only sentence slice."""
 
-    if not uses_ruby(language):
+    source_indices = {id(character): index for index, character in enumerate(source_sentence.characters)}
+    indices = [source_indices.get(id(character)) for character in phrase.characters]
+    if not indices:
         return []
-    converted = kakasi().convert(text)
-    result: list[RubyToken] = []
-    cursor = 0
-    for item in converted:
-        original = str(item.get("orig") or "")
-        reading = str(item.get("hira") or original)
-        reading = READING_OVERRIDES.get(original, reading)
-        start = cursor
-        end = start + len(original)
-        cursor = end
-        if (
-            original in READING_OVERRIDES
-            and not _contains_kanji(original)
-            and reading != original
-        ):
-            result.append(
-                RubyToken(
-                    original,
-                    reading,
-                    start,
-                    end,
-                )
+    if any(index is None for index in indices):
+        raise RubyValidationError("display phrase contains a character outside canonical SUG")
+    concrete_indices = [int(index) for index in indices]
+    source_to_phrase = {
+        source_index: phrase_index
+        for phrase_index, source_index in enumerate(concrete_indices)
+    }
+    source_tokens = canonical_ruby_tokens(source_sentence, sidecar=sidecar)
+    projected: list[RubyToken] = []
+    for token in source_tokens:
+        token_indices = list(range(token.start, token.end))
+        phrase_indices = [source_to_phrase.get(index) for index in token_indices]
+        if all(index is None for index in phrase_indices):
+            continue
+        if any(index is None for index in phrase_indices):
+            raise RubyValidationError(
+                f"display phrase splits canonical ruby span {token.text!r}"
             )
-        elif _contains_kanji(original) and reading and reading != original:
-            result.extend(_kanji_ruby_spans(original, reading, start=start))
-    return result
+        start = int(phrase_indices[0])
+        end = int(phrase_indices[-1]) + 1
+        if phrase_indices != list(range(start, end)):
+            raise RubyValidationError(
+                f"display phrase reorders canonical ruby span {token.text!r}"
+            )
+        projected.append(replace(token, start=start, end=end))
+    return projected
 
 
 def _escape_ass_text(text: str) -> str:
@@ -571,6 +508,18 @@ def _text_width(font_file: Path, size: int, text: str) -> float:
     return float(font.getlength(text))
 
 
+_ENGLISH_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['\u2018\u2019][A-Za-z0-9]+)*")
+
+
+def _english_letter_spacing_after_indices(text: str) -> frozenset[int]:
+    """Return character positions that receive positive word-internal spacing."""
+
+    positions: set[int] = set()
+    for match in _ENGLISH_WORD_RE.finditer(text):
+        positions.update(range(match.start(), match.end() - 1))
+    return frozenset(positions)
+
+
 def _measured_text_span(
     font_file: Path,
     text: str,
@@ -594,11 +543,12 @@ def _measured_text_span(
             for character in text
             if character.isspace()
         )
+    letter_spacing_count = len(_english_letter_spacing_after_indices(text))
     return float(
         natural_width
         + word_gap_adjustment
         + semantic_gap_count * font_size * semantic_gap_em
-        + 0 * font_size * letter_spacing_em
+        + letter_spacing_count * font_size * letter_spacing_em
     )
 
 
@@ -688,7 +638,7 @@ def text_geometry(
     gap_px = font_size * semantic_gap_em
     letter_spacing_px = font_size * letter_spacing_em
     target_word_gap_px = font_size * word_gap_em if word_gap_em is not None else None
-    letter_spacing_after_indices = frozenset()
+    letter_spacing_after_indices = _english_letter_spacing_after_indices(text)
     gap_before = tuple(
         sum(1 for gap_index in semantic_gap_after_indices if gap_index < index)
         * gap_px
@@ -864,6 +814,8 @@ def _character_onsets(
     return result
 
 
+
+
 def _character_releases(
     onsets: list[int],
     *,
@@ -1029,6 +981,8 @@ def main_glyph_events(
     return result
 
 
+
+
 def ruby_events(
     sentence: Sentence,
     *,
@@ -1051,11 +1005,10 @@ def ruby_events(
 ) -> list[str]:
     if not uses_ruby(language):
         return []
-    tokens = (
-        contextual_ruby_tokens(sentence.text, language=language)
-        if tokens is None
-        else tokens
-    )
+    if tokens is None:
+        raise RubyValidationError(
+            "renderer requires canonical SUG ruby tokens; inference is disabled"
+        )
     if not tokens:
         return []
     if geometry is None:
@@ -1217,6 +1170,14 @@ def _semantic_gap_after_indices(
             for character in source_sentence.characters[left_index + 1 : right_index]
         ):
             result.add(display_index)
+    if normalize_language(language, default=DEFAULT_LANGUAGE) == "en":
+        last_visible_index: int | None = None
+        for display_index, character in enumerate(display_sentence.characters):
+            if character.char.isspace():
+                if last_visible_index is not None:
+                    result.add(last_visible_index)
+            else:
+                last_visible_index = display_index
     return frozenset(result)
 
 
@@ -1224,41 +1185,53 @@ _BAD_DISPLAY_BOUNDARY_START_CHARS = frozenset(
     "・ーぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ"
 )
 _BAD_DISPLAY_BOUNDARY_END_CHARS = frozenset("・ーっッ")
+def _load_external_json(name: str) -> object:
+    """Load optional inline JSON or a UTF-8 JSON file named by an env var."""
+
+    raw_value = os.environ.get(name, "").strip()
+    if not raw_value:
+        return {}
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError:
+        try:
+            return json.loads(Path(raw_value).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(
+                f"{name} must contain JSON or name a UTF-8 JSON file"
+            ) from error
+
+
 def _load_display_phrase_overrides() -> dict[str, tuple[str, ...]]:
-    """Load source-text-to-phrase-list overrides from optional external JSON."""
+    """Load reviewed display splits without embedding private lyric facts."""
 
     document = _load_external_json("KARAOKE_DISPLAY_OVERRIDES")
     if not document:
         return {}
-    if (
-        isinstance(document, dict)
-        and set(document) == {"overrides"}
-        and isinstance(document["overrides"], dict)
-    ):
+    if isinstance(document, dict) and set(document) == {"overrides"}:
         document = document["overrides"]
-    if not isinstance(document, dict):
-        raise ValueError("KARAOKE_DISPLAY_OVERRIDES must be a JSON object")
-    result: dict[str, tuple[str, ...]] = {}
-    for source_text, phrases in document.items():
-        if (
-            not isinstance(source_text, str)
-            or not isinstance(phrases, list)
-            or not all(isinstance(phrase, str) for phrase in phrases)
-        ):
-            raise ValueError(
-                "display overrides must map source strings to string lists"
-            )
-        result[source_text] = tuple(phrases)
-    return result
+    if not isinstance(document, dict) or not all(
+        isinstance(source_text, str)
+        and isinstance(phrases, list)
+        and all(isinstance(phrase, str) for phrase in phrases)
+        for source_text, phrases in document.items()
+    ):
+        raise ValueError("KARAOKE_DISPLAY_OVERRIDES must map text to string lists")
+    return {str(source): tuple(phrases) for source, phrases in document.items()}
 
 
 _DISPLAY_PHRASE_OVERRIDES = _load_display_phrase_overrides()
+_SINGLE_TRACK_DISPLAY_PHRASE_OVERRIDES: dict[str, tuple[str, ...]] = {}
 
 
 def _validate_display_phrase_overrides() -> None:
-    """Validate external display overrides before any source line can use them."""
+    """Validate static display overrides before any source line can use them."""
 
-    for source_text, phrases in _DISPLAY_PHRASE_OVERRIDES.items():
+    combined = {
+        **_DISPLAY_PHRASE_OVERRIDES,
+        **_SINGLE_TRACK_DISPLAY_PHRASE_OVERRIDES,
+    }
+    for source_text, phrases in combined.items():
         normalized_source_text = _normalize_display_text(source_text)
         if source_text != normalized_source_text:
             raise ValueError(
@@ -1300,6 +1273,10 @@ def _split_sentence_by_display_override(
     normalized_source_text = _normalize_display_text(sentence.text)
     override = _DISPLAY_PHRASE_OVERRIDES.get(normalized_source_text)
     if override is None:
+        override = _SINGLE_TRACK_DISPLAY_PHRASE_OVERRIDES.get(
+            normalized_source_text
+        )
+    if override is None:
         return None
     if "".join(override) != normalized_source_text:
         raise ValueError(
@@ -1330,6 +1307,23 @@ def _split_sentence_by_display_override(
             "display override slices do not cover the complete source line: "
             f"{normalized_source_text!r}"
         )
+    if normalize_language(language) == "en":
+        visible_positions = [
+            index
+            for index, character in enumerate(sentence.characters)
+            if not character.char.isspace()
+        ]
+        cursor = 0
+        for phrase in override[:-1]:
+            cursor += len(phrase)
+            left_index = visible_positions[cursor - 1]
+            right_index = visible_positions[cursor]
+            between = sentence.characters[left_index + 1 : right_index]
+            if not any(character.char.isspace() for character in between):
+                raise ValueError(
+                    "English display override splits inside a word: "
+                    f"{normalized_source_text!r} at {cursor}"
+                )
     return result
 
 
@@ -1470,6 +1464,8 @@ def _coalesce_display_runs_that_fit(
     return result
 
 
+
+
 def split_sentence_for_display(
     sentence: Sentence,
     *,
@@ -1485,7 +1481,7 @@ def split_sentence_for_display(
         raise ValueError(
             f"max_chars must be at least {MIN_DISPLAY_PHRASE_CHARS}, got {max_chars}"
         )
-    if max_chars is None:
+    if max_chars is None and language == "ja":
         return [sentence]
     override_runs = _split_sentence_by_display_override(
         sentence,
@@ -1528,7 +1524,7 @@ def layout_for_language(
     layout: SubtitleLayout,
     language: str,
 ) -> SubtitleLayout:
-    """Validate the language and return the selected Japanese layout."""
+    """Validate the language and keep the explicitly selected layout."""
 
     normalize_language(language)
     return layout
@@ -1798,10 +1794,9 @@ def _cue_lyric_preload_starts(
         if not 0 <= target_index < len(prepared):
             continue
         # A cue fills the two display lanes, not necessarily two phrases from
-        # one editable source line.  Some short source lines (notably the
-        # Some short intro lines produce only one display phrase, so the second
-        # lane must preload the following source line without merging either
-        # source or changing its timing data.
+        # one editable source line. Some short source lines produce only one
+        # display phrase, so the second lane must preload the following source
+        # line without merging either source or changing its timing data.
         target_phrase_indices = range(
             target_index,
             min(target_index + 2, len(prepared)),
@@ -1892,9 +1887,25 @@ def build_review_ass(
     visual_release_overrides: dict[tuple[int, int], int] | None = None,
     layout: SubtitleLayout = STANDARD_LAYOUT,
     offset_ms: int = 0,
+    ruby_sidecar: Mapping[str, Any] | None = None,
 ) -> dict:
     visual_release_overrides = visual_release_overrides or {}
     language = _project_language(project)
+    canonical_spans = iter_sug_ruby_spans(project)
+    ruby_errors = validate_sug_ruby(project)
+    if ruby_errors:
+        raise RubyValidationError("; ".join(ruby_errors))
+    _require_reviewed_canonical_ruby(project, ruby_sidecar, canonical_spans)
+    canonical_sug_hash = sug_hash(project)
+    canonical_project_ruby_tokens = [
+        token
+        for source_sentence in project.sentences
+        for token in (
+            canonical_ruby_tokens(source_sentence, sidecar=ruby_sidecar)
+            if language == "ja"
+            else []
+        )
+    ]
     layout = layout_for_language(layout, language)
     identity = language_identity(language)
     visual_release_override_hits: set[tuple[int, int]] = set()
@@ -1914,6 +1925,15 @@ def build_review_ass(
         f"; Layout: {layout.name}",
         f"; Language: {identity['code']} ({identity['name']})",
         f"; Ruby policy: {identity['ruby_policy']}",
+        "; Ruby source: canonical-sug",
+        f"; SUG Ruby hash: {canonical_sug_hash}",
+        *[
+            "; Ruby span: "
+            f"{token.sentence_id}:{token.start}:{token.end} "
+            f"source={token.source}; review_status={token.review_status}; "
+            f"confidence={token.confidence}"
+            for token in canonical_project_ruby_tokens
+        ],
         "ScriptType: v4.00+",
         "PlayResX: 1920",
         "PlayResY: 1080",
@@ -1970,6 +1990,15 @@ def build_review_ass(
         )
         if voice_role is not None:
             for phrase_index, phrase in enumerate(phrases):
+                phrase_ruby_tokens = (
+                    _canonical_tokens_for_phrase(
+                        source_sentence,
+                        phrase,
+                        sidecar=ruby_sidecar,
+                    )
+                    if language == "ja"
+                    else []
+                )
                 first_onset = _first_timestamp(phrase)
                 if first_onset is None:
                     continue
@@ -2018,6 +2047,7 @@ def build_review_ass(
                             first_onset + offset_ms - PRE_ROLL_MS,
                         ),
                         "event_end_ms": release_ms + offset_ms + POST_ROLL_MS,
+                        "ruby_tokens": phrase_ruby_tokens,
                     }
                 )
                 shifted_release_ms = release_ms + offset_ms
@@ -2028,6 +2058,15 @@ def build_review_ass(
             continue
         source_to_first_display[source_line_index] = len(prepared)
         for phrase_index, phrase in enumerate(phrases):
+            phrase_ruby_tokens = (
+                _canonical_tokens_for_phrase(
+                    source_sentence,
+                    phrase,
+                    sidecar=ruby_sidecar,
+                )
+                if language == "ja"
+                else []
+            )
             first_onset = _first_timestamp(phrase)
             if first_onset is None:
                 continue
@@ -2080,6 +2119,7 @@ def build_review_ass(
                         first_onset + offset_ms - PRE_ROLL_MS,
                     ),
                     "event_end_ms": release_ms + offset_ms + POST_ROLL_MS,
+                    "ruby_tokens": phrase_ruby_tokens,
                 }
             )
         source_to_last_display[source_line_index] = len(prepared) - 1
@@ -2276,6 +2316,7 @@ def build_review_ass(
                 semantic_gap_em=layout.semantic_gap_em,
                 letter_spacing_em=layout.letter_spacing_em,
                 word_gap_em=layout.word_gap_em,
+                tokens=item["ruby_tokens"],
                 language=language,
                 outline_px=layout.ruby_outline_px,
                 glow_blur=layout.ruby_glow_blur,
@@ -2357,7 +2398,15 @@ def build_review_ass(
                     item["semantic_gap_after_indices"]
                 ),
                 "semantic_gap_px": round(font_size * layout.semantic_gap_em, 2),
-                "word_gap_px": 0.0,
+                "word_gap_px": round(
+                    font_size * layout.word_gap_em
+                    if layout.word_gap_em is not None
+                    else ImageFont.truetype(str(font_file), font_size).getlength(" ")
+                    + font_size * layout.semantic_gap_em,
+                    2,
+                )
+                if language == "en"
+                else 0.0,
                 "geometry": {
                     "left": round(geometry.left, 3),
                     "right": round(geometry.right, 3),
@@ -2377,11 +2426,7 @@ def build_review_ass(
                     ),
                 },
                 "ruby": [
-                    {"text": token.text, "reading": token.reading}
-                    for token in contextual_ruby_tokens(
-                        sentence.text,
-                        language=language,
-                    )
+                    token.to_dict() for token in item["ruby_tokens"]
                 ],
                 "language": language,
                 "language_identity": identity,
@@ -2507,7 +2552,11 @@ def build_review_ass(
     if prepared and project_duration_ms > int(prepared[-1]["event_end_ms"]):
         marker_start_ms = int(prepared[-1]["event_end_ms"])
         marker_end_ms = project_duration_ms
-        marker_text = "\u7d42\u308f\u308a"
+        marker_text = {
+            "ja": "終わり",
+            "zh": "结束",
+            "en": "The End",
+        }[language]
         marker_sentence = Sentence.from_text(marker_text, "outro")
         marker_fill_duration_ms = marker_end_ms - marker_start_ms
         marker_character_onsets_ms = [
@@ -2548,7 +2597,7 @@ def build_review_ass(
                 glow_blur=layout.main_glow_blur,
             )
         )
-        marker_ruby = "\u304a\u308f\u308a"
+        marker_ruby = "お" if language == "ja" else None
         if marker_ruby:
             events.extend(
                 ruby_events(
@@ -2562,7 +2611,16 @@ def build_review_ass(
                     advance_scale=layout.advance_scale,
                     letter_spacing_em=layout.letter_spacing_em,
                     word_gap_em=layout.word_gap_em,
-                    tokens=[RubyToken(text="終", reading=marker_ruby, start=0, end=1)],
+                    tokens=[
+                        RubyToken(
+                            text="終",
+                            reading=marker_ruby,
+                            start=0,
+                            end=1,
+                            source="renderer-marker",
+                            review_status="system-generated",
+                        )
+                    ],
                     language=language,
                     outline_px=layout.ruby_outline_px,
                     glow_blur=layout.ruby_glow_blur,
@@ -2626,7 +2684,11 @@ def build_review_ass(
                 layout.main_font_size * layout.letter_spacing_em,
                 3,
             ),
-            "scope": "global" if layout.letter_spacing_em > 0 else "none",
+            "scope": (
+                "english-word-internal"
+                if layout.letter_spacing_em > 0
+                else "none"
+            ),
             "positive": layout.letter_spacing_em > 0,
         },
         "word_gap": {
@@ -2648,8 +2710,35 @@ def build_review_ass(
                 ).getlength(" "),
                 3,
             ),
-            "strategy": "font-natural-plus-semantic-gap",
+            "natural_space_only": (
+                language == "en"
+                and layout.semantic_gap_em == 0.0
+                and layout.word_gap_em is None
+            ),
+            "narrowed_from_natural": (
+                language == "en"
+                and layout.word_gap_em is not None
+                and layout.main_font_size * layout.word_gap_em
+                < ImageFont.truetype(
+                    str(font_file),
+                    layout.main_font_size,
+                ).getlength(" ")
+            ),
+            "strategy": (
+                "fixed-em-renderer-geometry"
+                if language == "en" and layout.word_gap_em is not None
+                else "font-natural-plus-semantic-gap"
+            ),
+            "word_run_positioning_advance_scale": (
+                layout.advance_scale if language == "en" else None
+            ),
             "word_internal_spacing_affected": False,
+            "native_frame_visible_white_gap_target_px": (
+                {"minimum": 18, "maximum": 32}
+                if language == "en"
+                else None
+            ),
+            "native_frame_measurement_required": language == "en",
             "greater_than_letter_spacing": (
                 (
                     layout.main_font_size * layout.word_gap_em
@@ -2697,11 +2786,30 @@ def build_review_ass(
     lyric_texts = [sentence.text for sentence in project.sentences]
     if outro is not None:
         lyric_texts.append(str(outro["text"]))
+    canonical_ruby_spans = [token.to_dict() for token in canonical_project_ruby_tokens]
     return {
         "ass": str(output_path),
         "language": language,
         "language_identity": identity,
         "ruby_enabled": uses_ruby(language),
+        "sug_hash": canonical_sug_hash,
+        "ruby_source": "canonical-sug",
+        "ruby_spans": canonical_ruby_spans,
+        "ruby_review": {
+            "schema": ruby_sidecar.get("schema") if ruby_sidecar else None,
+            "generation_id": ruby_sidecar.get("generation_id") if ruby_sidecar else None,
+            "record_count": len(ruby_sidecar.get("records", []))
+            if ruby_sidecar
+            and isinstance(ruby_sidecar.get("records"), list)
+            else 0,
+        },
+        "ruby_consistency_gate": {
+            "sug": "canonical-sug",
+            "ass": "canonical-sug",
+            "report": "canonical-sug",
+            "sug_hash": canonical_sug_hash,
+            "status": "pass",
+        },
         "font_verification": verify_font(
             FONT_FAMILY,
             font_file,
@@ -3566,7 +3674,14 @@ def main(argv: list[str] | None = None) -> int:
             report_path=report_path,
             ass_only=args.ass_only,
         )
-    project = SugProjectParser.load(str(args.sug.resolve()))
+    sug_path = args.sug.resolve()
+    project = SugProjectParser.load(str(sug_path))
+    ruby_sidecar_path = sug_path.with_suffix(".ruby-review.json")
+    ruby_sidecar = (
+        load_review_sidecar(ruby_sidecar_path)
+        if ruby_sidecar_path.exists()
+        else None
+    )
     releases = parse_release_overrides(args.release)
     if (args.timing_overrides is None) != (args.song_id is None):
         raise ValueError("--timing-overrides and --song-id must be provided together")
@@ -3587,6 +3702,7 @@ def main(argv: list[str] | None = None) -> int:
         visual_release_overrides=visual_releases,
         layout=layout,
         offset_ms=args.offset_ms,
+        ruby_sidecar=ruby_sidecar,
     )
     if args.ass_only:
         payload = {"status": "ass-ready", "ass": ass_report}

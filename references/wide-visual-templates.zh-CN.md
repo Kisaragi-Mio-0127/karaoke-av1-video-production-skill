@@ -37,7 +37,7 @@ uv run --no-sync python scripts/karaoke_review_preview.py `
   --visual-style <vinyl-or-spectrum> <vinyl-only-arguments>
 ```
 
-黑胶替换占位参数为`--vinyl <vinyl-png>`；频谱省略它，可加`--spectrum-color RRGGBB --progress-color RRGGBB`。使用时间覆盖时同时传入`--timing-overrides <json>`和`--song-id <id>`。短预览可省略无损输出，正式全量渲染应保留。全节目AV1 4:2:0直出必须显式设置`--start 0`、已验证节目时长和成功探测后的`--video-encoder av1_nvenc --av1-cq <0..63>`；脚本默认是H.264，当前`libaom-av1`路径输出`gbrp`，不符合4:2:0交付配置。默认MP4使用AAC-LC 320k，MKV复制视频并从探测为无损的源直接取FLAC。不要显示耗时或播放控制按钮。
+黑胶替换占位参数为`--vinyl <vinyl-png>`；频谱省略它，可加`--spectrum-color RRGGBB --progress-color RRGGBB`。使用时间覆盖时同时传入`--timing-overrides <json>`和`--song-id <id>`。短预览可省略无损输出，正式全量渲染应保留。默认全节目AV1 4:2:0直出档为1920x1080、30fps、yuv420p、BT.709、AV1 NVENC CQ44、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、AQ strength8、GOP240，并且必须先通过硬件探测。默认兼容MP4使用AAC-LC 320k；选定源确实无损时可另配无损音频MKV。不要显示耗时或播放控制按钮。
 
 ## 当前宽屏约束
 

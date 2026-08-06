@@ -32,20 +32,24 @@ pad=ceil(iw/2)*2:ceil(ih/2)*2,subtitles=...,format=p010le
 
 Use `format=yuv420p` for 8-bit or `format=yuv420p10le` for the libaom 10-bit lane. Scaling is acceptable when the target resolution is intentional; do not silently crop source content.
 
-## NVENC 10-Bit 4:2:0
+## Default NVENC 8-Bit Compatibility 4:2:0
 
-Use for fast previews and delivery when the local NVIDIA encoder probe succeeds:
+Use this legacy-compatible default for 1920x1080 30 fps SDR delivery when the local NVIDIA encoder probe succeeds:
 
 ```powershell
 & $ffmpeg -nostdin -n -i $input `
   -map 0:v:0 -map 0:a:0? -map_metadata -1 -map_chapters -1 `
-  -vf "subtitles='$ass':fontsdir='$fonts',format=p010le" `
-  -c:v av1_nvenc -preset p6 -tune hq -rc vbr -cq 28 -b:v 0 `
+  -vf "subtitles='$ass':fontsdir='$fonts',format=yuv420p" `
+  -s 1920x1080 -r 30 -pix_fmt yuv420p `
+  -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 44 -b:v 0 `
+  -multipass fullres -lookahead 32 -spatial-aq 1 -temporal-aq 1 `
+  -aq-strength 8 -g 240 `
+  -colorspace bt709 -color_primaries bt709 -color_trc bt709 `
   -c:a aac -profile:a aac_low -b:a 320k -movflags +faststart `
   $temporaryMp4
 ```
 
-Adjust CQ after inspecting the source and target. For 8-bit compatibility, use `format=yuv420p`.
+Verify CQ, multipass, lookahead, AQ, GOP, dimensions, frame rate, pixel format, and BT.709 metadata with `ffprobe`. A separate lossless-audio MKV is optional when the selected source is genuinely lossless; the default compatibility MP4 remains AAC-LC 320k. For an explicitly requested 10-bit lane, use `p010le`/`yuv420p10le` and record that profile separately.
 
 ## libaom 10-Bit 4:2:0
 

@@ -18,6 +18,7 @@ album.json
 *timing*override*.json
 *display*override*.json
 *ruby*override*.json
+*.ruby-review.json
 *report*.json
 netease_lyrics.json
 lyric_corrections.json

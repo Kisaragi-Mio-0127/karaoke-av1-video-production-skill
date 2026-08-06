@@ -90,10 +90,14 @@ manifests, hashes, lyrics, timing overrides, fonts, reports, or media to this
 skill repository.
 
 Optional song-specific display and ruby decisions belong in private JSON files
-based on the examples. Point the renderer at them with
-`KARAOKE_DISPLAY_OVERRIDES` and `KARAOKE_RUBY_GROUP_OVERRIDES` when supported by
-the installed snapshot. Contextual timing readings use
-`KARAOKE_TIMING_READING_OVERRIDES`; start from the matching empty example.
+based on the examples. Use these only for approved exceptions or escalated
+ambiguity, proper nouns, artistic readings, evidence conflicts, low confidence,
+or `unresolved` results; preserve existing human-reviewed or legacy ruby.
+When supported by the installed snapshot, pass them through
+`KARAOKE_DISPLAY_OVERRIDES` and `KARAOKE_RUBY_GROUP_OVERRIDES`, then ensure the
+accepted result is written to the canonical SUG before rendering. Contextual
+timing readings use `KARAOKE_TIMING_READING_OVERRIDES`; start from the matching
+empty example.
 
 Network access is disabled by default. `karaoke_timing.py` requires an existing
 authorized lyric source unless `--refresh-source` is supplied explicitly.
@@ -136,12 +140,21 @@ for reviewed profile-specific normalization.
 ## Production order
 
 ```text
-manifest → optional MSST evidence → ASR/MMS audit → reviewed overrides
-→ SUG/ASS/LRC/SRT timing → ruby synchronization/preview → artwork
+manifest → optional MSST evidence → ASR/MMS audit → source lyrics
+→ candidate ruby fills in canonical SUG → Agent full-context ruby audit/writeback
+→ timing/phrase decisions → read-only renderer → ASS/report/final frames → artwork
 → HEVC/AV1 render → media inspection → finalization → archives/snapshot
 ```
 
-Manual timing review is optional by default. When required, use the editor
-audio probe first, then open the verified canonical SUG in normal editable mode.
-The final editable timing source remains `.sug`; JSON probe reports are evidence,
+Ruby review is automatic by default. The Agent reviews every span in full lyric,
+grammar, inflection, lexical-boundary, and contextual-reading context; human
+review is only an escalation for ambiguity, proper nouns, artistic readings,
+evidence conflicts, low confidence, or `unresolved`. If there is no correction,
+retain the default ruby. Protect human-reviewed or legacy ruby. The renderer is
+read-only over the reviewed canonical SUG and must not infer or overwrite ruby.
+Record per-span status, confidence, evidence, model/prompt version, and before/
+after SUG hashes; require SUG, ASS/report, and final-frame agreement. Manual
+timing review remains optional by default. When required, use the editor audio
+probe first, then open the verified canonical SUG in normal editable mode. The
+final editable timing source remains `.sug`; JSON probe reports are evidence,
 not project files.

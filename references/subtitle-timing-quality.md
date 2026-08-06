@@ -9,20 +9,22 @@ Use these gates for semantic segmentation, cue display behavior, ruby, MMS timin
 Track one generation through:
 
 ```text
-canonical source -> timing/phrase overrides -> renderer output
--> ASS and render report -> encoded video -> promoted/package artifact
+source text -> candidate ruby fill -> canonical SUG
+-> Agent ruby audit/corrections -> timing/phrase decisions
+-> read-only renderer -> ASS and render report
+-> encoded video -> promoted/package artifact
 ```
 
 - Record hashes or equivalent generation identifiers for every reproducible layer.
-- Validate source correctness and final rendered correctness separately. A canonical ruby defect may be corrected by contextual rendering, while a source defect can still block reproducibility.
+- Treat the canonical SUG as the reviewed ruby source of truth. The candidate generator fills missing ruby only and writes it there; the Agent audits every span in full-sentence context and writes approved corrections back before rendering. The renderer is read-only for ruby and cannot repair or hide a SUG defect. Require the sidecar's post-review SUG hash to equal the current canonical SUG hash and require an approved, exact-span record for every stored ruby span; missing, stale, machine-only, low-confidence, conflicting, or unresolved evidence fails closed. If the audit makes no change, retain the generated default ruby and record its approval.
 - Do not combine overlap counts, status flags, ASS, reports, or media from different generations.
 
 ## Semantic Phrase Contract
 
-- Review Japanese segmentation in full-line syntactic context. Do not split a display phrase across a source line, interlude, conjugation, particle, fixed expression, or project-defined refrain boundary without human approval; punctuation such as a middle dot is not universally a boundary.
+- Review segmentation in full-line syntactic context, like ruby. Automate normal approvals and corrections across source-language grammar, inflection, particles, fixed expressions, and refrain context; escalate only ambiguity, proper nouns or artistic readings, evidence conflicts, low confidence, or `unresolved` results. Do not make per-line human approval a gate.
 - Treat source whitespace and a model-proposed pause as evidence rather than commands. Prefer a semantically complete phrase when it fits, but retain a documented sung-breath split when the measured pause and performance make the dependency clear.
 - After whitespace normalization, concatenated display phrases must reproduce the source line character for character.
-- Treat recomposition, override reachability, and passing tests as structural evidence only. They do not prove that a Japanese phrase boundary is semantically natural; review object-predicate, modifier-head, particle, conjugation, quotation, and refrain context separately.
+- Treat recomposition, override reachability, and passing tests as structural evidence alongside the Agent's full-context semantic audit. Escalate unresolved object-predicate, modifier-head, particle, conjugation, quotation, or refrain ambiguity rather than requiring routine manual review.
 - Key manual overrides by the complete source line and assert the expected hit count. When repeated lyrics require different handling, include a stable section or occurrence identity. Fail on unreachable, duplicate, or unexpectedly broad overrides.
 - Slice and reuse canonical character records or objects, timestamps, and generation identity; do not reconstruct characters and silently lose timing or ruby metadata.
 - Treat long semantically complete phrases as explicit reviewed exceptions. If a project uses a 15–16-character review band, allow it only when the phrase is semantically complete, a reviewer approves it, the resolved target font and requested size fit without clipping, and the reason is recorded. Do not make that band a universal limit.
@@ -41,19 +43,19 @@ canonical source -> timing/phrase overrides -> renderer output
 
 ## Ruby And Visual Fit
 
-- Review Japanese ruby in whole-word and sentence context; do not mechanically apply isolated kanji readings.
-- Treat homographs as phrase-level decisions, not global surface replacements. For example, `雨が降りそう` uses `ふ`, while `駅で降りた` uses `お`; verify the canonical SUG and final ASS independently, and record an occurrence- or phrase-specific override whenever automatic ruby disagrees with the reviewed source.
+- Generate ruby candidates only for missing spans and write them to the canonical SUG. Preserve existing human-reviewed or legacy ruby. Then audit every ruby span in whole-word and sentence context, using grammar, inflection, lexical boundaries, and contextual readings; automatically approve or write corrections back to the SUG. If no correction is needed, retain the generated default ruby.
+- Treat homographs as phrase-level decisions, not global surface replacements. For example, `雨が降りそう` uses `ふ`, while `駅で降りた` uses `お`. Escalate only ambiguous proper nouns, ateji/jukujikun, artistic readings, evidence conflicts, low confidence, or `unresolved` results; routine spans do not require human approval.
 - Check reading correctness and lexical grouping as two independent properties. A concatenated reading can be correct while its ruby span is wrong.
 - Prefer lexical-word ruby groups, not uniformly per-kanji groups. Keep multi-kanji compounds and jukujikun together when one contextual reading belongs to the whole word, such as `今年→ことし`, `来年→らいねん`, and `一番→いちばん`. A one-kanji group remains valid when that kanji is the actual annotated lexical span.
 - Stop a ruby group at every real lexical boundary. Do not merge adjacent words because their kana can be concatenated; reject `一番好→いちばんす` and require `一番→いちばん`, `好→す`, with `き` left as unannotated okurigana. Normally keep kana okurigana outside the ruby span unless a documented renderer or dictionary contract requires otherwise.
 - For StrangeUtaGame, derive canonical word spans from each ruby-bearing line's `linked_to_next` chain. Require every chain to be contiguous, terminate at the intended word end, map to one surface span and one contextual reading, and never cross into the next lexical word. Check every ruby-bearing line, not only reported exceptions.
-- Use a tokenizer, morphological analyzer, dictionary, or LLM only as boundary evidence. Resolve ambiguous proper nouns, ateji, jukujikun, contractions, and artistic readings in full lyric context and record the accepted manual decision.
-- Verify the same word spans and readings at three layers: canonical/editable project, generated ASS or render report, and rendered frame geometry. In the frame, confirm that each reading is centered over only its intended word and does not visually straddle a neighboring word.
-- Emit a focused ruby-word-boundary QA artifact containing stable song and source-line identity, occurrence, main-text span, reading, canonical link flags or equivalent grouping, source/editable/rendered status, reviewed exceptions, timing-unchanged status, and representative frame paths. Fail when any layer disagrees even if the visible kana string is otherwise correct.
-- Verify visible ruby independently in the final ASS or rendered frames.
+- Use tokenizer, morphological analyzer, dictionary, and model output as inputs to the Agent's full-context audit, not as a reason to force routine human confirmation. Record the escalation reason and human decision only for ambiguity, proper nouns or artistic readings, evidence conflict, low confidence, or `unresolved` results.
+- Verify the same word spans and readings at three layers: canonical/editable SUG, generated ASS or render report, and rendered frame geometry. The renderer reads only the reviewed canonical SUG; it must not infer or override ruby. In the frame, confirm that each reading is centered over only its intended word and does not visually straddle a neighboring word.
+- Emit a focused ruby-word-boundary QA artifact containing stable song and source-line identity, occurrence, main-text span, reading, canonical link flags or equivalent grouping, source/editable/rendered status, confidence, evidence, model/prompt version, SUG hash before and after review, reviewed exceptions, timing-unchanged status, and representative frame paths. Fail when any layer disagrees even if the visible kana string is otherwise correct.
+- Verify visible ruby independently in the final ASS and rendered frames; SUG, ASS/report, and final-frame geometry must agree.
 - Record structured `source_ruby_status` and `rendered_ruby_status` values so `source wrong, rendered correct` remains distinct from `rendered output wrong`.
-- When an editable project is part of review or delivery, require `editable_ruby_status` too. Do not declare a ruby fix complete while the renderer corrects an obsolete or isolated-kanji reading only at render time.
-- Diff the editable project's ruby against the current reviewed ASS/report by stable song, source-line, occurrence, character span, and reading. Back-propagate approved contextual readings to the editable source, then reopen that exact generation and inspect the affected line.
+- When an editable project is part of review or delivery, require `editable_ruby_status` too. Do not declare a ruby fix complete until the reviewed canonical SUG, ASS/report, and rendered frames agree; renderer-only contextual correction is forbidden.
+- Diff the editable project's ruby against the current reviewed ASS/report by stable song, source-line, occurrence, character span, and reading. The Agent writes approved corrections to the canonical SUG before rendering, preserves existing human or legacy ruby, and reopens that exact generation for inspection.
 - Ruby corrections must not change character timing unless timing is the explicit task.
 - Treat requested main-text size, ruby size, spacing, and resolved font as output invariants. Shrink only after measured overflow and record the exception.
 - For semantic gaps inside one display line, record the exact post-character indices and configured em/pixel increment. Compare geometry with and without the gap; do not infer unequal spacing from glyph contours, highlight color, or centered ruby alone.

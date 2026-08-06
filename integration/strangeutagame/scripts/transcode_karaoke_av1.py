@@ -25,6 +25,9 @@ except ImportError:  # pragma: no cover - direct script execution
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = REPO_ROOT / "deliverables" / "karaoke"
 PROFILES = ("standard", "wide")
+# Stable release profile; change only through an explicit profile migration.
+DEFAULT_AV1_CQ = 44
+DEFAULT_AV1_PRESET = "p7"
 
 
 def encoder_command(
@@ -49,7 +52,7 @@ def encoder_command(
         "-c:v",
         "av1_nvenc",
         "-preset",
-        "p7",
+        DEFAULT_AV1_PRESET,
         "-tune",
         "hq",
         "-rc",
@@ -130,8 +133,11 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cq",
         type=int,
-        default=44,
-        help="NVENC constant-quality target; higher is smaller (default: 44)",
+        default=DEFAULT_AV1_CQ,
+        help=(
+            "NVENC constant-quality target; higher is smaller "
+            f"(default: {DEFAULT_AV1_CQ}; preset fixed to {DEFAULT_AV1_PRESET})"
+        ),
     )
     parser.add_argument("--workers", type=int, default=2)
     return parser
@@ -225,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         "audio": "copy",
         "settings": {
             "cq": args.cq,
-            "preset": "p7",
+            "preset": DEFAULT_AV1_PRESET,
             "tune": "hq",
             "multipass": "fullres",
             "lookahead": 32,

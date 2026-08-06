@@ -83,6 +83,9 @@ def _require_reviewed_canonical_ruby(
 
 FONT_FAMILY = "HarmonyOS Sans SC"
 CANVAS_WIDTH = 1920
+# Stable release profile shared by full renders and review reports.
+DEFAULT_AV1_CQ = 44
+DEFAULT_AV1_PRESET = "p7"
 MAIN_FONT_SIZE = 52
 MIN_MAIN_FONT_SIZE = 38
 RUBY_FONT_SIZE = 24
@@ -3024,7 +3027,7 @@ def render_review_clip(
     duration_seconds: float,
     layout: SubtitleLayout = STANDARD_LAYOUT,
     video_encoder: str = "libx264",
-    av1_cq: int = 44,
+    av1_cq: int = DEFAULT_AV1_CQ,
     hevc_cq: int = 30,
     visual_style: str = "vinyl",
     spectrum_color: str = "#E19E84",
@@ -3170,7 +3173,7 @@ def render_review_clip(
             "-c:v",
             "av1_nvenc",
             "-preset",
-            "p7",
+            DEFAULT_AV1_PRESET,
             "-tune",
             "hq",
             "-rc",
@@ -3419,6 +3422,9 @@ def render_review_clip(
         "audio_bitrate": COMPATIBILITY_AUDIO_BITRATE,
         "lossless": lossless_report,
         "av1_cq": av1_cq if video_encoder == "av1_nvenc" else None,
+        "av1_preset": (
+            DEFAULT_AV1_PRESET if video_encoder == "av1_nvenc" else None
+        ),
         "hevc_cq": hevc_cq if video_encoder == "hevc_nvenc_444" else None,
         "visual_style": visual_style,
         "spectrum_color": f"#{color}" if visual_style == "spectrum" else None,
@@ -3588,10 +3594,13 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--av1-cq",
         type=int,
-        default=44,
+        default=DEFAULT_AV1_CQ,
         choices=range(0, 64),
         metavar="0..63",
-        help="constant-quality value for av1_nvenc (default: 44)",
+        help=(
+            "constant-quality value for av1_nvenc "
+            f"(default: {DEFAULT_AV1_CQ}; preset fixed to {DEFAULT_AV1_PRESET})"
+        ),
     )
     parser.add_argument(
         "--hevc-cq",

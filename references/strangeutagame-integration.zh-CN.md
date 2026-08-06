@@ -31,7 +31,7 @@ uv pip install -r requirements-karaoke.skill.lock.txt
 python scripts/check_karaoke_environment.py --target D:\path\to\StrangeUtaGame
 ```
 
-当前已验证应用基线是StrangeUtaGame 1.4.5，SUG存储格式是0.3.0。应用版本应从`src/strange_uta_game/__version__.py`确认，格式应从`SugMigrator.CURRENT_VERSION`确认；`pyproject.toml`中的1.2.6不是版本真源。升级后用`scripts/check_sug_compatibility.py`检查代表性项目，并要求前后哈希不变。文档化的ASR/对齐流程使用已配置的语言 profile。
+当前要求并验证的版本为StrangeUtaGame 1.4.5和SUG存储格式0.3.0。`src/strange_uta_game/__version__.py`与`pyproject.toml`中的应用版本必须保持一致，SUG格式版本以`SugMigrator.CURRENT_VERSION`为准。升级后用`scripts/check_sug_compatibility.py`检查代表性项目，并要求前后哈希不变。文档化的ASR/对齐流程使用已配置的语言profile。
 
 ## 私有数据与脚本流程
 

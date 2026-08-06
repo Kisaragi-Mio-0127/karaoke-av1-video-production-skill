@@ -13,9 +13,9 @@
 - `SKILL.md`中的检查→预览→编码→验证流程。
 - 语义分段、注音词边界QA、可编辑SUG一致性、MMS与独立ASR证据以及歌词视觉适配门禁。
 - 宽屏`vinyl`和`spectrum`模板；每次渲染只能选择一个。
-- 兼容旧版发布档的默认视频为1920x1080、30fps、yuv420p、BT.709：AV1 NVENC CQ44、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240；默认兼容MP4音频为AAC-LC 320 kb/s，选定源确实无损时可另提供无损音频版。
+- 兼容旧版发布档的默认视频为1920x1080、30fps、yuv420p、BT.709：AV1 NVENC CQ44、固定preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240；默认兼容MP4音频为AAC-LC 320 kb/s，选定源确实无损时可另提供无损音频版。
 - 通过`scripts/pitch_shift_audio.py`处理完整混音，默认使用带共振峰保持的Rubber Band R3 Finer；正式流程拒绝MP3/AAC源，不能把有损音频重新标记为FLAC。
-- 当前已验证基线为StrangeUtaGame 1.4.5和SUG存储格式0.3.0。`pyproject.toml`中的包版本可能仍为1.2.6；它不是应用版本或解析器格式的真源。
+- 当前要求并验证的版本为StrangeUtaGame 1.4.5和SUG存储格式0.3.0；`__version__.py`与`pyproject.toml`中的应用版本必须一致。
 - 19个不同的脱敏生产入口脚本，另加共享的`sug_ruby.py`规范事实模块。变调工具另在顶层`scripts/pitch_shift_audio.py`保留一份完全相同的独立入口；此外还包含带保护的安装器、编辑器/音频探针、环境检查器、只读的顶层`scripts/check_sug_compatibility.py`验证器、清单和私有覆盖示例。
 
 依赖清单的`scripts`数组包含19个入口；共享模块`sug_ruby.py`单独记录在`shared_modules`中，不另算入口。

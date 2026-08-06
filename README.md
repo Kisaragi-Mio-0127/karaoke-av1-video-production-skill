@@ -19,16 +19,16 @@ English/Chinese reference pairs below are maintained together.
   MMS and independent-ASR evidence, and lyric visual-fit gates.
 - Wide-layout `vinyl` and `spectrum` templates; choose exactly one per render.
 - Legacy-compatible default video delivery at 1920x1080 30 fps yuv420p BT.709:
-  AV1 NVENC CQ44, preset p7, tune hq, VBR, full-resolution multipass,
+  AV1 NVENC CQ44 with preset fixed at p7, tune hq, VBR, full-resolution multipass,
   lookahead32, spatial/temporal AQ, strength8, GOP240; default MP4 audio is
   AAC-LC 320 kb/s, with an optional lossless-audio version from a genuinely
   lossless source.
 - Complete-mix pitch shifting through `scripts/pitch_shift_audio.py`, using
   Rubber Band R3 Finer with formant preservation by default; formal runs reject
   MP3/AAC sources instead of relabeling lossy audio as FLAC.
-- StrangeUtaGame 1.4.5 / SUG storage format 0.3.0 as the current tested
-  baseline. The `pyproject.toml` package version may still say 1.2.6; it is
-  not the application or parser version authority.
+- Required and tested versions: StrangeUtaGame 1.4.5 and SUG storage format
+  0.3.0. The application version must match in `__version__.py` and
+  `pyproject.toml`.
 - Nineteen distinct sanitized production entry-script implementations plus the
   shared `sug_ruby.py` canonical-facts module. The pitch tool
   is also mirrored at `scripts/pitch_shift_audio.py` for standalone use, plus a guarded installer, an editor/audio

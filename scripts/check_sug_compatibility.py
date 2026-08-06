@@ -27,18 +27,29 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def version_key(value: str) -> tuple[int, ...]:
-    """Return a numeric comparison key for ordinary StrangeUtaGame versions."""
+def read_pyproject_version(repo: Path) -> str:
+    """Read ``project.version`` without requiring Python 3.11 ``tomllib``."""
 
-    numbers = tuple(int(item) for item in re.findall(r"\d+", str(value)))
-    return numbers or (0,)
+    in_project = False
+    for raw_line in (repo / "pyproject.toml").read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line == "[project]":
+            in_project = True
+            continue
+        if in_project and line.startswith("["):
+            break
+        if in_project:
+            match = re.fullmatch(r'version\s*=\s*["\']([^"\']+)["\']', line)
+            if match:
+                return match.group(1)
+    raise ValueError("pyproject.toml has no [project] version")
 
 
 def inspect_checkout(
     repo: Path,
     projects: list[Path],
     *,
-    minimum_app_version: str,
+    expected_app_version: str,
     expected_sug_version: str,
 ) -> dict[str, Any]:
     """Import the target parser and load projects without modifying them."""
@@ -62,6 +73,7 @@ def inspect_checkout(
         sys.path.remove(str(source_root))
 
     parser_version = str(SugMigrator.CURRENT_VERSION)
+    package_version = read_pyproject_version(repo)
     records: list[dict[str, Any]] = []
     for requested in projects:
         project_path = requested.expanduser().resolve()
@@ -81,8 +93,8 @@ def inspect_checkout(
         )
 
     checks = {
-        "application_at_least_minimum": version_key(__version__)
-        >= version_key(minimum_app_version),
+        "application_version_matches_expected": __version__ == expected_app_version,
+        "package_version_matches_application": package_version == __version__,
         "parser_format_matches_expected": parser_version == expected_sug_version,
         "all_projects_loaded": len(records) == len(projects),
         "all_projects_unchanged": all(item["unchanged"] for item in records),
@@ -90,7 +102,8 @@ def inspect_checkout(
     return {
         "schema_version": "karaoke-sug-compatibility/v1",
         "application_version": __version__,
-        "minimum_application_version": minimum_app_version,
+        "package_version": package_version,
+        "expected_application_version": expected_app_version,
         "sug_format_version": parser_version,
         "expected_sug_format_version": expected_sug_version,
         "projects": records,
@@ -103,7 +116,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--project", type=Path, action="append", default=[])
-    parser.add_argument("--minimum-app-version", default="1.4.5")
+    parser.add_argument(
+        "--expected-app-version",
+        default="1.4.5",
+        help="required application/package version (default: 1.4.5)",
+    )
     parser.add_argument("--expected-sug-version", default="0.3.0")
     parser.add_argument("--output", type=Path)
     return parser
@@ -118,7 +135,7 @@ def main() -> int:
     report = inspect_checkout(
         args.repo,
         args.project,
-        minimum_app_version=args.minimum_app_version,
+        expected_app_version=args.expected_app_version,
         expected_sug_version=args.expected_sug_version,
     )
     text = json.dumps(report, ensure_ascii=False, indent=2) + "\n"

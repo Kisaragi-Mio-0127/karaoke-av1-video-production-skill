@@ -10,9 +10,8 @@ license claim. Do not infer an AGPL grant for separately supplied components.
 The files under `integration/strangeutagame/scripts/` are later-developed
 integration scripts, not files from the Git history of
 [karaoke-studio/StrangeUtaGame](https://github.com/karaoke-studio/StrangeUtaGame).
-They are validated against the current StrangeUtaGame 1.4.5 application
-baseline and SUG storage format 0.3.0. The `pyproject.toml` package version may
-still report 1.2.6 and is not the application or parser version authority.
+They are validated against StrangeUtaGame 1.4.5 and SUG storage format 0.3.0.
+The application version must match in `__version__.py` and `pyproject.toml`.
 These files were untracked additions in the production working tree before
 packaging. Some scripts directly import tracked
 StrangeUtaGame application modules, some depend on those scripts transitively,
@@ -41,6 +40,6 @@ responsible for their licenses, service terms, and redistribution rights.
 
 除非具体文件另有说明，本仓库代码和文档使用**GPL-3.0-only**，著作权归各自作者与贡献者所有。本仓库不声明AGPL授权，也不能据此推断外部组件获得了AGPL授权。
 
-`integration/strangeutagame/scripts/`中的文件是后来开发的集成脚本，不是从[karaoke-studio/StrangeUtaGame](https://github.com/karaoke-studio/StrangeUtaGame)上游Git历史复制的文件。当前验证基线为StrangeUtaGame 1.4.5和SUG 0.3.0；`pyproject.toml`中的1.2.6不是应用版本或解析器格式的真源。各脚本的直接依赖、传递依赖和无上游代码导入分类以`integration/strangeutagame/dependency-manifest.json`为准。
+`integration/strangeutagame/scripts/`中的文件是后来开发的集成脚本，不是从[karaoke-studio/StrangeUtaGame](https://github.com/karaoke-studio/StrangeUtaGame)上游Git历史复制的文件。当前要求并验证的版本为StrangeUtaGame 1.4.5和SUG 0.3.0；`__version__.py`与`pyproject.toml`中的应用版本必须一致。各脚本的直接依赖、传递依赖和无上游代码导入分类以`integration/strangeutagame/dependency-manifest.json`为准。
 
 公开快照已删除真实专辑名、歌词、媒体哈希、封面URL和本机路径；歌曲专用分句和ruby规则改由外部JSON提供；网络访问需显式启用。仓库不重新分发StrangeUtaGame应用、录音、歌词、字体、封面、FFmpeg或Rubber Band二进制文件、驱动、模型和渲染媒体。使用者须自行确认许可证、服务条款和再分发权。

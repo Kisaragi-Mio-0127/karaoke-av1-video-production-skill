@@ -49,10 +49,10 @@ The lock installs StrangeUtaGame editable plus GUI, rendering, timing,
 Whisper/stable-ts, PyTorch, and MMS dependencies. Use the copied `.in` file as
 the human-readable dependency source. Keep this environment project-local.
 
-The current tested application baseline is StrangeUtaGame 1.4.5 with SUG
-storage format 0.3.0. Verify those values from the application source and
-`SugMigrator.CURRENT_VERSION`; the `pyproject.toml` package version may still
-read 1.2.6 and is not the version authority. Run
+The required and tested versions are StrangeUtaGame 1.4.5 and SUG storage
+format 0.3.0. Keep the application version synchronized in
+`src/strange_uta_game/__version__.py` and `pyproject.toml`, and read the storage
+format from `SugMigrator.CURRENT_VERSION`. Run
 `scripts/check_sug_compatibility.py` against representative projects after an
 application update. Use the configured language profile for the documented
 ASR/alignment path. Require unchanged before/after project hashes.

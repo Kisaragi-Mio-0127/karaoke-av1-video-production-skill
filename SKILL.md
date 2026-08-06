@@ -56,7 +56,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - Never auto-save an editor review session. If audio loading alone changes the in-memory duration by a rounding-sized amount such as 1 ms, changes dirty from false to true, and leaves all other serialized project fields unchanged, leave it unsaved and record `do-not-save-duration-normalization`. Treat any other dirty state as requiring review before save. A callback pass is provisional while the editor remains open; require graceful exit plus a final unchanged canonical hash for the completed gate. A forced exit or missing final check is inconclusive.
 - Keep guarded loading review separate from editable work. The probe writes only a private JSON evidence report and blocks project saves. If the user actually adjusts timing, reopen the verified canonical project in the application's normal editable mode and save those edits to the canonical editable source (`.sug` for StrangeUtaGame); then regenerate the ASS and final video from that saved source. Do not mistake the probe JSON, ASS, or encoded video for the editable timing source.
 - Report separately: project opened, reviewed project identity matched, media path resolved, audio engine load verified, and any recovery copy handled.
-- Verify the installed StrangeUtaGame application version and `SugMigrator.CURRENT_VERSION` instead of treating the package metadata in `pyproject.toml` as authoritative. The current tested baseline is StrangeUtaGame 1.4.5 with SUG storage format 0.3.0. Run the compatibility checker against representative canonical projects after an application update; loading must leave every project hash unchanged.
+- Require StrangeUtaGame 1.4.5 and SUG storage format 0.3.0. Keep the application version synchronized in `src/strange_uta_game/__version__.py` and `pyproject.toml`, and read the storage format from `SugMigrator.CURRENT_VERSION`. Run the compatibility checker against representative canonical projects after an application update; loading must leave every project hash unchanged.
 
 ## Subtitle And Timeline Gate
 
@@ -87,7 +87,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - Never assume the encoder retained 4:2:0; verify the final `pix_fmt` with ffprobe.
 - Use AV1 NVENC for fast previews or delivery when a real probe encode succeeds. Use `libaom-av1` as the CPU fallback and reproducible quality lane.
 - Do not infer hardware support from the encoder list alone. Run a short synthetic or source preview encode first.
-- Use the legacy-compatible default video profile for the default 1920x1080 30 fps SDR delivery: AV1 NVENC CQ44, `preset p7`, `tune hq`, VBR, full-resolution multipass, lookahead 32, spatial and temporal AQ, AQ strength 8, GOP 240, `yuv420p`, and BT.709 color metadata. Verify every value with `ffprobe`; use another profile only when explicitly requested and recorded.
+- Use the legacy-compatible default video profile for the default 1920x1080 30 fps SDR delivery: AV1 NVENC CQ44 with the preset fixed at `p7`, `tune hq`, VBR, full-resolution multipass, lookahead 32, spatial and temporal AQ, AQ strength 8, GOP 240, `yuv420p`, and BT.709 color metadata. Verify every value with `ffprobe`; use another profile only when explicitly requested and recorded.
 - Keep speed and image quality claims separate. Use `libaom-av1` as the CPU fallback and reproducible quality lane, and do not infer hardware support from the encoder list alone; run a short probe encode first.
 - Preserve documented HDR metadata. For ordinary SDR sources, do not introduce HDR or conflicting color tags; verify expected BT.709 metadata when applicable.
 
@@ -109,12 +109,12 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 
 ## 中文要点
 
-- 先确认应用真实版本和SUG格式版本。不要把`pyproject.toml`中的旧包版本当作应用版本；当前已验证基线是StrangeUtaGame 1.4.5和SUG 0.3.0。
+- 当前要求并验证的版本为StrangeUtaGame 1.4.5和SUG存储格式0.3.0；`src/strange_uta_game/__version__.py`与`pyproject.toml`中的应用版本必须保持一致，SUG格式版本以`SugMigrator.CURRENT_VERSION`为准。
 - 独立ASR不是强制对齐失败后的自动替代方案。ASR失败时必须记录为未解决，不能悄悄改用插值后宣称ASR通过。
 - 文档化的ASR和对齐流程使用已配置的语言 profile；任何非默认 profile 都必须有经过验证的 adapter，不对未经验证的中文或英文实现作承诺。
 - 升降调时直接处理完整混音，默认使用Rubber Band R3 Finer和共振峰保持。变调后的无损FLAC必须同时作为时间轴证据和最终MKV无损音轨来源。
 - 候选注音生成器只填补缺失项并先写入规范SUG；Agent像语义分句一样按整句歌词、语法、词形、词边界和上下文自动审核每条注音，可自动批准或直接回写修正。无修改时沿用默认注音，但仍须记录批准状态；仅歧义、专名/艺术读音、证据冲突、低置信或`unresolved`升级人工。renderer只读审核后的规范SUG，渲染阶段禁止再推断或覆盖注音；审核sidecar必须匹配当前SUG哈希，且每个注音span都必须有范围精确的已批准记录，缺失、陈旧、`machine-fill`、低置信、冲突或未解决状态一律阻止渲染。保护已有人工或legacy注音，并为每个span记录状态、置信度、evidence、model/prompt版本及SUG修改前后哈希；SUG、ASS/报告和最终帧必须三层一致。
-- 默认兼容视频档为AV1 NVENC CQ44、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240、1920x1080 30fps、yuv420p、BT.709；MP4音频保持AAC-LC 320k，可另选无损音频版。
+- 默认兼容视频档为AV1 NVENC CQ44、固定preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240、1920x1080 30fps、yuv420p、BT.709；MP4音频保持AAC-LC 320k，可另选无损音频版。
 
 ## Verification Gate
 

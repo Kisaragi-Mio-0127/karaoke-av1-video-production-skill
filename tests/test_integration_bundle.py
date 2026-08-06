@@ -194,6 +194,7 @@ class IntegrationBundleTests(unittest.TestCase):
         )
         self.assertIn('choices=("vinyl", "spectrum")', preview_source)
         self.assertIn('COMPATIBILITY_AUDIO_BITRATE = "320k"', preview_source)
+        self.assertIn('"av1_preset":', preview_source)
         self.assertNotIn("wide-zh", preview_source)
         self.assertNotIn("wide-en", preview_source)
 
@@ -294,6 +295,12 @@ class IntegrationBundleTests(unittest.TestCase):
         renderer = (SCRIPTS / "render_karaoke_direct_av1_420_album.py").read_text(
             encoding="utf-8"
         )
+        transcoder = (SCRIPTS / "transcode_karaoke_av1.py").read_text(
+            encoding="utf-8"
+        )
+        for source in (renderer, transcoder):
+            self.assertIn("DEFAULT_AV1_CQ = 44", source)
+            self.assertIn('DEFAULT_AV1_PRESET = "p7"', source)
         self.assertIn('"audio_bitrate": "320k"', renderer)
         self.assertIn('"audio_codec": "flac"', renderer)
         self.assertIn("lossless-output", renderer)
@@ -307,7 +314,7 @@ class IntegrationBundleTests(unittest.TestCase):
             checker.inspect_checkout(
                 ROOT,
                 [],
-                minimum_app_version="1.4.5",
+                expected_app_version="1.4.5",
                 expected_sug_version="0.3.0",
             )
 

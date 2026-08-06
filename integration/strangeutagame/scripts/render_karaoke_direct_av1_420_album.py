@@ -72,6 +72,9 @@ PROFILES = ("standard", "wide")
 AV1_OUTPUT_DIR = "av1-420"
 LOSSLESS_OUTPUT_DIR = "av1-420-lossless"
 AV1_REPORT_NAME = "av1_420_report.json"
+# Stable release profile; change only through an explicit profile migration.
+DEFAULT_AV1_CQ = 44
+DEFAULT_AV1_PRESET = "p7"
 
 
 class DirectAV1420RenderError(RuntimeError):
@@ -707,6 +710,7 @@ def validate_preview_report(report: dict[str, Any], *, av1_cq: int) -> None:
         "video_encoder": "av1_nvenc",
         "pixel_format": "yuv420p",
         "av1_cq": av1_cq,
+        "av1_preset": DEFAULT_AV1_PRESET,
         "preferred_output": "compatibility-mp4",
         "audio_codec": "aac",
         "audio_profile": "aac_low",
@@ -1746,7 +1750,7 @@ def build_av1_420_report(
         },
         "language_ruby_identity": identity,
         "settings": {
-            "preset": "p7",
+            "preset": DEFAULT_AV1_PRESET,
             "tune": "hq",
             "rate_control": "vbr",
             "cq": av1_cq,
@@ -1810,7 +1814,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--av1-cq",
         type=int,
-        default=44,
+        default=DEFAULT_AV1_CQ,
         choices=range(0, 64),
         metavar="0..63",
     )

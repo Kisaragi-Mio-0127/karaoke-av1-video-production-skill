@@ -18,8 +18,8 @@ English/Chinese reference pairs below are maintained together.
 - Semantic phrase segmentation, ruby word-boundary QA, editable SUG parity,
   MMS and independent-ASR evidence, and lyric visual-fit gates.
 - Wide-layout `vinyl` and `spectrum` templates; choose exactly one per render.
-- Legacy-compatible default video delivery at 1920x1080 30 fps yuv420p BT.709:
-  AV1 NVENC CQ44 with preset fixed at p7, tune hq, VBR, full-resolution multipass,
+- Default video delivery at 1920x1080 30 fps yuv420p BT.709:
+  AV1 NVENC CQ38 with preset fixed at p7, tune hq, VBR, full-resolution multipass,
   lookahead32, spatial/temporal AQ, strength8, GOP240; default MP4 audio is
   AAC-LC 320 kb/s, with an optional lossless-audio version from a genuinely
   lossless source.
@@ -104,7 +104,7 @@ official links, script routing, private manifests, and network boundaries.
 4. When pitch shifting is requested, shift the complete mix before timing and
    rendering. Feed the verified shifted FLAC into alignment evidence, previews,
    MP4 AAC-LC 320 kb/s, and the paired MKV FLAC track.
-5. Use the legacy-compatible AV1 profile by default: NVENC CQ44, preset p7,
+5. Use the default AV1 release profile: NVENC CQ38, preset p7,
    tune hq, VBR, full-resolution multipass, lookahead32, spatial/temporal AQ,
    strength8, GOP240, 1920x1080 30 fps, yuv420p, and BT.709. Keep MP4 as the
    AAC-LC 320k compatibility version; make a separate lossless version only

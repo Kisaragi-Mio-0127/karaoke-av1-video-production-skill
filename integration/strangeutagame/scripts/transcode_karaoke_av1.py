@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = REPO_ROOT / "deliverables" / "karaoke"
 PROFILES = ("standard", "wide")
 # Stable release profile; change only through an explicit profile migration.
-DEFAULT_AV1_CQ = 44
+DEFAULT_AV1_CQ = 38
 DEFAULT_AV1_PRESET = "p7"
 
 

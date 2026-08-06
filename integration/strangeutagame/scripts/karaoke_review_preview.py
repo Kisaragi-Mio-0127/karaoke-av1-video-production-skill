@@ -84,7 +84,7 @@ def _require_reviewed_canonical_ruby(
 FONT_FAMILY = "HarmonyOS Sans SC"
 CANVAS_WIDTH = 1920
 # Stable release profile shared by full renders and review reports.
-DEFAULT_AV1_CQ = 44
+DEFAULT_AV1_CQ = 38
 DEFAULT_AV1_PRESET = "p7"
 MAIN_FONT_SIZE = 52
 MIN_MAIN_FONT_SIZE = 38

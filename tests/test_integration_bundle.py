@@ -299,7 +299,7 @@ class IntegrationBundleTests(unittest.TestCase):
             encoding="utf-8"
         )
         for source in (renderer, transcoder):
-            self.assertIn("DEFAULT_AV1_CQ = 44", source)
+            self.assertIn("DEFAULT_AV1_CQ = 38", source)
             self.assertIn('DEFAULT_AV1_PRESET = "p7"', source)
         self.assertIn('"audio_bitrate": "320k"', renderer)
         self.assertIn('"audio_codec": "flac"', renderer)

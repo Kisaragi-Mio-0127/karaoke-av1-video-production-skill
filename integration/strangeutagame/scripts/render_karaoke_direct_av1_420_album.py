@@ -73,7 +73,7 @@ AV1_OUTPUT_DIR = "av1-420"
 LOSSLESS_OUTPUT_DIR = "av1-420-lossless"
 AV1_REPORT_NAME = "av1_420_report.json"
 # Stable release profile; change only through an explicit profile migration.
-DEFAULT_AV1_CQ = 44
+DEFAULT_AV1_CQ = 38
 DEFAULT_AV1_PRESET = "p7"
 
 

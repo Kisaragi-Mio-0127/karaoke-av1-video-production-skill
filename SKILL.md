@@ -87,7 +87,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - Never assume the encoder retained 4:2:0; verify the final `pix_fmt` with ffprobe.
 - Use AV1 NVENC for fast previews or delivery when a real probe encode succeeds. Use `libaom-av1` as the CPU fallback and reproducible quality lane.
 - Do not infer hardware support from the encoder list alone. Run a short synthetic or source preview encode first.
-- Use the legacy-compatible default video profile for the default 1920x1080 30 fps SDR delivery: AV1 NVENC CQ44 with the preset fixed at `p7`, `tune hq`, VBR, full-resolution multipass, lookahead 32, spatial and temporal AQ, AQ strength 8, GOP 240, `yuv420p`, and BT.709 color metadata. Verify every value with `ffprobe`; use another profile only when explicitly requested and recorded.
+- Use the default release video profile for 1920x1080 30 fps SDR delivery: AV1 NVENC CQ38 with the preset fixed at `p7`, `tune hq`, VBR, full-resolution multipass, lookahead 32, spatial and temporal AQ, AQ strength 8, GOP 240, `yuv420p`, and BT.709 color metadata. Verify every value with `ffprobe`; use another profile only when explicitly requested and recorded.
 - Keep speed and image quality claims separate. Use `libaom-av1` as the CPU fallback and reproducible quality lane, and do not infer hardware support from the encoder list alone; run a short probe encode first.
 - Preserve documented HDR metadata. For ordinary SDR sources, do not introduce HDR or conflicting color tags; verify expected BT.709 metadata when applicable.
 
@@ -114,7 +114,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - 文档化的ASR和对齐流程使用已配置的语言 profile；任何非默认 profile 都必须有经过验证的 adapter，不对未经验证的中文或英文实现作承诺。
 - 升降调时直接处理完整混音，默认使用Rubber Band R3 Finer和共振峰保持。变调后的无损FLAC必须同时作为时间轴证据和最终MKV无损音轨来源。
 - 候选注音生成器只填补缺失项并先写入规范SUG；Agent像语义分句一样按整句歌词、语法、词形、词边界和上下文自动审核每条注音，可自动批准或直接回写修正。无修改时沿用默认注音，但仍须记录批准状态；仅歧义、专名/艺术读音、证据冲突、低置信或`unresolved`升级人工。renderer只读审核后的规范SUG，渲染阶段禁止再推断或覆盖注音；审核sidecar必须匹配当前SUG哈希，且每个注音span都必须有范围精确的已批准记录，缺失、陈旧、`machine-fill`、低置信、冲突或未解决状态一律阻止渲染。保护已有人工或legacy注音，并为每个span记录状态、置信度、evidence、model/prompt版本及SUG修改前后哈希；SUG、ASS/报告和最终帧必须三层一致。
-- 默认兼容视频档为AV1 NVENC CQ44、固定preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240、1920x1080 30fps、yuv420p、BT.709；MP4音频保持AAC-LC 320k，可另选无损音频版。
+- 默认发布视频档为AV1 NVENC CQ38、固定preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240、1920x1080 30fps、yuv420p、BT.709；MP4音频保持AAC-LC 320k，可另选无损音频版。
 
 ## Verification Gate
 

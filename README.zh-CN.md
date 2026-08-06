@@ -13,7 +13,7 @@
 - `SKILL.md`中的检查→预览→编码→验证流程。
 - 语义分段、注音词边界QA、可编辑SUG一致性、MMS与独立ASR证据以及歌词视觉适配门禁。
 - 宽屏`vinyl`和`spectrum`模板；每次渲染只能选择一个。
-- 兼容旧版发布档的默认视频为1920x1080、30fps、yuv420p、BT.709：AV1 NVENC CQ44、固定preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240；默认兼容MP4音频为AAC-LC 320 kb/s，选定源确实无损时可另提供无损音频版。
+- 默认发布视频为1920x1080、30fps、yuv420p、BT.709：AV1 NVENC CQ38、固定preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240；默认兼容MP4音频为AAC-LC 320 kb/s，选定源确实无损时可另提供无损音频版。
 - 通过`scripts/pitch_shift_audio.py`处理完整混音，默认使用带共振峰保持的Rubber Band R3 Finer；正式流程拒绝MP3/AAC源，不能把有损音频重新标记为FLAC。
 - 当前要求并验证的版本为StrangeUtaGame 1.4.5和SUG存储格式0.3.0；`__version__.py`与`pyproject.toml`中的应用版本必须一致。
 - 19个不同的脱敏生产入口脚本，另加共享的`sug_ruby.py`规范事实模块。变调工具另在顶层`scripts/pitch_shift_audio.py`保留一份完全相同的独立入口；此外还包含带保护的安装器、编辑器/音频探针、环境检查器、只读的顶层`scripts/check_sug_compatibility.py`验证器、清单和私有覆盖示例。
@@ -70,7 +70,7 @@ python scripts/check_karaoke_environment.py --target $projectRoot
 2. 探测每个输入并在编码前确定输出矩阵。所有强制门禁通过前保留源媒体并写入临时输出。
 3. 文档化的ASR和对齐流程使用已配置的语言 profile；任何非默认 profile 都必须有经过验证的 adapter。独立ASR是独立证据链，绝不是强制对齐失败后的静默后备；不可用或失败时记录为`unresolved`。
 4. 请求升降调时，在时间轴和渲染前处理完整混音。验证后的变调FLAC同时用于时间证据、预览、MP4 AAC-LC 320 kb/s和配对MKV FLAC音轨。
-5. 默认使用兼容旧版发布档的视频参数：AV1 NVENC CQ44、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240、1920x1080、30fps、yuv420p、BT.709。MP4保持AAC-LC/320k兼容音频；只有源确实无损时才另产无损版。
+5. 默认使用发布视频参数：AV1 NVENC CQ38、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、strength8、GOP240、1920x1080、30fps、yuv420p、BT.709。MP4保持AAC-LC/320k兼容音频；只有源确实无损时才另产无损版。
 6. 把MP4和MKV作为同一代一起验证：MP4为AAC-LC/320k，MKV只有FLAC音频，编码视频流哈希一致，时间轴一致，MKV解码PCM等于选定的无损源切片。
 7. 候选注音生成器只填补缺失项并先写入规范SUG，保护已有人工或legacy注音。Agent按整句歌词、语法、词形、词边界和上下文自动审核每条注音，可自动批准或直接回写修正；无修改时沿用默认注音并记录批准状态。仅歧义、专名/艺术读音、证据冲突、低置信或`unresolved`升级人工。renderer只读审核后的规范SUG，渲染阶段禁止再推断或覆盖。审核sidecar必须匹配当前SUG哈希，并为每个已存注音span提供范围精确的已批准记录；缺失、陈旧、仅机器填补、低置信、冲突或未解决记录一律失败关闭。发布时先原子写入SUG，再原子写入sidecar，避免中断后sidecar错误证明一个从未落盘的SUG。SUG、ASS/报告和最终帧必须一致，并为每个span记录状态、置信度、evidence、model/prompt版本及SUG修改前后哈希。
 8. 保持源文本、适用的注音和上下文读音从可编辑SUG到ASS及渲染输出的可追溯性。

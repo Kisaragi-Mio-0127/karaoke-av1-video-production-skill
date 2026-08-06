@@ -18,7 +18,7 @@ pad=ceil(iw/2)*2:ceil(ih/2)*2,subtitles=...,format=p010le
 
 ## AV1编码与默认兼容MP4
 
-NVENC探测成功时，默认1920x1080、30fps、SDR兼容档使用AV1 NVENC CQ44、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、AQ strength8、GOP240、yuv420p和BT.709。CPU质量路径使用`libaom-av1`；10位路径另行记录，不能把示例CQ/CRF当作默认标准。
+NVENC探测成功时，默认1920x1080、30fps、SDR发布档使用AV1 NVENC CQ38、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、AQ strength8、GOP240、yuv420p和BT.709。CPU质量路径使用`libaom-av1`；10位路径另行记录，不能把示例CQ/CRF当作默认标准。
 
 默认主交付是MP4，音频使用AAC-LC，目标码率为320 kb/s，并显式映射视频和选定音轨：
 
@@ -27,7 +27,7 @@ NVENC探测成功时，默认1920x1080、30fps、SDR兼容档使用AV1 NVENC CQ4
   -map 0:v:0 -map 0:a:0? -map_metadata -1 -map_chapters -1 `
   -vf "subtitles='$ass':fontsdir='$fonts',format=yuv420p" `
   -s 1920x1080 -r 30 -pix_fmt yuv420p `
-  -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 44 -b:v 0 `
+  -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 38 -b:v 0 `
   -multipass fullres -lookahead 32 -spatial-aq 1 -temporal-aq 1 `
   -aq-strength 8 -g 240 `
   -colorspace bt709 -color_primaries bt709 -color_trc bt709 `

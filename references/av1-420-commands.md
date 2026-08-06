@@ -34,14 +34,14 @@ Use `format=yuv420p` for 8-bit or `format=yuv420p10le` for the libaom 10-bit lan
 
 ## Default NVENC 8-Bit Compatibility 4:2:0
 
-Use this legacy-compatible default for 1920x1080 30 fps SDR delivery when the local NVIDIA encoder probe succeeds:
+Use this default for 1920x1080 30 fps SDR delivery when the local NVIDIA encoder probe succeeds:
 
 ```powershell
 & $ffmpeg -nostdin -n -i $input `
   -map 0:v:0 -map 0:a:0? -map_metadata -1 -map_chapters -1 `
   -vf "subtitles='$ass':fontsdir='$fonts',format=yuv420p" `
   -s 1920x1080 -r 30 -pix_fmt yuv420p `
-  -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 44 -b:v 0 `
+  -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 38 -b:v 0 `
   -multipass fullres -lookahead 32 -spatial-aq 1 -temporal-aq 1 `
   -aq-strength 8 -g 240 `
   -colorspace bt709 -color_primaries bt709 -color_trc bt709 `

@@ -179,6 +179,35 @@ def build_archive(
     if not album_info.is_file():
         raise FileNotFoundError(f"missing album info: {album_info}")
 
+    # Lossless companions are optional when the selected source audio is lossy.
+    # If any companion exists, require the complete selected matrix so archives
+    # cannot silently mix MP4-only and dual-delivery tracks.
+    lossless_sources: dict[tuple[str, int], Path] = {}
+    if lane == "av1-420":
+        candidates = {
+            (profile, int(track["track_number"])): (
+                deliverable_root
+                / "video"
+                / "av1-420-lossless"
+                / profile
+                / Path(numbered_filename(track)).with_suffix(".mkv")
+            )
+            for profile in profiles
+            for track in manifest["tracks"]
+        }
+        present = {
+            key: path
+            for key, path in candidates.items()
+            if path.is_file() and path.stat().st_size > 0
+        }
+        if present and len(present) != len(candidates):
+            missing = next(path for key, path in candidates.items() if key not in present)
+            raise FileNotFoundError(
+                "incomplete lossless package matrix; missing input: "
+                f"{missing}"
+            )
+        lossless_sources = present
+
     entries: list[dict[str, Any]] = []
     try:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -244,25 +273,13 @@ def build_archive(
                             "sha256": sha256_file(source),
                         }
                     )
-                    if lane == "av1-420":
+                    lossless_source = lossless_sources.get(
+                        (profile, int(track["track_number"]))
+                    )
+                    if lossless_source is not None:
                         lossless_filename = Path(numbered_filename(track)).with_suffix(
                             ".mkv"
                         )
-                        lossless_source = (
-                            deliverable_root
-                            / "video"
-                            / "av1-420-lossless"
-                            / profile
-                            / lossless_filename
-                        )
-                        if (
-                            not lossless_source.is_file()
-                            or lossless_source.stat().st_size == 0
-                        ):
-                            raise FileNotFoundError(
-                                "missing lossless package input: "
-                                f"{lossless_source}"
-                            )
                         lossless_entry_name = (
                             f"{package_root}/{profile}/{lossless_filename}"
                         )

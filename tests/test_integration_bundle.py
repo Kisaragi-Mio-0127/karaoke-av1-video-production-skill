@@ -298,7 +298,10 @@ class IntegrationBundleTests(unittest.TestCase):
         transcoder = (SCRIPTS / "transcode_karaoke_av1.py").read_text(
             encoding="utf-8"
         )
-        for source in (renderer, transcoder):
+        preview = (SCRIPTS / "karaoke_review_preview.py").read_text(
+            encoding="utf-8"
+        )
+        for source in (renderer, transcoder, preview):
             self.assertIn("DEFAULT_AV1_CQ = 38", source)
             self.assertIn('DEFAULT_AV1_PRESET = "p7"', source)
         self.assertIn('"audio_bitrate": "320k"', renderer)

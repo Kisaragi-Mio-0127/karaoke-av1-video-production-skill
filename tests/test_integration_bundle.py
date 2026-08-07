@@ -166,6 +166,12 @@ def test_network_and_output_expansion_require_explicit_flags() -> None:
     assert "--full-decode" in direct and "action=\"store_true\"" in direct
 
 
+def test_manifest_driven_tools_have_no_import_time_private_manifest() -> None:
+    for name in ("package_karaoke_numbered_archives.py", "transcode_karaoke_av1.py"):
+        text = (SCRIPTS / name).read_text(encoding="utf-8")
+        assert "DEFAULT_MANIFEST_PATH" not in text
+
+
 def test_public_bundle_contains_no_track_specific_or_private_literals() -> None:
     forbidden = re.compile(
         r"((?<![A-Za-z0-9_])[A-Za-z]:[/\\]|/home/|private-album-name|"

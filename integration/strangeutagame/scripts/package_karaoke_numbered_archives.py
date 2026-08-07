@@ -16,14 +16,12 @@ from typing import Any
 
 try:
     from .karaoke_album import (
-        DEFAULT_MANIFEST_PATH,
         delivery_display_title,
         numbered_video_filename,
         sha256_file,
     )
 except ImportError:  # pragma: no cover - direct script execution
     from karaoke_album import (  # type: ignore[no-redef]
-        DEFAULT_MANIFEST_PATH,
         delivery_display_title,
         numbered_video_filename,
         sha256_file,
@@ -405,7 +403,7 @@ def write_report(path: Path, packages: list[dict[str, Any]]) -> None:
 
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
+    parser.add_argument("--manifest", type=Path)
     parser.add_argument(
         "--root",
         type=Path,
@@ -443,6 +441,8 @@ def make_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
     try:
+        if args.manifest is None:
+            raise NumberedPackageError("--manifest is required")
         manifest_path = _resolve(args.manifest)
         manifest = load_manifest(manifest_path)
         deliverable_root = (

@@ -15,18 +15,12 @@ from typing import Any
 import imageio_ffmpeg
 
 try:
-    from .karaoke_album import DEFAULT_MANIFEST_PATH, load_album_manifest
+    from .karaoke_album import load_album_manifest
 except ImportError:  # pragma: no cover - direct script execution
-    from karaoke_album import (  # type: ignore[no-redef]
-        DEFAULT_MANIFEST_PATH,
-        load_album_manifest,
-    )
+    from karaoke_album import load_album_manifest  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ALBUM = load_album_manifest(DEFAULT_MANIFEST_PATH)
-DEFAULT_ROOT = DEFAULT_ALBUM.deliverable_dir
 PROFILES = ("standard", "wide")
-TRACKS = tuple(track.artifact_slug for track in DEFAULT_ALBUM.tracks)
 # Stable release profile; change only through an explicit profile migration.
 DEFAULT_AV1_CQ = 38
 DEFAULT_AV1_PRESET = "p7"
@@ -130,7 +124,7 @@ def transcode_one(
 
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
+    parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--root", type=Path, default=None)
     parser.add_argument(
         "--cq",

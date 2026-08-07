@@ -34,6 +34,9 @@ companion SUG, generates the current layout, renders AV1 MP4, and writes stage
 reports. It defaults to `--quality-policy auto-fallback` and
 `--visual-style spectrum`.
 
+The MSST adapter is auto-discovered from supported local installations; an
+explicit `KARAOKE_MSST_PREPARATION_SCRIPT` path overrides discovery.
+
 Treat `rendered-with-fallback` as successful automation with retained quality
 evidence, not as a human quality approval. Low-confidence units retain their
 initial timing. Manual or Agent adjustment of the companion SUG is optional.

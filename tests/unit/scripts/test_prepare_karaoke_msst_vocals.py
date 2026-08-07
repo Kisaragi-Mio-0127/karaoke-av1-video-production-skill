@@ -25,6 +25,38 @@ def test_import_does_not_load_a_default_manifest():
     assert not hasattr(prepare, "DEFAULT_ALBUM")
 
 
+def test_msst_script_prefers_explicit_environment_path(tmp_path: Path, monkeypatch):
+    script = tmp_path / "custom-msst.py"
+    script.write_text("# adapter\n", encoding="utf-8")
+    monkeypatch.setenv(prepare.MSST_PREPARATION_ENV, str(script))
+
+    assert prepare.resolve_msst_preparation_script() == script.resolve()
+
+
+def test_msst_script_auto_discovers_supported_sibling(tmp_path: Path, monkeypatch):
+    root = tmp_path / "submaker" / "StrangeUtaGame"
+    root.mkdir(parents=True)
+    script = tmp_path / "TTS_Test" / "scripts" / prepare.MSST_PREPARATION_NAME
+    script.parent.mkdir(parents=True)
+    script.write_text("# adapter\n", encoding="utf-8")
+    monkeypatch.delenv(prepare.MSST_PREPARATION_ENV, raising=False)
+    monkeypatch.setattr(prepare, "ROOT", root)
+
+    assert prepare.resolve_msst_preparation_script() == script.resolve()
+
+
+def test_missing_msst_script_reports_configuration_instead_of_cwd(
+    tmp_path: Path, monkeypatch
+):
+    root = tmp_path / "isolated" / "StrangeUtaGame"
+    root.mkdir(parents=True)
+    monkeypatch.delenv(prepare.MSST_PREPARATION_ENV, raising=False)
+    monkeypatch.setattr(prepare, "ROOT", root)
+
+    with pytest.raises(FileNotFoundError, match=prepare.MSST_PREPARATION_ENV):
+        prepare.resolve_msst_preparation_script()
+
+
 def test_prepare_accepts_one_source_and_injected_cache_root(
     tmp_path: Path,
     monkeypatch,

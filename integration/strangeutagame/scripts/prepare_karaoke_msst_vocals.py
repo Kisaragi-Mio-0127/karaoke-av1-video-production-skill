@@ -44,7 +44,8 @@ MSST_INPUT_DIR = CACHE_ROOT / "msst-input"
 MSST_OUTPUT_DIR = CACHE_ROOT / "msst-vocals"
 MSST_RUNTIME_DIR = CACHE_ROOT / "msst-runtime"
 
-EXTERNAL_SCRIPT = Path(os.environ.get("KARAOKE_MSST_PREPARATION_SCRIPT", ""))
+MSST_PREPARATION_ENV = "KARAOKE_MSST_PREPARATION_SCRIPT"
+MSST_PREPARATION_NAME = "prepare_sovits41_msst_stems.py"
 
 EXPECTED_SAMPLE_RATE = 44_100
 EXPECTED_CHANNELS = 2
@@ -61,12 +62,41 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def resolve_msst_preparation_script() -> Path:
+    """Resolve an explicit or supported local MSST preparation adapter."""
+
+    candidates: list[Path] = []
+    configured = os.environ.get(MSST_PREPARATION_ENV, "").strip()
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.extend(
+        [
+            ROOT / "tools" / "msst" / MSST_PREPARATION_NAME,
+            ROOT.parent / "TTS_Test" / "scripts" / MSST_PREPARATION_NAME,
+            ROOT.parents[1] / "TTS_Test" / "scripts" / MSST_PREPARATION_NAME,
+        ]
+    )
+
+    checked: list[Path] = []
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in checked:
+            continue
+        checked.append(resolved)
+        if resolved.is_file():
+            return resolved
+    locations = "\n".join(f"- {path}" for path in checked)
+    raise FileNotFoundError(
+        "MSST preparation script was not found. Set "
+        f"{MSST_PREPARATION_ENV} or install a supported local adapter. Checked:\n"
+        f"{locations}"
+    )
+
+
 def load_msst_module() -> ModuleType:
     """Import the TTS_Test preparation script without changing its source."""
 
-    script = EXTERNAL_SCRIPT.resolve()
-    if not script.is_file():
-        raise FileNotFoundError(f"MSST preparation script does not exist: {script}")
+    script = resolve_msst_preparation_script()
 
     spec = importlib.util.spec_from_file_location(
         "tts_test_prepare_sovits41_msst_stems", str(script)
@@ -92,7 +122,7 @@ def _dependency_paths(msst_module: ModuleType) -> dict[str, Path]:
         label: Path(getattr(msst_module, name)).resolve()
         for label, name in names.items()
     }
-    paths["script"] = EXTERNAL_SCRIPT.resolve()
+    paths["script"] = resolve_msst_preparation_script()
 
     missing = [
         f"{label}: {path}" for label, path in paths.items() if not path.is_file()

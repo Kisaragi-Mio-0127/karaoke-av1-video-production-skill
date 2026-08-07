@@ -37,9 +37,11 @@ The workflow first writes an independent `karaoke-preflight.ass`, then
 writes the final `karaoke.ass` during MP4 rendering. It requires their
 SHA-256 identities to match. Full duration and MP4-only output are the
 defaults; `--lossless-companion` and `--full-decode` are explicit opt-ins for
-MKV and full-decode diagnostics. The album/batch direct renderer remains
-vinyl-only, so spectrum support here must not be documented as album-renderer
-support.
+MKV and full-decode diagnostics. Japanese pronunciation validation defaults to
+non-blocking `optional`. The one-click route and the underlying renderer share the same
+singer, overlay, ruby, container, and diagnostic gates. The album/batch direct
+renderer remains vinyl-only, so spectrum support here must not be documented as
+album-renderer support.
 
 ## Use the shared scripts
 
@@ -70,7 +72,7 @@ For `vinyl`, replace `<vinyl-only-arguments>` with `--vinyl <current-vinyl-png>`
 
 ## Current composition contract
 
-The current wide composition uses `wide-layout-v5/no-right-panels`. It removes both the extra outer right-panel overlay and the compact dark backplate behind or below the rotating record. The record still rotates, and the album card, card footer, and lower subtitle panel remain visible. The spectrum variant does not reintroduce the removed vinyl-region background frame.
+The current wide composition uses `wide-layout-v6/top-secondary-clearance`. It removes both the extra outer right-panel overlay and the compact dark backplate behind or below the rotating record. The record still rotates, and the album card, card footer, and lower subtitle panel remain visible. The spectrum variant does not reintroduce the removed vinyl-region background frame.
 
 ## Preserve the visual contract
 
@@ -78,6 +80,8 @@ The current wide composition uses `wide-layout-v5/no-right-panels`. It removes b
 - Keep the common lower subtitle backdrop at corner coordinates `(x1,y1,x2,y2)=(20,576,1900,1050)`; its top edge is `y=576` and it remains in the composition. Subtitle anchors come from `--layout`, not from this rectangle.
 - For `vinyl`, use album-card geometry `(x,y,width,height)=(40,30,340,402)`, footer bottom padding `12`, and title block visual left edge `430`.
 - For Japanese wide subtitles, the upper and lower main-lyric anchors are `y=660` and `y=870` respectively.
+- For explicit `opera`, `harmony`, and `secondary` roles, use a dedicated top-centred overlay in the `y=0..96` safe band at anchor `y=12`, default `60 px` font size, and a `36 px` minimum for long-line fitting. The actual outline/glow reserve extends through `y=107`; keep the overlay independent of main lanes, cues, and ruby.
+- In `wide-layout-v6/top-secondary-clearance`, place the title label/title/artist at `y=120/155/220` using actual ink bounds, and keep at least `16 px` between title ink and the secondary reserve. Verify the reserve/title clearance in the composition report and a representative frame.
 - In the composition report, `right_panel: null`/`right_panel_visible: false` and `outer_right_panel: null`/`outer_right_panel_visible: false` confirm that no outer right-panel overlay is present. `vinyl_backplate: null`, `vinyl_backplate_present: false`, and compatibility `vinyl_backplate_preserved: false` confirm that the compact backplate is also absent.
 - For `spectrum`, use album-card geometry `(40,30,460,522)`, title/spectrum/progress visual left edge `800`, spectrum geometry `(x,y,width,height)=(800,290,1040,220)`, baseline `y=516`, and progress geometry `(800,548,1040,6)` with a 20 px circular indicator. Keep the clip-safe geometry `(x,y,width,height)=(736,226,1168,348)`, 64 px horizontal glow padding, 56 px top/bottom glow padding, and 8 px top/bottom bar clearance so upper peaks and lower glow are not clipped.
 - Align visible title ink, spectrum bars, and progress track by their reviewed visual boundary, not only by a text draw origin or glow-layer canvas.

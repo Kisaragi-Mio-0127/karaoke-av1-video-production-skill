@@ -8,7 +8,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
-
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_DIR = ROOT / "integration" / "strangeutagame" / "scripts"
@@ -110,6 +110,128 @@ def load_renderer_without_optional_ruby():
 
 
 class KaraokeReviewPreviewTests(unittest.TestCase):
+    def test_synthetic_singer_resolution_and_final_secondary_geometry(self) -> None:
+        renderer = load_renderer_without_optional_ruby()
+        default = SimpleNamespace(id="default", color="#112233", is_default=True)
+        alternate = SimpleNamespace(id="alternate", color="#A1B2C3", is_default=False)
+        project = SimpleNamespace(
+            singers=[alternate, default],
+            get_default_singer=lambda: default,
+            get_singer=lambda singer_id: {
+                "default": default,
+                "alternate": alternate,
+            }.get(singer_id),
+        )
+        sentence = SimpleNamespace(singer_id="default", id="line")
+        character = SimpleNamespace(char="あ", singer_id="alternate")
+        empty = SimpleNamespace(char="い", singer_id="")
+        invalid = SimpleNamespace(char="う", singer_id="missing")
+
+        self.assertEqual(
+            renderer._effective_singer(character, sentence, project)["singer_id"],
+            "alternate",
+        )
+        fallback = renderer._effective_singer(empty, sentence, project)
+        self.assertEqual(fallback["singer_id"], "default")
+        self.assertEqual(fallback["resolution_source"], "sentence.singer_id")
+        with self.assertRaisesRegex(ValueError, "unknown non-empty character.singer_id"):
+            renderer._effective_singer(invalid, sentence, project)
+        self.assertEqual(renderer.SECONDARY_FONT_SIZE, 60)
+        self.assertEqual(renderer.SECONDARY_MIN_FONT_SIZE, 36)
+        self.assertEqual(renderer.SECONDARY_TOP_Y, 12)
+        self.assertEqual(
+            (renderer.SECONDARY_TOP_SAFE_TOP_PX, renderer.SECONDARY_TOP_SAFE_BOTTOM_PX),
+            (0, 96),
+        )
+
+    def test_singer_resolution_rejects_unknown_sentence_and_invalid_defaults(self) -> None:
+        renderer = load_renderer_without_optional_ruby()
+        default = SimpleNamespace(id="default", color="#112233", is_default=True)
+        character = SimpleNamespace(char="a", singer_id="")
+
+        with self.assertRaisesRegex(ValueError, "unknown non-empty sentence.singer_id"):
+            renderer._effective_singer(
+                character,
+                SimpleNamespace(id="line", singer_id="missing"),
+                SimpleNamespace(singers=[default]),
+            )
+
+        for singers, expected_count in (
+            ([SimpleNamespace(id="only", color="#112233", is_default=False)], 0),
+            (
+                [
+                    SimpleNamespace(id="first", color="#112233", is_default=True),
+                    SimpleNamespace(id="second", color="#445566", is_default=True),
+                ],
+                2,
+            ),
+        ):
+            with self.subTest(expected_count=expected_count), self.assertRaisesRegex(
+                ValueError,
+                f"exactly one explicit default singer: found={expected_count}",
+            ):
+                renderer._effective_singer(
+                    character,
+                    SimpleNamespace(id="line", singer_id=""),
+                    SimpleNamespace(singers=singers),
+                )
+
+    def test_singer_resolution_rejects_duplicate_ids_and_invalid_color(self) -> None:
+        renderer = load_renderer_without_optional_ruby()
+        character = SimpleNamespace(char="a", singer_id="")
+        sentence = SimpleNamespace(id="line", singer_id="")
+
+        duplicate_singers = [
+            SimpleNamespace(id="duplicate", color="#112233", is_default=True),
+            SimpleNamespace(id="duplicate", color="#445566", is_default=False),
+        ]
+        with self.assertRaisesRegex(ValueError, "duplicate singer_id: 'duplicate'"):
+            renderer._effective_singer(
+                character,
+                sentence,
+                SimpleNamespace(singers=duplicate_singers),
+            )
+
+        invalid_color = SimpleNamespace(
+            id="default",
+            color="not-a-color",
+            is_default=True,
+        )
+        with self.assertRaisesRegex(ValueError, "invalid non-empty singer.color"):
+            renderer._effective_singer(
+                character,
+                sentence,
+                SimpleNamespace(singers=[invalid_color]),
+            )
+
+    def test_synthetic_ruby_cannot_cross_effective_singers(self) -> None:
+        renderer = load_renderer_without_optional_ruby()
+        first = SimpleNamespace(id="first", color="#112233", is_default=True)
+        second = SimpleNamespace(id="second", color="#A1B2C3", is_default=False)
+        project = SimpleNamespace(
+            singers=[first, second],
+            get_default_singer=lambda: first,
+            get_singer=lambda singer_id: {"first": first, "second": second}.get(singer_id),
+        )
+        sentence = SimpleNamespace(
+            id="line",
+            singer_id="first",
+            characters=[
+                SimpleNamespace(char="あ", singer_id="first"),
+                SimpleNamespace(char="い", singer_id="second"),
+            ],
+        )
+        token = SimpleNamespace(start=0, end=2)
+        with self.assertRaisesRegex(ValueError, "crosses effective singer boundary"):
+            renderer._validate_ruby_singer_boundaries(sentence, [token], project)
+
+        sentence.characters[1].singer_id = "unknown"
+        with self.assertRaisesRegex(
+            ValueError,
+            "unknown non-empty character.singer_id",
+        ):
+            renderer._validate_ruby_singer_boundaries(sentence, [token], project)
+
     def test_renderer_has_only_canonical_sug_ruby_path(self) -> None:
         source = SOURCE.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(SOURCE))

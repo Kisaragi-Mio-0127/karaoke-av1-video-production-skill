@@ -36,7 +36,7 @@ The tested compatibility baseline is StrangeUtaGame 1.4.5 with SUG storage forma
 
 Copy `examples/album.example.json`, replace its placeholders, and pass the resulting manifest through `--manifest` or `KARAOKE_ALBUM_MANIFEST`.
 
-Song-specific display, ruby-group, and timing-reading decisions can be supplied through `KARAOKE_DISPLAY_OVERRIDES`, `KARAOKE_RUBY_GROUP_OVERRIDES`, and `KARAOKE_TIMING_READING_OVERRIDES`. The Japanese workflow exposes pronunciation modes `optional`, `required`, and `off`; `optional` is the default.
+Song-specific display, ruby-group, and timing-reading decisions can be supplied through `KARAOKE_DISPLAY_OVERRIDES`, `KARAOKE_RUBY_GROUP_OVERRIDES`, and `KARAOKE_TIMING_READING_OVERRIDES`. The Japanese workflow exposes pronunciation modes `optional`, `required`, and `off`; non-blocking `optional` is the default. For multi-singer identity and top-overlay rules, read [singer-overlays.md](singer-overlays.md).
 
 ## Production order
 
@@ -55,7 +55,9 @@ When pitch shifting is requested, run `scripts/pitch_shift_audio.py` on the comp
 
 The vinyl remains rotating and is regenerated for formal and test runs with `direction-neutral-concentric-grooves/v3/backplate-absent`.
 
-The current wide composition is `wide-layout-v5/no-right-panels`: vinyl card `(40,30,340,402)`, footer bottom padding `12`, and lower subtitle panel beginning at `y=576`. The outer right panel and compact vinyl backplate are absent. The spectrum variant uses clip-safe region `(736,226,1168,348)` with 64 px horizontal glow clearance, 56 px vertical glow clearance, and 8 px bar clearance at the top and bottom.
+The current wide composition is `wide-layout-v6/top-secondary-clearance`: vinyl card `(40,30,340,402)`, footer bottom padding `12`, and lower subtitle panel beginning at `y=576`. The outer right panel and compact vinyl backplate are absent. The spectrum variant uses clip-safe region `(736,226,1168,348)` with 64 px horizontal glow clearance, 56 px vertical glow clearance, and 8 px bar clearance at the top and bottom. The secondary overlay uses anchor `y=12`, default `60 px`, minimum `36 px`, content safe band `y=0..96`, and outline/glow reserve through `y=107`; title label/title/artist positions are `y=120/155/220`, using actual ink bounds with at least `16 px` clearance from the reserve.
+
+Direct album entry points are codec-specific: `render_karaoke_direct_av1_420_album.py` is the AV1 4:2:0 command and `render_karaoke_direct_hevc444_album.py` is the HEVC 4:4:4 command. The older `render_karaoke_direct_av1_album.py` name remains a deprecated compatibility entry for HEVC. Both codec lanes use the neutral `karaoke_direct_album_planning.py` module for manifest selection and task planning.
 
 ## Shared single-track workflow
 
@@ -83,8 +85,11 @@ The workflow writes an independent `karaoke-preflight.ass` first and the
 final `karaoke.ass` during MP4 rendering, then requires their SHA-256
 identities to match. Full duration and MP4-only output are defaults;
 `--lossless-companion` and `--full-decode` are explicit opt-ins for MKV and
-full-decode diagnostics. The album/batch direct renderer remains vinyl-only
-and must not be documented as a spectrum-capable path.
+full-decode diagnostics. Japanese pronunciation validation defaults to
+non-blocking `optional`. The one-click route and the underlying renderer share the same
+singer, overlay, ruby, container, and diagnostic gates. The album/batch direct
+renderer remains vinyl-only and must not be documented as a spectrum-capable
+path.
 
 ## Installed files
 

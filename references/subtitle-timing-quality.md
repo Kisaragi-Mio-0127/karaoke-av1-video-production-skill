@@ -2,7 +2,7 @@
 
 [简体中文](subtitle-timing-quality.zh-CN.md) | English
 
-Use these gates for semantic phrase segmentation, cue display, Japanese ruby, MMS timing evidence, and adjacent-line highlight release.
+Use these gates for semantic phrase segmentation, cue display, Japanese ruby, explicit multi-singer identity, secondary overlays, MMS timing evidence, and adjacent-line highlight release. Read [singer-overlays.md](singer-overlays.md) for the complete singer and top-overlay contract.
 
 ## Fact chain and semantic phrases
 
@@ -25,6 +25,8 @@ Treat ruby word boundaries and reading correctness as separate gates. Preserve e
 
 For every ruby-bearing line, inspect the canonical SUG `linked_to_next` chain and compare the same surface span and reading in the SUG, ASS/report, and rendered geometry. Record source, editable, and rendered status plus confidence, evidence, review identity, before/after SUG identities, exceptions, unchanged timing status, and representative frames.
 
+Resolve each ruby span's singer before rendering. Use character-level `singer_id`, then sentence-level `singer_id`, then the explicit project default; reject a span whose linked surface characters resolve to different singers. Do not split or reassign it in the renderer.
+
 Skip manual timing review when automatic evidence and release checks agree. When listening or editing is required, identify the canonical project, inspect recovery copies, resolve relative media paths from the project directory, and prove that audio reached the playback engine. The probe opens the project without saving; timing edits are made later in normal editable mode and saved to the canonical SUG.
 
 ## Editor, MMS, and independent ASR
@@ -41,6 +43,6 @@ Derive adjacent-line release from ASS karaoke tags, event timing, post-roll, and
 
 For per-character highlighting, record acoustic onset, visual onset, visual release, line release, event end, and fade end separately. Ensure every visible character has a strictly increasing visual start after ASS time quantization, including long marks, small kana, digits, and punctuation.
 
-For cover-derived colors, record the extraction method, candidates, accepted RGB value, and review decision. Apply the accepted color consistently to the editable singer color, ASS `Main`/`Glow`, and active cue color, verify RGB-to-ASS-BGR conversion, and inspect frames before, during, and after highlight.
+For cover-derived colors, record the extraction method, candidates, accepted RGB value, and review decision. Apply the resolved singer colour consistently to the editable singer colour, ASS `Main`/`Glow`, active cue, and any top secondary subtitle layers; keep inactive text white, verify RGB-to-ASS-BGR conversion, and inspect frames before, during, and after highlight.
 
 Run renderer, preview, segmentation, cue, ruby, release, and packaging tests in a writable project-local temporary directory. Cover override reachability, phrase recomposition, cue timing, font-size exceptions, three-layer ruby status, editable-project identity, relative media resolution, audio-load evidence, MMS source identity, ASS/report identity, release fields, and boundary frames.

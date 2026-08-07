@@ -71,7 +71,7 @@ try:  # noqa: E402
     from scripts.sug_ruby import validate_review_sidecar
 except ImportError:  # pragma: no cover - supplied by the ruby-review lane
     validate_review_sidecar = None
-from strange_uta_game.backend.domain import Sentence  # noqa: E402
+from strange_uta_game.backend.domain import Character, Sentence  # noqa: E402
 from strange_uta_game.backend.infrastructure.persistence.sug_io import (  # noqa: E402
     SugProjectParser,
 )
@@ -129,13 +129,13 @@ SHARED_FONT_FILE = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Regular.ttf"
 # Stable release profile shared by full renders and review reports.
 DEFAULT_AV1_CQ = 38
 DEFAULT_AV1_PRESET = "p7"
-SECONDARY_FONT_SIZE = 51
+SECONDARY_FONT_SIZE = 60
 SECONDARY_MIN_FONT_SIZE = 36
 SECONDARY_OUTLINE_PX = 3
 SECONDARY_GLOW_BLUR = 8
-SECONDARY_TOP_Y = 72
-SECONDARY_TOP_SAFE_TOP_PX = 24
-SECONDARY_TOP_SAFE_BOTTOM_PX = 160
+SECONDARY_TOP_Y = 12
+SECONDARY_TOP_SAFE_TOP_PX = 0
+SECONDARY_TOP_SAFE_BOTTOM_PX = 96
 SECONDARY_SAFE_MARGIN_X = 160
 PRE_ROLL_MS = 200
 POST_ROLL_MS = 180
@@ -852,6 +852,7 @@ def main_glyph_events(
     glow_layer: int = 1,
     main_layer: int = 2,
     geometry: TextGeometry | None = None,
+    character_colors: list[str] | None = None,
 ) -> list[str]:
     """Render every base character at an explicit center shared with its ruby span."""
 
@@ -881,6 +882,10 @@ def main_glyph_events(
         offset_ms=offset_ms,
         release_overrides=release_overrides,
     )
+    if character_colors is not None and len(character_colors) != len(
+        sentence.characters
+    ):
+        raise ValueError("character color count must match rendered characters")
     result: list[str] = []
     for index, (character, onset) in enumerate(
         zip(sentence.characters, onsets, strict=True)
@@ -888,16 +893,27 @@ def main_glyph_events(
         duration_cs = max(1, int(round((releases[index] - onset) / 10)))
         lead_in_cs = max(0, onset - event_start_ms) // 10
         x = (geometry.glyph_starts[index] + geometry.glyph_ends[index]) / 2.0
+        color = character_colors[index] if character_colors is not None else None
+        color_override = (
+            f"\\1c{_ass_bgr(color)}\\2c&H00FFFFFF"
+            if color is not None
+            else ""
+        )
         common_override = (
             f"{{\\an8\\pos({int(round(x))},{lane.main_y})"
             f"\\fs{font_size}\\bord{outline_px}\\fad(80,120)"
+            f"{color_override}"
             f"\\k{lead_in_cs}\\kf{duration_cs}}}"
         )
         if letter_spacing_em > 0:
             letter_spacing_px = font_size * letter_spacing_em
             formatted_spacing = f"{letter_spacing_px:.3f}".rstrip("0").rstrip(".")
             common_override = common_override[:-1] + f"\\fsp{formatted_spacing}}}"
-        glow_override = common_override[:-1] + f"\\blur{glow_blur}}}"
+        glow_override = (
+            common_override[:-1]
+            + ("\\1a&H50&\\2a&H70&" if color is not None else "")
+            + f"\\blur{glow_blur}}}"
+        )
         escaped = _escape_ass_text(character.char)
         result.append(
             f"Dialogue: {glow_layer},"
@@ -1505,6 +1521,7 @@ def vocal_cue_events(
     *,
     cue_x: int,
     cue_y: int,
+    hot_color: str | None = None,
 ) -> list[str]:
     """Render four dim dots that turn red one-by-one before the next vocal."""
 
@@ -1526,7 +1543,14 @@ def vocal_cue_events(
     for dot_index, (dot_start_ms, dot_x) in enumerate(
         zip(cue.dot_starts_ms, dot_positions, strict=True)
     ):
-        hot_override = f"{{\\an5\\pos({dot_x},{cue_y})\\fad(70,80)}}"
+        color_override = (
+            f"\\1c{_ass_bgr(hot_color)}\\2c{_ass_bgr(hot_color)}"
+            if hot_color is not None
+            else ""
+        )
+        hot_override = (
+            f"{{\\an5\\pos({dot_x},{cue_y})\\fad(70,80){color_override}}}"
+        )
         events.append(
             "Dialogue: 6,"
             f"{ms_to_ass_time(dot_start_ms)},{cue_end},CueHot,"
@@ -1595,29 +1619,171 @@ def _normalise_highlight_color(value: object) -> str:
     return color
 
 
-def _project_highlight_color(project: object) -> str:
-    singers = getattr(project, "singers", None)
-    if singers:
-        return _normalise_highlight_color(getattr(singers[0], "color", None))
-    return DEFAULT_HIGHLIGHT_COLOR
+def _project_singers(project: object) -> list[object]:
+    """Return singers only after proving that every explicit ID is unique."""
+
+    singers = list(getattr(project, "singers", None) or [])
+    seen_ids: set[str] = set()
+    for singer in singers:
+        singer_id = str(getattr(singer, "id", "") or "").strip()
+        if singer_id in seen_ids:
+            raise RubyValidationError(f"duplicate singer_id: {singer_id!r}")
+        seen_ids.add(singer_id)
+    return singers
 
 
-def _project_secondary_highlight_color(
+def _project_default_singer(project: object):
+    """Return the one explicit project default or fail closed."""
+
+    defaults = [
+        singer
+        for singer in _project_singers(project)
+        if bool(getattr(singer, "is_default", False))
+    ]
+    if len(defaults) != 1:
+        raise RubyValidationError(
+            "project must declare exactly one explicit default singer: "
+            f"found={len(defaults)}"
+        )
+    return defaults[0], "singer.is_default"
+
+
+def _singer_by_id(project: object, singer_id: object):
+    normalized_id = str(singer_id or "").strip()
+    if not normalized_id:
+        return None
+    for singer in _project_singers(project):
+        if str(getattr(singer, "id", "") or "").strip() == normalized_id:
+            return singer
+    return None
+
+
+def _singer_color(singer: object | None) -> tuple[str, str]:
+    if singer is None:
+        raise RubyValidationError("resolved singer is missing")
+    value = str(getattr(singer, "color", "") or "").strip().upper()
+    if re.fullmatch(r"#[0-9A-F]{6}", value):
+        return value, "singer.color"
+    if value:
+        raise RubyValidationError(
+            "invalid non-empty singer.color: "
+            f"singer_id={getattr(singer, 'id', None)!r} color={value!r}"
+        )
+    return DEFAULT_HIGHLIGHT_COLOR, "renderer-fallback-missing-singer-color"
+
+
+def _effective_singer(
+    character: Character,
+    sentence: Sentence,
     project: object,
-    *,
-    fallback: str,
-) -> tuple[str, str]:
-    """Use an explicitly assigned secondary singer colour when available."""
+) -> dict[str, object]:
+    """Resolve singer facts in character, sentence, project-default order."""
 
-    for sentence in getattr(project, "sentences", ()):
-        role, _ = sentence_voice_metadata(sentence, project)
-        if role is None:
+    singer = None
+    resolution_source = ""
+    for source, singer_id in (
+        ("character.singer_id", getattr(character, "singer_id", "")),
+        ("sentence.singer_id", getattr(sentence, "singer_id", "")),
+    ):
+        normalized_id = str(singer_id or "").strip()
+        if not normalized_id:
             continue
-        singer = _sentence_singer(sentence, project)
-        value = str(getattr(singer, "color", "") or "").strip().upper()
-        if re.fullmatch(r"#[0-9A-F]{6}", value):
-            return value, "secondary-singer"
-    return fallback, "project-default-singer"
+        singer = _singer_by_id(project, normalized_id)
+        if singer is None:
+            raise RubyValidationError(
+                f"unknown non-empty {source}: {normalized_id!r}"
+            )
+        resolution_source = source
+        break
+    default_source = None
+    if singer is None:
+        singer, default_source = _project_default_singer(project)
+        resolution_source = "project-default-singer"
+    color, color_source = _singer_color(singer)
+    return {
+        "singer_id": str(getattr(singer, "id", "") or "") or None,
+        "resolution_source": resolution_source,
+        "default_source": default_source,
+        "color": color,
+        "color_source": color_source,
+    }
+
+
+def _sentence_singer_audit(sentence: Sentence, project: object) -> dict[str, object]:
+    characters: list[dict[str, object]] = []
+    runs: list[dict[str, object]] = []
+    for index, character in enumerate(sentence.characters):
+        facts = _effective_singer(character, sentence, project)
+        record = {"character_index": index, "character": character.char, **facts}
+        characters.append(record)
+        run_key = (
+            facts["singer_id"], facts["resolution_source"],
+            facts["color"], facts["color_source"],
+        )
+        if runs and runs[-1]["_key"] == run_key:
+            runs[-1]["end"] = index + 1
+            runs[-1]["text"] = str(runs[-1]["text"]) + character.char
+        else:
+            runs.append({
+                "_key": run_key, "start": index, "end": index + 1,
+                "text": character.char, **facts,
+            })
+    for run in runs:
+        run.pop("_key")
+    singer_ids = list(dict.fromkeys(
+        record["singer_id"] for record in characters
+        if record["singer_id"] is not None
+    ))
+    return {
+        "effective_singer_id": singer_ids[0] if len(singer_ids) == 1 else None,
+        "effective_singer_ids": singer_ids,
+        "effective_singer_runs": runs,
+        "character_singers": characters,
+        "character_colors": [str(record["color"]) for record in characters],
+    }
+
+
+def _singer_color_mapping(project: object) -> list[dict[str, object]]:
+    default_singer, default_source = _project_default_singer(project)
+    mapping = []
+    for singer in getattr(project, "singers", None) or []:
+        color, color_source = _singer_color(singer)
+        mapping.append({
+            "singer_id": str(getattr(singer, "id", "") or "") or None,
+            "is_project_default": singer is default_singer,
+            "default_source": default_source if singer is default_singer else None,
+            "raw_color": getattr(singer, "color", None),
+            "effective_color": color,
+            "color_source": color_source,
+        })
+    return mapping
+
+
+def _validate_ruby_singer_boundaries(
+    sentence: Sentence,
+    tokens: Iterable[RubyToken],
+    project: object,
+) -> None:
+    audit = _sentence_singer_audit(sentence, project)
+    character_singers = audit["character_singers"]
+    for token in tokens:
+        singer_ids = {
+            character_singers[index]["singer_id"]
+            for index in range(token.start, token.end)
+        }
+        if len(singer_ids) > 1:
+            raise RubyValidationError(
+                "ruby span crosses effective singer boundary: "
+                f"sentence={getattr(sentence, 'id', '')} "
+                f"span={token.start}:{token.end} "
+                f"singers={sorted(str(value) for value in singer_ids)}"
+            )
+
+
+def _project_highlight_color(project: object) -> tuple[str, str, str | None]:
+    singer, default_source = _project_default_singer(project)
+    color, color_source = _singer_color(singer)
+    return color, color_source, default_source
 
 
 def _project_language(project: object) -> str:
@@ -1665,16 +1831,12 @@ def build_review_ass(
     layout = layout_for_language(layout, language)
     identity = language_identity(language)
     visual_release_override_hits: set[tuple[int, int]] = set()
-    highlight_color = _project_highlight_color(project)
+    highlight_color, highlight_color_source, default_singer_source = (
+        _project_highlight_color(project)
+    )
     main_hot = _ass_bgr(highlight_color)
     glow_hot = _ass_bgr(highlight_color, alpha="50")
-    secondary_highlight_color, secondary_highlight_color_source = (
-        _project_secondary_highlight_color(
-            project,
-            fallback=highlight_color,
-        )
-    )
-    secondary_hot = _ass_bgr(secondary_highlight_color)
+    secondary_hot = main_hot
     header = [
         "[Script Info]",
         "; Generator: StrangeUtaGame karaoke renderer",
@@ -1723,6 +1885,12 @@ def build_review_ass(
     latest_secondary_block_release_ms: int | None = None
     for source_line_index, source_sentence in enumerate(project.sentences):
         voice_role, singer_group = sentence_voice_metadata(source_sentence, project)
+        source_ruby_tokens = canonical_ruby_tokens(
+            source_sentence, sidecar=ruby_sidecar
+        )
+        _validate_ruby_singer_boundaries(
+            source_sentence, source_ruby_tokens, project
+        )
         sentence = source_sentence
         source_token_indices = tuple(range(len(sentence.characters)))
         source_character_indices = {
@@ -1749,6 +1917,7 @@ def build_review_ass(
         )
         if voice_role is not None:
             for phrase_index, phrase in enumerate(phrases):
+                singer_audit = _sentence_singer_audit(phrase, project)
                 phrase_ruby_tokens = _canonical_tokens_for_phrase(
                     source_sentence,
                     phrase,
@@ -1797,6 +1966,7 @@ def build_review_ass(
                         "source_glyph_indices": source_glyph_indices,
                         "voice_role": voice_role,
                         "singer_group": singer_group,
+                        "singer_audit": singer_audit,
                         "natural_start_ms": max(
                             0,
                             first_onset + offset_ms - PRE_ROLL_MS,
@@ -1813,6 +1983,7 @@ def build_review_ass(
             continue
         source_to_first_display[source_line_index] = len(prepared)
         for phrase_index, phrase in enumerate(phrases):
+            singer_audit = _sentence_singer_audit(phrase, project)
             phrase_ruby_tokens = _canonical_tokens_for_phrase(
                 source_sentence,
                 phrase,
@@ -1861,6 +2032,7 @@ def build_review_ass(
                     "source_glyph_indices": source_glyph_indices,
                     "voice_role": None,
                     "singer_group": None,
+                    "singer_audit": singer_audit,
                     "preceding_secondary_block_release_ms": (
                         latest_secondary_block_release_ms
                     ),
@@ -1944,6 +2116,7 @@ def build_review_ass(
     # phrases have fully ended. Cue dots still use cue.cue_start_ms below.
     cue_lyric_preload_start_by_line = _cue_lyric_preload_starts(cues, prepared)
     cue_placements: list[VocalCuePlacement] = []
+    cue_singer_audits: list[dict[str, object]] = []
     for cue in cues:
         target_sentence = prepared[cue.before_line_index]["sentence"]
         target_lane = layout.lanes[
@@ -1966,11 +2139,24 @@ def build_review_ass(
             lane=target_lane,
         )
         cue_placements.append(placement)
+        target_singer_audit = prepared[cue.before_line_index]["singer_audit"]
+        cue_singer = (
+            target_singer_audit["character_singers"][0]
+            if target_singer_audit["character_singers"]
+            else {
+                "singer_id": None,
+                "resolution_source": "project-default-singer",
+                "color": highlight_color,
+                "color_source": highlight_color_source,
+            }
+        )
+        cue_singer_audits.append(dict(cue_singer))
         events.extend(
             vocal_cue_events(
                 cue,
                 cue_x=cue_x,
                 cue_y=cue_y,
+                hot_color=str(cue_singer["color"]),
             )
         )
 
@@ -2051,6 +2237,7 @@ def build_review_ass(
                 outline_px=layout.main_outline_px,
                 glow_blur=layout.main_glow_blur,
                 geometry=geometry,
+                character_colors=item["singer_audit"]["character_colors"],
             )
         )
         events.extend(
@@ -2096,6 +2283,10 @@ def build_review_ass(
                 "display_phrase": sentence.text,
                 "voice_role": item["voice_role"],
                 "singer_group": item["singer_group"],
+                "effective_singer_id": item["singer_audit"]["effective_singer_id"],
+                "effective_singer_ids": item["singer_audit"]["effective_singer_ids"],
+                "effective_singer_runs": item["singer_audit"]["effective_singer_runs"],
+                "character_singers": item["singer_audit"]["character_singers"],
                 "event_start_ms": event_start_ms,
                 "first_onset_ms": first_onset + offset_ms,
                 "early_display_ms": first_onset + offset_ms - event_start_ms,
@@ -2227,6 +2418,7 @@ def build_review_ass(
                 glow_layer=7,
                 main_layer=8,
                 geometry=geometry,
+                character_colors=item["singer_audit"]["character_colors"],
             )
         )
         secondary_diagnostics.append(
@@ -2241,6 +2433,10 @@ def build_review_ass(
                 "display_phrase": sentence.text,
                 "voice_role": item["voice_role"],
                 "singer_group": item["singer_group"],
+                "effective_singer_id": item["singer_audit"]["effective_singer_id"],
+                "effective_singer_ids": item["singer_audit"]["effective_singer_ids"],
+                "effective_singer_runs": item["singer_audit"]["effective_singer_runs"],
+                "character_singers": item["singer_audit"]["character_singers"],
                 "event_start_ms": event_start_ms,
                 "first_onset_ms": item["first_onset"] + offset_ms,
                 "release_ms": release_ms + offset_ms,
@@ -2255,15 +2451,15 @@ def build_review_ass(
                 },
                 "letter_spacing_em": 0.0,
                 "letter_spacing_px": 0.0,
-                "highlight_color": secondary_highlight_color,
-                "highlight_color_source": secondary_highlight_color_source,
-                "hot_primary_ass": secondary_hot,
+                "highlight_color": item["singer_audit"]["character_colors"][0],
+                "highlight_color_source": item["singer_audit"]["character_singers"][0]["color_source"],
+                "hot_primary_ass": _ass_bgr(item["singer_audit"]["character_colors"][0]),
                 "unhighlighted_secondary_ass": "&H00FFFFFF",
                 "colors": {
-                    "highlight_color": secondary_highlight_color,
-                    "highlight_color_source": secondary_highlight_color_source,
-                    "hot_primary_ass": secondary_hot,
-                    "glow_hot_primary_ass": secondary_hot,
+                    "highlight_color": item["singer_audit"]["character_colors"][0],
+                    "highlight_color_source": item["singer_audit"]["character_singers"][0]["color_source"],
+                    "hot_primary_ass": _ass_bgr(item["singer_audit"]["character_colors"][0]),
+                    "glow_hot_primary_ass": _ass_bgr(item["singer_audit"]["character_colors"][0]),
                     "unhighlighted_ass": "&H00FFFFFF",
                     "glow_unhighlighted_ass": "&H70FFFFFF",
                 },
@@ -2495,16 +2691,29 @@ def build_review_ass(
             "blocks_main_preload": False,
             "main_preload_coexists": True,
             "ruby": False,
-            "highlight_color": secondary_highlight_color,
-            "highlight_color_source": secondary_highlight_color_source,
-            "hot_primary_ass": secondary_hot,
+            "highlight_color": (
+                secondary_diagnostics[0]["highlight_color"]
+                if secondary_diagnostics else highlight_color
+            ),
+            "highlight_color_source": (
+                "secondary-singer" if secondary_diagnostics
+                else "project-default-singer-style-fallback"
+            ),
+            "hot_primary_ass": (
+                secondary_diagnostics[0]["hot_primary_ass"]
+                if secondary_diagnostics else secondary_hot
+            ),
             "unhighlighted_secondary_ass": "&H00FFFFFF",
             "glow_unhighlighted_secondary_ass": "&H70FFFFFF",
+            "per_line_singer_colors": True,
         },
         "highlight_color": highlight_color,
         "highlight_color_source": (
-            "project-default-singer" if getattr(project, "singers", None) else "fallback"
+            "project-default-singer"
+            if highlight_color_source == "singer.color" else "fallback"
         ),
+        "highlight_color_value_source": highlight_color_source,
+        "default_singer_source": default_singer_source,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(header + events) + "\n", encoding="utf-8")
@@ -2536,6 +2745,7 @@ def build_review_ass(
             "sug_hash": canonical_sug_hash,
             "status": "pass",
         },
+        "singer_color_mapping": _singer_color_mapping(project),
         "font_verification": verify_font(
             FONT_FAMILY,
             font_file,
@@ -2579,8 +2789,15 @@ def build_review_ass(
                     "relation": "above-next-lyric-start",
                     "lane": placement.lane.__dict__,
                 },
+                "singer_id": singer["singer_id"],
+                "singer_resolution_source": singer["resolution_source"],
+                "highlight_color": singer["color"],
+                "highlight_color_source": singer["color_source"],
+                "hot_primary_ass": _ass_bgr(str(singer["color"])),
             }
-            for placement in cue_placements
+            for placement, singer in zip(
+                cue_placements, cue_singer_audits, strict=True
+            )
         ],
     }
 

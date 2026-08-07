@@ -56,7 +56,7 @@ class IntegrationBundleTests(unittest.TestCase):
             if "__pycache__" not in path.parts
         }
         self.assertEqual(recorded_paths, bundled_paths)
-        self.assertEqual(len(script_paths), 22)
+        self.assertEqual(len(script_paths), 23)
         self.assertEqual(len(package_paths), 5)
         self.assertEqual(shared_paths, INTERNAL_MODULES)
         self.assertTrue(
@@ -119,7 +119,7 @@ class IntegrationBundleTests(unittest.TestCase):
             for path in SCRIPTS.rglob("*.py")
             if "__pycache__" not in path.parts
         )
-        self.assertEqual(len(files), 28)
+        self.assertEqual(len(files), 29)
         for path in files:
             with self.subTest(path=path.relative_to(SCRIPTS).as_posix()):
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -356,11 +356,14 @@ class IntegrationBundleTests(unittest.TestCase):
         self.assertIn("allow_network: bool = False", vinyl)
         self.assertIn("MAX_NETWORK_COVER_BYTES = 25 * 1024 * 1024", vinyl)
 
-    def test_wide_layout_v5_has_no_vinyl_backplate(self) -> None:
+    def test_wide_layout_v6_has_no_vinyl_backplate(self) -> None:
         builder_source = (SCRIPTS / "build_karaoke_wide_artwork.py").read_text(
             encoding="utf-8"
         )
-        self.assertIn('WIDE_LAYOUT_VERSION = "wide-layout-v5/no-right-panels"', builder_source)
+        self.assertIn(
+            'WIDE_LAYOUT_VERSION = "wide-layout-v6/top-secondary-clearance"',
+            builder_source,
+        )
         self.assertIn('"vinyl": (40, 30, 340, 402)', builder_source)
         self.assertIn("BOTTOM_PANEL = (20, 576, 1900, 1050)", builder_source)
         self.assertIn("SLEEVE_BOTTOM_PADDING = 12", builder_source)

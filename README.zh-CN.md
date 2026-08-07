@@ -10,13 +10,15 @@
 
 - 检查→预览→编码→验证的制作流程。
 - 语义分段、日文注音词边界审核、可编辑SUG一致性、MMS证据、独立ASR复核和视觉适配检查。
+- 按显式SUG的`singer_id`路由多演唱者，优先字符级、再句级、最后项目默认；活动的Main、Glow、提示字幕和顶部叠加层使用一致的歌手颜色，未激活文字保持白色。
+- 显式的`opera`、`harmony`和`secondary`角色使用顶部居中叠加层，安全带为`y=0..96`、锚点为`y=12`，默认字号为`60 px`，长句最低缩小到`36 px`；实际outline/glow保留区延伸到`y=107`；跨歌手注音必须拒绝。
 - 互斥的旋转黑胶与实时频谱宽屏布局。
-- `wide-layout-v5/no-right-panels`：不显示右侧大框，也不显示黑胶后方的小背板；保留专辑卡片、footer、旋转黑胶和底部字幕面板。
+- `wide-layout-v6/top-secondary-clearance`：不显示右侧大框，也不显示黑胶后方的小背板；保留专辑卡片、footer、旋转黑胶和底部字幕面板。标题label/title/artist位置为`y=120/155/220`；标题区使用实际ink bounds，并与secondary保留区至少保持`16 px`间距。
 - 频谱采用上下辉光均不会被裁切的安全区域。
 - 默认输出为1920x1080、30 fps、`yuv420p`、BT.709的AV1视频与AAC-LC 320 kb/s音频。
 - MP4为默认输出；只有显式选择且源音频经确认是FLAC或PCM WAV时才生成MKV。
 - 完整输出解码为可选诊断；普通验证使用媒体探测、抽样解码、画面检查和输出身份校验。
-- 日文注音验证提供`optional`、`required`和`off`三种模式，默认为`optional`。
+- 日文注音验证提供`optional`、`required`和`off`三种模式，默认为不阻塞的`optional`。
 - 通过`scripts/pitch_shift_audio.py`对完整混音变调，使用Rubber Band R3 Finer并默认保持共振峰。
 - 通过JSON提供专辑配置以及歌曲专用的显示、时间和注音决定。
 - 共享单曲一键渲染分别生成preflight/final ASS，并要求ASS身份一致。
@@ -101,7 +103,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 `--spectrum-color RRGGBB --progress-color RRGGBB`。黑胶的`--vinyl`只是规范身份输入；workflow会在新输出目录中重新生成并校验当前旋转黑胶，再把生成资源传给renderer。频谱不要求、不探测、不生成、不传递也不报告vinyl。
 
 workflow先独立写入`karaoke-preflight.ass`，再在渲染阶段写入最终
-`karaoke.ass`；同一SUG/配置下两者SHA-256身份不一致就失败。默认使用完整时长，并且只生成带AAC-LC音频的MP4。`--smoke-duration`、`--lossless-companion`和`--full-decode`都必须显式选择；默认运行不生成MKV，也不执行full decode。
+`karaoke.ass`；同一SUG/配置下两者SHA-256身份不一致就失败。默认使用完整时长，并且只生成带AAC-LC音频的MP4。MKV和完整解码必须显式选择；默认运行不生成MKV，也不执行完整解码。日文注音验证默认为不阻塞的`optional`，`required`和`off`仍需显式选择。一键入口与底层renderer使用相同的歌手、叠加层、注音、容器和诊断门禁。
 
 专辑/批量direct renderer当前仍是仅支持vinyl的路径。共享单曲workflow或预览路径的频谱能力不等于专辑renderer支持频谱。
 
@@ -114,6 +116,7 @@ workflow先独立写入`karaoke-preflight.ass`，再在渲染阶段写入最终
 | AV1、FFmpeg、MP4/MKV | [av1-420-commands.md](references/av1-420-commands.md) | [av1-420-commands.zh-CN.md](references/av1-420-commands.zh-CN.md) |
 | SUG、独立ASR、变调 | [asr-sug-pitch.md](references/asr-sug-pitch.md) | [asr-sug-pitch.zh-CN.md](references/asr-sug-pitch.zh-CN.md) |
 | 宽屏黑胶/频谱 | [wide-visual-templates.md](references/wide-visual-templates.md) | [wide-visual-templates.zh-CN.md](references/wide-visual-templates.zh-CN.md) |
+| 歌手身份与副唱叠加 | [singer-overlays.md](references/singer-overlays.md) | [singer-overlays.zh-CN.md](references/singer-overlays.zh-CN.md) |
 | 字幕时间轴与质量 | [subtitle-timing-quality.md](references/subtitle-timing-quality.md) | [subtitle-timing-quality.zh-CN.md](references/subtitle-timing-quality.zh-CN.md) |
 | 批量发布 | [batch-release-gates.md](references/batch-release-gates.md) | [batch-release-gates.zh-CN.md](references/batch-release-gates.zh-CN.md) |
 | StrangeUtaGame集成 | [strangeutagame-integration.md](references/strangeutagame-integration.md) | [strangeutagame-integration.zh-CN.md](references/strangeutagame-integration.zh-CN.md) |
@@ -127,7 +130,7 @@ workflow先独立写入`karaoke-preflight.ass`，再在渲染阶段写入最终
 | 配置与文本 | `karaoke_album.py`、`karaoke_language.py` |
 | 时间轴与可编辑SUG | `karaoke_timing.py`、`karaoke_review_preview.py`、`sync_karaoke_editable_ruby.py`、`sug_ruby.py` |
 | 对齐证据 | `audit_karaoke_asr_recognition.py`、`audit_karaoke_mms_alignment.py`、`build_karaoke_mms_overrides.py`、`prepare_karaoke_msst_vocals.py` |
-| 构图与渲染 | `build_karaoke_wide_artwork.py`、`render_vinyl_karaoke.py`、`render_karaoke_direct_av1_420_album.py`、`render_karaoke_direct_av1_album.py`、`render_karaoke_direct_hevc444_album.py` |
+| 构图与渲染 | `build_karaoke_wide_artwork.py`、`render_vinyl_karaoke.py`、`karaoke_direct_album_planning.py`、`render_karaoke_direct_av1_420_album.py`、`render_karaoke_direct_hevc444_album.py`、`render_karaoke_direct_av1_album.py`（旧名称兼容入口） |
 | 日语工作流 | `karaoke_workflow.py`、`run_karaoke_japanese_workflow.py` |
 | 媒体与发布 | `inspect_karaoke_media.py`、`transcode_karaoke_av1.py`、`finalize_karaoke_release.py`、`karaoke_release_snapshot.py`、`package_karaoke_numbered_archives.py` |
 | 完整混音变调 | `pitch_shift_audio.py` |
@@ -135,6 +138,8 @@ workflow先独立写入`karaoke-preflight.ass`，再在渲染阶段写入最终
 递归安装的包文件为`karaoke_common/__init__.py`、`karaoke_common/layout.py`、`karaoke_common/pronunciation.py`、`karaoke_japanese/__init__.py`和`karaoke_japanese/layout.py`。
 
 仓库支持工具为`check_sug_compatibility.py`、`check_karaoke_environment.py`、`install_strangeutagame_integration.py`、`open_editable_project_with_audio_probe.py`以及`pitch_shift_audio.py`的独立镜像。
+
+专辑直出时，AV1 4:2:0使用`render_karaoke_direct_av1_420_album.py`，HEVC 4:4:4使用`render_karaoke_direct_hevc444_album.py`。`render_karaoke_direct_av1_album.py`仅保留为HEVC命令的旧名称兼容入口，运行时会显示弃用提示。清单选择和任务规划等共享流程位于`karaoke_direct_album_planning.py`。
 
 ## 仓库结构与测试
 

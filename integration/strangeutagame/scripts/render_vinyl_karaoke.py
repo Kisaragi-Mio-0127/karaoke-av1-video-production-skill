@@ -14,8 +14,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
-import ipaddress
 import io
+import ipaddress
 import json
 import os
 import re
@@ -735,7 +735,7 @@ def _first_ass_dialogue_time(text: str) -> float | None:
 def _parse_ass_color(value: object) -> dict[str, str] | None:
     """Parse an ASS ``&HAABBGGRR`` color and expose its RGB value."""
 
-    raw = str(value or "").strip().upper()
+    raw = str(value or "").strip().upper().removesuffix("&")
     match = re.fullmatch(r"&H([0-9A-F]{6}|[0-9A-F]{8})", raw)
     if match is None:
         return None
@@ -866,8 +866,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         if secondary_declared:
             size_ranges.update(
                 {
-                    "SecondaryGlow": (51.0, 51.0),
-                    "Secondary": (51.0, 51.0),
+                    "SecondaryGlow": (60.0, 60.0),
+                    "Secondary": (60.0, 60.0),
                 }
             )
         missing_styles = sorted(set(size_ranges) - {style["name"] for style in styles})
@@ -887,7 +887,7 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             for style in styles
             if (
                 style["name"] in secondary_style_names
-                and not 51.0 <= style["font_size"] <= 51.0
+                and not 60.0 <= style["font_size"] <= 60.0
             )
             or (
                 style["name"] not in secondary_style_names
@@ -906,11 +906,11 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         inline_size_ranges = dict(size_ranges)
         if secondary_declared:
             inline_size_ranges.update(
-                {"SecondaryGlow": (36.0, 51.0), "Secondary": (36.0, 51.0)}
+                {"SecondaryGlow": (36.0, 60.0), "Secondary": (36.0, 60.0)}
             )
     else:
         inline_size_ranges = (
-            {"SecondaryGlow": (36.0, 51.0), "Secondary": (36.0, 51.0)}
+            {"SecondaryGlow": (36.0, 60.0), "Secondary": (36.0, 60.0)}
             if secondary_declared
             else {}
         )
@@ -1008,7 +1008,7 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     secondary_bad_positions = [
         record
         for record in secondary_positions
-        if not (160 <= record["x"] <= 1760 and 24 <= record["y"] <= 160)
+        if not (160 <= record["x"] <= 1760 and 0 <= record["y"] <= 96)
     ]
     secondary_bad_layers = [
         {"line": dialogue["line"], "layer": dialogue["layer"]}
@@ -1035,7 +1035,7 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
 
     def position_is_allowed(record: dict[str, Any]) -> bool:
         if record["style"] in secondary_style_names:
-            return 160 <= record["x"] <= 1760 and 24 <= record["y"] <= 160
+            return 160 <= record["x"] <= 1760 and 0 <= record["y"] <= 96
         if role_aware_layout:
             return 0 <= record["x"] <= 1920 and 450 <= record["y"] <= 1020
         return record["x"] >= 960 and record["y"] >= 500
@@ -1071,7 +1071,7 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
 
     secondary_style_sizes_ok = not any(
         style["name"] in secondary_style_names
-        and not 51.0 <= style["font_size"] <= 51.0
+        and not 60.0 <= style["font_size"] <= 60.0
         for style in styles
     )
     secondary_style_alignment_ok = not any(
@@ -1147,6 +1147,145 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     ):
         project_highlight_bgr = next(iter(project_highlight_bgr_values))
 
+    singer_event_style_names = {
+        "Main",
+        "Glow",
+        "CueHot",
+        "Secondary",
+        "SecondaryGlow",
+    }
+    inline_primary_pattern = re.compile(
+        r"\\(?:1c|c)(&H(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})&?)"
+    )
+    inline_secondary_pattern = re.compile(
+        r"\\2c(&H(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})&?)"
+    )
+    singer_event_colors: list[dict[str, Any]] = []
+    for dialogue in dialogues:
+        if dialogue["style"] not in singer_event_style_names:
+            continue
+        if (
+            dialogue["style"] != "CueHot"
+            and re.search(r"\\k(?:f|o)?\d", dialogue["text"]) is None
+        ):
+            continue
+        primary_match = inline_primary_pattern.search(dialogue["text"])
+        secondary_match = inline_secondary_pattern.search(dialogue["text"])
+        parsed = _parse_ass_color(primary_match.group(1)) if primary_match else None
+        parsed_secondary = (
+            _parse_ass_color(secondary_match.group(1)) if secondary_match else None
+        )
+        singer_event_colors.append({
+            "line": dialogue["line"],
+            "style": dialogue["style"],
+            "ass": parsed["ass"] if parsed else None,
+            "rgb": parsed["rgb"] if parsed else None,
+            "bgr": parsed["bgr"] if parsed else None,
+            "secondary_bgr": parsed_secondary["bgr"] if parsed_secondary else None,
+            "inline": primary_match is not None,
+            "inline_secondary": secondary_match is not None,
+            "event_key": (
+                dialogue["start"],
+                dialogue["end"],
+                dialogue["name"],
+                re.sub(r"\{[^}]*\}", "", dialogue["text"]),
+            ),
+        })
+    inline_singer_color_mode = any(record["inline"] for record in singer_event_colors)
+    invalid_inline_singer_colors = (
+        [record for record in singer_event_colors if record["bgr"] is None]
+        if inline_singer_color_mode else []
+    )
+    if invalid_inline_singer_colors:
+        errors.append(
+            "singer_events_missing_readable_inline_primary_color: "
+            f"{invalid_inline_singer_colors}"
+        )
+
+    singer_event_color_mismatches: list[dict[str, Any]] = []
+    if inline_singer_color_mode:
+        records_by_style: dict[str, dict[tuple[str, str, str, str], list[dict[str, Any]]]] = {}
+        for record in singer_event_colors:
+            records_by_style.setdefault(record["style"], {}).setdefault(
+                record["event_key"], []
+            ).append(record)
+
+        for main_style, glow_style in (
+            ("Main", "Glow"),
+            ("Secondary", "SecondaryGlow"),
+        ):
+            main_records = records_by_style.get(main_style, {})
+            glow_records = records_by_style.get(glow_style, {})
+            for event_key in sorted(set(main_records) | set(glow_records)):
+                mains = main_records.get(event_key, [])
+                glows = glow_records.get(event_key, [])
+                if len(mains) != len(glows):
+                    singer_event_color_mismatches.append(
+                        {
+                            "styles": [main_style, glow_style],
+                            "event_key": event_key,
+                            "reason": "unpaired_render_events",
+                            "lines": [
+                                [record["line"] for record in mains],
+                                [record["line"] for record in glows],
+                            ],
+                        }
+                    )
+                    continue
+                for main_record, glow_record in zip(mains, glows, strict=True):
+                    if main_record["bgr"] != glow_record["bgr"]:
+                        singer_event_color_mismatches.append(
+                            {
+                                "styles": [main_style, glow_style],
+                                "event_key": event_key,
+                                "reason": "paired_primary_colors_differ",
+                                "lines": [main_record["line"], glow_record["line"]],
+                                "bgr": [main_record["bgr"], glow_record["bgr"]],
+                            }
+                        )
+
+        for record in singer_event_colors:
+            style = record["style"]
+            style_secondary = _parse_ass_color(
+                styles_by_name.get(style, {}).get("secondary_color")
+            )
+            effective_secondary_bgr = (
+                record["secondary_bgr"]
+                or (style_secondary["bgr"] if style_secondary else None)
+            )
+            if style == "CueHot":
+                if not record["inline_secondary"]:
+                    singer_event_color_mismatches.append(
+                        {
+                            "style": style,
+                            "line": record["line"],
+                            "reason": "missing_inline_secondary_hot_color",
+                        }
+                    )
+                elif record["bgr"] != record["secondary_bgr"]:
+                    singer_event_color_mismatches.append(
+                        {
+                            "style": style,
+                            "line": record["line"],
+                            "reason": "cue_hot_primary_secondary_colors_differ",
+                            "bgr": [record["bgr"], record["secondary_bgr"]],
+                        }
+                    )
+            elif effective_secondary_bgr != "FFFFFF":
+                singer_event_color_mismatches.append(
+                    {
+                        "style": style,
+                        "line": record["line"],
+                        "reason": "unhighlighted_color_must_be_white",
+                        "bgr": effective_secondary_bgr,
+                    }
+                )
+    if singer_event_color_mismatches:
+        errors.append(
+            "singer_event_colors_not_consistent: "
+            f"{singer_event_color_mismatches}"
+        )
+
     secondary_highlight_required = bool(secondary_events)
     parsed_secondary_highlight_colors: dict[str, dict[str, str]] = {}
     secondary_highlight_color_errors: list[dict[str, Any]] = []
@@ -1164,17 +1303,30 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             else:
                 parsed_secondary_highlight_colors[style_name] = parsed
 
-    secondary_highlight_is_white = secondary_highlight_required and any(
-        parsed["bgr"] == "FFFFFF"
-        for parsed in parsed_secondary_highlight_colors.values()
+    secondary_event_colors = [
+        record for record in singer_event_colors
+        if record["style"] in secondary_style_names
+    ]
+    secondary_highlight_is_white = secondary_highlight_required and (
+        any(record["bgr"] == "FFFFFF" for record in secondary_event_colors)
+        if inline_singer_color_mode else any(
+            parsed["bgr"] == "FFFFFF"
+            for parsed in parsed_secondary_highlight_colors.values()
+        )
     )
-    secondary_highlight_consistent = not secondary_highlight_required or (
+    global_secondary_color_consistent = (
         len(parsed_secondary_highlight_colors) == 2
         and not secondary_highlight_color_errors
-        and not secondary_highlight_is_white
         and len(
             {parsed["bgr"] for parsed in parsed_secondary_highlight_colors.values()}
         ) == 1
+    )
+    secondary_highlight_consistent = not secondary_highlight_required or (
+        not secondary_highlight_is_white
+        and (
+            not invalid_inline_singer_colors
+            if inline_singer_color_mode else global_secondary_color_consistent
+        )
     )
     secondary_highlight_matches_project = (
         not secondary_highlight_required
@@ -1194,7 +1346,11 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         )
     if secondary_highlight_is_white:
         errors.append("secondary_hot_highlight_must_not_be_white")
-    if secondary_highlight_required and not secondary_highlight_consistent:
+    if (
+        secondary_highlight_required
+        and not secondary_highlight_consistent
+        and not invalid_inline_singer_colors
+    ):
         errors.append(
             "secondary_highlight_colors_not_consistent: "
             f"{ {name: parsed['bgr'] for name, parsed in parsed_secondary_highlight_colors.items()} }"
@@ -1229,6 +1385,7 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         "highlight_colors": {
             name: parsed["rgb"] for name, parsed in parsed_highlight_colors.items()
         },
+        "singer_event_colors": singer_event_colors,
         "secondary": {
             "present": secondary_declared,
             "style_pair": secondary_style_pair_ok,
@@ -1246,8 +1403,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             "top_safe_area": {
                 "left_px": 160,
                 "right_px": 1760,
-                "top_px": 24,
-                "bottom_px": 160,
+                "top_px": 0,
+                "bottom_px": 96,
             },
             "excluded_from_main_lane_phase": True,
             "excluded_from_main_cue_pairing": True,
@@ -1259,6 +1416,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             },
             "highlight_color_consistency": secondary_highlight_consistent,
             "matches_main_highlight": secondary_highlight_matches_project,
+            "inline_singer_color_mode": inline_singer_color_mode,
+            "event_highlight_colors": secondary_event_colors,
         },
         "gate": {
             "no_forbidden_karaoke_tokens": not forbidden_tokens,
@@ -1269,6 +1428,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             "secondary_styles": secondary_gate_ok,
             "highlight_color_consistency": highlight_color_consistent,
             "secondary_highlight_color_consistency": secondary_highlight_consistent,
+            "inline_singer_event_colors": not invalid_inline_singer_colors
+            and not singer_event_color_mismatches,
         },
     }
 

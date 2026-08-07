@@ -127,6 +127,15 @@ NETEASE_ENDPOINT = "https://music.163.com/api/song/lyric"
 SUG_VERSION = "0.3.0"
 DEFAULT_FONT_NAME = "HarmonyOS Sans SC"
 VOICE_ROLES = ("opera", "harmony", "secondary")
+DEFAULT_ROLE_SINGER_COLORS = {
+    "opera": "#4ECDC4",
+    "harmony": "#45B7D1",
+    "secondary": "#C9B1FF",
+}
+ROLE_SINGER_COLOR_PALETTE = (
+    "#4ECDC4", "#45B7D1", "#FFA07A", "#98D8C8", "#C9B1FF",
+    "#F7DC6F", "#82E0AA", "#F1948A", "#85C1E9",
+)
 
 # These are evidence-contract labels, not claims that either forced aligner is
 # an independent recognizer.  Keep them in the timing report so downstream
@@ -175,6 +184,31 @@ def _normalize_voice_role(value: Any) -> str | None:
             f"one of {', '.join(VOICE_ROLES)}"
         )
     return role
+
+
+def _normalize_hex_color(value: Any, *, field_name: str) -> str:
+    color = str(value).strip().upper()
+    if not re.fullmatch(r"#[0-9A-F]{6}", color):
+        raise ValueError(f"invalid {field_name}: {value!r}")
+    return color
+
+
+def _normalize_role_colors(
+    role_colors: Mapping[str, Any] | None,
+) -> dict[str, str]:
+    if role_colors is None:
+        return {}
+    if not isinstance(role_colors, Mapping):
+        raise ValueError("role_colors must be an object")
+    normalized: dict[str, str] = {}
+    for raw_role, raw_color in role_colors.items():
+        role = _normalize_voice_role(raw_role)
+        if role is None:
+            raise ValueError(f"role_colors contains unsupported role {raw_role!r}")
+        normalized[role] = _normalize_hex_color(
+            raw_color, field_name=f"role color for {role}"
+        )
+    return normalized
 HARMONYOS_FONT_URL = (
     "https://developer.huawei.com/images/download/general/HarmonyOS-Sans.zip"
 )
@@ -1638,13 +1672,16 @@ def build_project(
     alignment_meta: dict[str, Any],
     timing_overrides: dict[str, Any] | None = None,
     singer_color: str = "#FF6B6B",
+    role_colors: Mapping[str, Any] | None = None,
 ) -> tuple[Project, list[dict[str, Any]]]:
     language = normalize_language(spec.language)
     helper = ReadingHelper()
     singer_id = stable_id("singer", spec.song_id)
-    singer_color = str(singer_color).strip().upper()
-    if not re.fullmatch(r"#[0-9A-F]{6}", singer_color):
-        raise ValueError(f"invalid singer highlight color: {singer_color!r}")
+    singer_color = _normalize_hex_color(
+        singer_color, field_name="singer highlight color"
+    )
+    normalized_role_colors = _normalize_role_colors(role_colors)
+    allocated_role_colors = set(normalized_role_colors.values())
     singer = Singer(
         id=singer_id,
         name=spec.artist,
@@ -1660,10 +1697,21 @@ def build_project(
         existing = role_singers.get(role)
         if existing is not None:
             return existing
+        role_color = normalized_role_colors.get(role)
+        if role_color is None:
+            candidates = (DEFAULT_ROLE_SINGER_COLORS.get(role), *ROLE_SINGER_COLOR_PALETTE)
+            role_color = next((
+                candidate for candidate in candidates
+                if candidate and candidate != singer_color
+                and candidate not in allocated_role_colors
+            ), None)
+            if role_color is None:
+                raise ValueError(f"no independent colour available for voice role {role!r}")
+        allocated_role_colors.add(role_color)
         role_singer = Singer(
             id=stable_id("singer", f"{spec.song_id}:{role}"),
             name=role,
-            color=singer_color,
+            color=role_color,
             is_default=False,
             is_placeholder=False,
             display_priority=1 + VOICE_ROLES.index(role),
@@ -1862,6 +1910,23 @@ def project_signature(project: Project) -> dict[str, Any]:
         "duration": project.audio_duration_ms,
         "title": project.metadata.title,
         "language": normalize_language(project.metadata.language),
+        "singers": [
+            {
+                "id": singer.id,
+                "name": singer.name,
+                "color": singer.color,
+                "complement_color": singer.complement_color,
+                "color_mode": singer.color_mode,
+                "split_colors": list(singer.split_colors),
+                "backend_number": singer.backend_number,
+                "is_default": singer.is_default,
+                "is_placeholder": singer.is_placeholder,
+                "display_priority": singer.display_priority,
+                "enabled": singer.enabled,
+                "group": singer.group,
+            }
+            for singer in project.singers
+        ],
         "sentences": [
             {
                 "id": sentence.id,
@@ -1870,6 +1935,7 @@ def project_signature(project: Project) -> dict[str, Any]:
                 "chars": [
                     {
                         "char": character.char,
+                        "singer_id": character.singer_id,
                         "check_count": character.check_count,
                         "timestamps": list(character.timestamps),
                         "sentence_end_ts": character.sentence_end_ts,
@@ -2564,6 +2630,7 @@ def build_song(
     audit_original_mix: bool = True,
     timing_overrides: dict[str, Any] | None = None,
     singer_color: str = "#FF6B6B",
+    role_colors: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     language = normalize_language(spec.language)
     fallback_method = "deterministic-mora-interpolation"
@@ -2810,6 +2877,7 @@ def build_song(
         alignment_meta,
         timing_overrides,
         singer_color,
+        role_colors,
     )
     project_validation = validate_project(project, duration_ms)
     exports = export_song(spec, audio_path, duration_ms, project, font_name)
@@ -3107,6 +3175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             not args.skip_mix_cross_check,
             song_overrides.get("lines", {}),
             singer_color=song_overrides.get("highlight_color", "#FF6B6B"),
+            role_colors=song_overrides.get("role_colors"),
         )
         song_report["source"]["lyric_corrections"] = applied_corrections
         song_reports.append(song_report)

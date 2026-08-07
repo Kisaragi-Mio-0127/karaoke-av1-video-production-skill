@@ -2,19 +2,19 @@
 
 [简体中文](batch-release-gates.zh-CN.md) | English
 
-Use these gates when encoding, promoting, or packaging multiple songs or delivery profiles together.
+Use these gates when encoding, promoting, or packaging multiple songs or delivery profiles together. Apply the same gates to one-click and underlying renderer routes.
 
 ## Freeze the generation
 
-Before full encoding, record a parameter fingerprint covering source files, timing overrides, renderer, report and test identities, encoder, pixel format, quality control, preset, audio, container, fonts, lyric and ruby sizes, spacing, render options, timing evidence, and delivery profile. Keep song counts, cue counts, quality values, font sizes, and filenames in project configuration rather than the generic skill.
+Before full encoding, record a parameter fingerprint covering source files, timing overrides, renderer, report and test identities, explicit singer resolution and colours, secondary roles and top-overlay geometry, encoder, pixel format, quality control, preset, audio, container, fonts, lyric and ruby sizes, spacing, render options, timing evidence, and delivery profile. Keep song counts, cue counts, quality values, font sizes, and filenames in project configuration rather than the generic skill.
 
 ## Isolated staging
 
 - Encode in a dedicated staging directory outside accepted deliverables.
 - Require successful renderer and encoder exits; reject partial files, stale outputs, unverified profiles, and mixed generation identities.
 - Compare per-track and total sizes with the previous accepted generation. Treat unusual changes as investigation signals rather than quality proof.
-- Treat complete null decoding as optional. When performed, map the intended streams and record actual exit codes.
-- Extract boundary frames for cues, longest phrases, ruby exceptions, and release-overlap conflicts.
+- Treat complete null decoding as optional and off by default. When performed, map the intended streams and record actual exit codes; do not make an unperformed diagnostic a release failure.
+- Extract boundary frames for cues, longest phrases, top overlays, ruby exceptions, and release-overlap conflicts.
 
 ## Multi-file promotion
 

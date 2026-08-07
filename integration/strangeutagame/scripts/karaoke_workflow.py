@@ -30,7 +30,11 @@ try:
         DirectAV1420RenderError,
         validate_current_wide_compositions,
     )
-    from scripts.render_vinyl_karaoke import build_artwork, default_ffmpeg
+    from scripts.render_vinyl_karaoke import (
+        build_artwork,
+        default_ffmpeg,
+        validate_ass_for_render,
+    )
 except ImportError:  # pragma: no cover - direct script entry points
     from finalize_karaoke_release import inspect_av1_420_media  # type: ignore[no-redef]
     from inspect_karaoke_media import (  # type: ignore[no-redef]
@@ -50,6 +54,7 @@ except ImportError:  # pragma: no cover - direct script entry points
     from render_vinyl_karaoke import (  # type: ignore[no-redef]
         build_artwork,
         default_ffmpeg,
+        validate_ass_for_render,
     )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -580,6 +585,60 @@ def validate_renderer_report(
     return {"visual_style": config.visual_style, "checks": checks}
 
 
+def _critical_ass_report_facts(report: dict[str, Any]) -> dict[str, Any]:
+    """Extract stable singer/secondary/ruby facts from either report wrapper."""
+
+    nested = report.get("ass")
+    ass = nested if isinstance(nested, dict) else report
+
+    def line_facts(value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        keys = (
+            "line_index", "secondary_line_index", "source_line_index",
+            "phrase_index", "text", "voice_role", "singer_group",
+            "effective_singer_id", "effective_singer_ids",
+            "effective_singer_runs", "hot_primary_ass", "ruby",
+        )
+        return [
+            {key: item.get(key) for key in keys if key in item}
+            for item in value if isinstance(item, dict)
+        ]
+
+    top_keys = (
+        "language_identity", "singer_color_mapping", "sug_hash",
+        "ruby_enabled", "ruby_spans", "ruby_review",
+        "ruby_consistency_gate", "pronunciation_validation",
+    )
+    return {
+        **{key: ass.get(key) for key in top_keys if key in ass},
+        "lines": line_facts(ass.get("lines")),
+        "secondary_lines": line_facts(ass.get("secondary_lines")),
+    }
+
+
+def validate_ass_report_parity(
+    preflight_report: dict[str, Any],
+    final_report: dict[str, Any],
+) -> dict[str, Any]:
+    preflight = _critical_ass_report_facts(preflight_report)
+    final = _critical_ass_report_facts(final_report)
+    if preflight != final:
+        raise KaraokeWorkflowError(
+            "preflight and final singer/secondary/ruby report facts differ"
+        )
+    encoded = json.dumps(
+        preflight, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return {
+        "status": "ok",
+        "critical_facts_sha256": hashlib.sha256(encoded).hexdigest(),
+        "singer_color_mapping_count": len(preflight.get("singer_color_mapping", [])),
+        "line_count": len(preflight["lines"]),
+        "secondary_line_count": len(preflight["secondary_lines"]),
+    }
+
+
 def _full_decode_report(
     *,
     requested: bool,
@@ -609,6 +668,7 @@ def run_workflow(
     runner: Callable[[Sequence[str]], subprocess.CompletedProcess[str]] = _run_command,
     artwork_builder: Callable[..., dict[str, Any]] = build_artwork,
     media_verifier: Callable[[Path, Path], dict[str, Any]] = inspect_av1_420_media,
+    ass_validator: Callable[[Path, str], dict[str, Any]] = validate_ass_for_render,
 ) -> dict[str, Any]:
     validate_visual_contract(config)
     output_dir = validate_output_dir(config)
@@ -772,6 +832,14 @@ def run_workflow(
             raise KaraokeWorkflowError(f"ASS production failed: {ass_result.stderr[-2000:]}")
         if not preflight_ass_path.is_file() or not ass_report_path.is_file():
             raise KaraokeWorkflowError("ASS production did not create its declared outputs")
+        preflight_ass_gate = ass_validator(preflight_ass_path, "HarmonyOS Sans SC")
+        if not preflight_ass_gate.get("ok"):
+            raise KaraokeWorkflowError(
+                f"preflight ASS gate failed: {preflight_ass_gate.get('errors')}"
+            )
+        preflight_renderer_report = json.loads(
+            ass_report_path.read_text(encoding="utf-8")
+        )
         preflight_contract = enforce_language_contract(config, preflight_ass_path)
         preflight_ass_sha256 = sha256_file(preflight_ass_path)
         report["stages"].append(
@@ -780,6 +848,7 @@ def run_workflow(
                 "status": "ok",
                 "contract": preflight_contract,
                 "preflight_ass_sha256": preflight_ass_sha256,
+                "ass_gate": preflight_ass_gate,
             }
         )
 
@@ -806,6 +875,11 @@ def run_workflow(
                 "requested lossless companion was not created"
             )
         final_contract = enforce_language_contract(config, ass_path)
+        final_ass_gate = ass_validator(ass_path, "HarmonyOS Sans SC")
+        if not final_ass_gate.get("ok"):
+            raise KaraokeWorkflowError(
+                f"final ASS gate failed: {final_ass_gate.get('errors')}"
+            )
         final_ass_sha256 = sha256_file(ass_path)
         if final_ass_sha256 != preflight_ass_sha256:
             raise KaraokeWorkflowError(
@@ -816,6 +890,12 @@ def run_workflow(
             render_report_path,
             generated_vinyl=generated_vinyl,
         )
+        final_renderer_report = json.loads(
+            render_report_path.read_text(encoding="utf-8")
+        )
+        report_parity = validate_ass_report_parity(
+            preflight_renderer_report, final_renderer_report
+        )
         report["stages"].append(
             {
                 "name": "ass-render-parity",
@@ -823,6 +903,9 @@ def run_workflow(
                 "preflight_ass_sha256": preflight_ass_sha256,
                 "final_ass_sha256": final_ass_sha256,
                 "contract": final_contract,
+                "preflight_ass_gate": preflight_ass_gate,
+                "final_ass_gate": final_ass_gate,
+                "report_parity": report_parity,
             }
         )
         render_stage = {

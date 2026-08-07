@@ -121,19 +121,24 @@
       "reason": "Prepares optional external MSST evidence without importing StrangeUtaGame."
     },
     {
+      "path": "karaoke_direct_album_planning.py",
+      "category": "no-upstream-code-import",
+      "reason": "Provides codec-neutral album manifest selection, profile selection, source discovery, font resolution, and render task planning."
+    },
+    {
       "path": "render_karaoke_direct_av1_420_album.py",
       "category": "transitive-runtime",
-      "reason": "Executes the StrangeUtaGame-backed preview renderer with language/pronunciation policy, current wide-composition validation, durable final-ASS report paths (including atomic copied-report rebinding), and opt-in MKV/full-decode gates."
+      "reason": "Uses codec-neutral album planning and executes the StrangeUtaGame-backed preview renderer with AV1 4:2:0-only encoding, language/pronunciation policy, durable final-ASS reports, and explicit-only MKV/full-decode gates."
     },
     {
       "path": "render_karaoke_direct_av1_album.py",
       "category": "transitive-runtime",
-      "reason": "Executes karaoke_review_preview.py against SUG input to regenerate ASS before encoding."
+      "reason": "Deprecated argv/exit-code-compatible wrapper for render_karaoke_direct_hevc444_album.py."
     },
     {
       "path": "render_karaoke_direct_hevc444_album.py",
       "category": "transitive-runtime",
-      "reason": "Delegates to render_karaoke_direct_av1_album.py, which executes the SUG preview renderer."
+      "reason": "Formal HEVC 4:4:4 implementation using codec-neutral album planning and the SUG preview renderer with hevc_nvenc_444/yuv444p MP4 output."
     },
     {
       "path": "render_vinyl_karaoke.py",

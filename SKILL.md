@@ -1,6 +1,6 @@
 ---
 name: karaoke-av1-video-production
-description: Use when producing, re-encoding, debugging, packaging, or reviewing karaoke and lyric videos or opening editable karaoke timing projects with attached audio, including semantic phrase segmentation, source-line overrides, cue/lane behavior, Japanese ruby, editable-source/render parity, media restoration, MMS timing evidence, ASS highlight release, lyric visual fit, AV1 4:2:0 encoding, batch promotion, archives, and media-structure verification. Do not use for TTS, voice cloning, music generation, vocal separation, or lyric transcription.
+description: Use when producing, re-encoding, debugging, packaging, or reviewing karaoke and lyric videos or opening editable karaoke timing projects with attached audio, including semantic phrase segmentation, explicit SUG singer_id colour routing, dedicated Japanese secondary-vocal overlays, cross-singer ruby rejection, source-line overrides, cue/lane behavior, Japanese ruby, editable-source/render parity, media restoration, MMS timing evidence, ASS highlight release, lyric visual fit, AV1 4:2:0 encoding, batch promotion, archives, and media-structure verification. Do not use for TTS, voice cloning, music generation, vocal separation, or lyric transcription.
 ---
 
 # Karaoke AV1 Video Production
@@ -24,7 +24,7 @@ Read [av1-420-commands.md](references/av1-420-commands.md) / [中文](references
 
 Read [wide-visual-templates.md](references/wide-visual-templates.md) / [中文](references/wide-visual-templates.zh-CN.md) before selecting or changing the wide-layout vinyl or real-time spectrum template. Keep the two effects mutually exclusive and drive both through the shared artwork and preview-render scripts.
 
-The current `wide-layout-v5/no-right-panels` composition uses a vinyl card at
+The current `wide-layout-v6/top-secondary-clearance` composition uses a vinyl card at
 `(40,30,340,402)`, footer bottom padding `12`, and a lower subtitle panel that
 starts at `y=576`. Both the extra outer right-panel overlay and the compact
 dark backplate behind/below the rotating record are removed. The rotating
@@ -34,7 +34,11 @@ record, album card, card footer, and bottom subtitle panel remain. Reports use
 `vinyl_backplate_preserved=false` for this no-panel composition. The spectrum
 variant must also use the clip-safe geometry documented in
 [wide-visual-templates.md](references/wide-visual-templates.md), leaving top
-and bottom glow clearance so peaks are not clipped.
+and bottom glow clearance so peaks are not clipped. The top secondary contract
+uses anchor `y=12`, default font size `60 px`, minimum long-line size `36 px`,
+content safe band `y=0..96`, and an actual outline/glow reserve through `y=107`.
+The title block uses actual ink bounds at label/title/artist `y=120/155/220`
+and keeps at least `16 px` between title ink and the secondary reserve.
 
 ## Shared single-track workflow
 
@@ -63,15 +67,23 @@ The workflow first creates an independent `karaoke-preflight.ass` in ASS-only
 mode, then creates the final `karaoke.ass` during MP4 rendering. It compares
 their SHA-256 identities for the same SUG/configuration and fails if they
 differ. Full probed duration and MP4-only output with AAC-LC audio are the
-defaults. Use `--smoke-duration`, `--lossless-companion`, or `--full-decode`
-only as explicit opt-ins; a default run does not create MKV or run a full
-decode.
+defaults. MKV and full decode require explicit opt-ins; a default run does not
+create MKV or run a full decode. Japanese pronunciation validation defaults to
+non-blocking `optional`; `required` and `off` remain explicit choices. The one-click route and the
+underlying renderer must apply the same singer, overlay, ruby, container, and
+diagnostic gates.
 
 The album/batch direct renderer (`render_karaoke_direct_av1_420_album.py`)
 remains the current vinyl-only path. Do not document spectrum support for that
 renderer based on the shared single-track workflow or preview path.
+Use `render_karaoke_direct_hevc444_album.py` for the explicit HEVC 4:4:4 lane.
+Treat `render_karaoke_direct_av1_album.py` only as its deprecated compatibility
+name; shared manifest selection and task planning belong to
+`karaoke_direct_album_planning.py`, not either codec-specific entry point.
 
 Read [subtitle-timing-quality.md](references/subtitle-timing-quality.md) / [中文](references/subtitle-timing-quality.zh-CN.md) when changing phrase segmentation, cue behavior, ruby, MMS-derived timing, highlight release, visual-fit rules, or opening an editable timing project for review.
+
+Read [singer-overlays.md](references/singer-overlays.md) / [中文](references/singer-overlays.zh-CN.md) when a project has multiple singers, explicit `singer_id` fields, opera/harmony/secondary roles, singer-colour routing, top overlays, or ruby spans that may cross singers.
 
 Read [asr-sug-pitch.md](references/asr-sug-pitch.md) / [中文](references/asr-sug-pitch.zh-CN.md) before using independent ASR evidence, validating a newer StrangeUtaGame/SUG version, or pitch-shifting delivery audio. Use the bundled `scripts/check_sug_compatibility.py` and `scripts/pitch_shift_audio.py` instead of one-off commands.
 
@@ -114,8 +126,11 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - Keep one traceable fact chain from canonical source through overrides, renderer output, ASS/report, encoded media, and promoted or packaged artifacts. Record a hash or equivalent generation identity at every reproducible layer.
 - Preserve source-line semantics when creating display phrases. Require exact override reachability, lossless phrase recomposition, and reuse of original character timing objects.
 - Treat source whitespace as breath evidence, not an authoritative display boundary. Resolve it against source-language syntax, measured acoustic pauses, minimum phrase length, and visual fit; document reviewed exceptions where a sung breath splits a grammatical dependency.
+- Resolve singer identity only from explicit SUG data, with character-level `singer_id` taking precedence over sentence-level `singer_id`, then the explicit project default. Apply the resolved singer colour consistently to active `Main`, `Glow`, cue, and top secondary subtitle layers; keep inactive or unhighlighted text white. Never infer singer identity from lyric text or role wording.
+- Route explicit `opera`, `harmony`, and `secondary` roles to a top-centred overlay independent of main lanes, cues, and ruby. Use the top safe band `y=0..96`, anchor `y=12`, default font size `60 px`, and a minimum `36 px` long-line size; the actual outline/glow reserve extends through `y=107`. Inspect coexistence with the `wide-layout-v6/top-secondary-clearance` title, whose label/title/artist positions are `y=120/155/220`, whose placement uses actual ink bounds, and whose title ink stays at least `16 px` below the reserve.
 - Treat ruby word boundaries as a mandatory release gate, independently from reading correctness. The candidate generator fills missing ruby only; preserve existing human-reviewed or legacy ruby. The Agent audits every ruby span like semantic phrase segmentation, using the full lyric sentence, grammar, inflection, lexical word boundaries, and context, and may approve it or write a correction directly back to the canonical SUG. Human review is not mandatory for every span: escalate only ambiguity, proper nouns, artistic readings, evidence conflicts, low confidence, or `unresolved` results. If no correction is made, retain the default ruby. Do not force one ruby group per kanji: keep a multi-kanji lexical word or jukujikun such as `今年→ことし`, `来年→らいねん`, or `一番→いちばん` together. Do not merge adjacent lexical words merely because their readings are contiguous; for example, keep `一番|好|き` as `一番→いちばん`, `好→す`, and unannotated okurigana `き`, rather than `一番好→いちばんす`. For StrangeUtaGame, inspect every ruby-bearing line's canonical SUG `linked_to_next` chain, compare the same surface spans and readings in the ASS/report, and inspect a rendered frame to confirm each ruby is centered over the intended word. The renderer reads only the reviewed canonical SUG and must not infer or override ruby. Record per-span status, confidence, evidence, model/prompt version, and before/after SUG hashes; fail release when the SUG, ASS/report, or final frame disagrees, even if the concatenated reading text is correct, while preserving character timing unless timing is the explicit task.
 - Apply extra in-line semantic spacing only at approved breath or semantic boundaries. Record the boundary character indices and one configured pixel/em value, then verify coordinate deltas independently from perceived spacing caused by glyph shape, highlight state, or ruby.
+- Reject a ruby chain when its resolved surface characters contain more than one `singer_id`; never split or silently reassign a cross-singer span during rendering. Run this check in the one-click preflight, final render, and lower-level renderer gate.
 - Treat cue pairing, lane reset, countdown anchoring, ruby, target font sizes, display preload, per-character sweep onset/release, line release, event end, and outro visibility as separate explicit contracts rather than incidental renderer behavior. A report that a red sweep is early or short does not authorize moving the lyric display preload; change preload only when the user reports that lyric visibility itself is wrong.
 - When the established album layout preloads intro lyrics from program start and interlude lyrics from the preceding visible event end, preserve those starts independently of the later countdown-dot window and acoustic onset. Keep the approved outro marker visible from the final lyric event end through the media end unless the user explicitly requests a clean tail.
 - For a held syllable reported as too short, inspect the following character's sweep onset as well as the current character's release. If the following onset was assigned inside the held vowel, move the reviewed following onset (or a renderer-only visual onset) so the held glyph consumes the sustain; do not misuse a line-level preload or event boundary to create the effect. Distinguish sustained sound from a silent breath before accepting the change.
@@ -123,7 +138,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - For wide-layout karaoke output, fix the default typography at `1.5x` the project's established `1x` baseline for main lyrics, ruby, and countdown cues. For the current 72/34/26 px baseline, require 108/51/39 px respectively. Use a 35 px ruby-to-main anchor gap and place countdown cues 16 px above the ruby anchor. Apply both spacing values consistently to upper, lower, outro, and cue layouts. Do not switch to `2x`, silently shrink, or change only one of these layers unless the user explicitly requests it or measured overflow is accepted as a recorded, rollback-safe exception.
 - Treat original-mix and separated-vocal MMS results as timing evidence, not delivery tracks. Resolve conflicts with recorded confidence and human A/B review.
 - Use the configured language profile for the documented ASR and alignment path; require a validated adapter for any non-default profile. Keep independent ASR separate from stable-ts and MMS forced alignment; it may support, veto, or remain unresolved, but is never a silent fallback that replaces failed alignment. If ASR is unavailable or errors, record `unresolved` and require other evidence or human review.
-- In StrangeUtaGame, pronunciation validation is an explicit `optional`, `required`, or `off` mode and defaults to `optional`. `optional` keeps structural ruby checks and SUG/ASS/frame agreement mandatory, but a missing pronunciation sidecar is recorded as not performed and does not block by default. Validate a supplied sidecar when present; use `required` only when the user explicitly requests that Japanese gate, and use `off` to disable the semantic sidecar review.
+- In StrangeUtaGame, pronunciation validation is an explicit `optional`, `required`, or `off` mode and defaults to non-blocking `optional`. `optional` keeps structural ruby checks and SUG/ASS/frame agreement mandatory, but a missing semantic sidecar is recorded as not performed and does not block release. Use `required` only when explicitly requested; use `off` to disable semantic-sidecar review.
 - Resolve CJK fonts explicitly and inspect missing-glyph or fallback-font warnings.
 - Correct odd dimensions by an explicit pad or scale decision before subtitle rendering; prefer padding when cropping would discard content.
 - Render a short preview covering the title, first lyric, longest line, representative lyric changes, dense timing, and ending before the full encode.

@@ -15,7 +15,7 @@ SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
 SHARED_REGULAR_FONT = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Regular.ttf"
 SHARED_BOLD_FONT = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Bold.ttf"
 CANVAS_SIZE = (1920, 1080)
-WIDE_LAYOUT_VERSION = "wide-layout-v5/no-right-panels"
+WIDE_LAYOUT_VERSION = "wide-layout-v6/top-secondary-clearance"
 SLEEVE_BOXES = {
     "vinyl": (40, 30, 340, 402),
     "spectrum": (40, 30, 460, 522),
@@ -26,6 +26,19 @@ SLEEVE_MARGIN = 20
 SLEEVE_FOOTER_HEIGHT = 70
 SLEEVE_BOTTOM_PADDING = 12
 TITLE_BLOCK_X = {"vinyl": 430, "spectrum": 800}
+TITLE_BLOCK_Y = {"label": 120, "title": 155, "artist": 220}
+SECONDARY_OVERLAY_SAFE_BOUNDS = (0, 0, 1920, 96)
+SECONDARY_OVERLAY_OUTLINE_PX = 3
+SECONDARY_OVERLAY_GLOW_PX = 8
+MIN_TITLE_SECONDARY_CLEARANCE_PX = 16
+SECONDARY_RESERVED_BOUNDS = (
+    0,
+    0,
+    1920,
+    SECONDARY_OVERLAY_SAFE_BOUNDS[3]
+    + SECONDARY_OVERLAY_OUTLINE_PX
+    + SECONDARY_OVERLAY_GLOW_PX,
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -64,16 +77,27 @@ def _draw_text_with_visual_left(
     text: str,
     font: ImageFont.FreeTypeFont,
     fill: tuple[int, int, int, int],
-) -> dict[str, int]:
+) -> dict[str, int | tuple[int, int, int, int]]:
     mask_bbox = font.getmask(text).getbbox()
     ink_left_offset = mask_bbox[0] if mask_bbox is not None else 0
     draw_x = visual_left - ink_left_offset
+    ink_bounds = tuple(int(value) for value in draw.textbbox((draw_x, y), text, font=font))
     draw.text((draw_x, y), text, font=font, fill=fill)
     return {
         "visual_left": visual_left,
         "draw_x": draw_x,
         "ink_left_offset": ink_left_offset,
+        "ink_bounds": ink_bounds,
     }
+
+
+def _union_bounds(*bounds: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    return (
+        min(value[0] for value in bounds),
+        min(value[1] for value in bounds),
+        max(value[2] for value in bounds),
+        max(value[3] for value in bounds),
+    )
 
 
 def build_wide_composition(
@@ -172,7 +196,7 @@ def build_wide_composition(
     label_alignment = _draw_text_with_visual_left(
         draw,
         visual_left=title_block_x,
-        y=70,
+        y=TITLE_BLOCK_Y["label"],
         text="STUDIO KARAOKE / WIDE CUT",
         font=_font(bold_font, 18),
         fill=(234, 232, 227, 195),
@@ -187,7 +211,7 @@ def build_wide_composition(
     title_alignment = _draw_text_with_visual_left(
         draw,
         visual_left=title_block_x,
-        y=105,
+        y=TITLE_BLOCK_Y["title"],
         text=title,
         font=title_font,
         fill=(255, 255, 255, 255),
@@ -202,11 +226,26 @@ def build_wide_composition(
     artist_alignment = _draw_text_with_visual_left(
         draw,
         visual_left=title_block_x,
-        y=170,
+        y=TITLE_BLOCK_Y["artist"],
         text=artist,
         font=artist_font,
         fill=(204, 207, 215, 238),
     )
+
+    title_bounds = _union_bounds(
+        tuple(label_alignment["ink_bounds"]),
+        tuple(title_alignment["ink_bounds"]),
+        tuple(artist_alignment["ink_bounds"]),
+    )
+    title_secondary_clearance_px = title_bounds[1] - SECONDARY_RESERVED_BOUNDS[3]
+    if title_secondary_clearance_px < MIN_TITLE_SECONDARY_CLEARANCE_PX:
+        raise ValueError(
+            "wide artwork title does not clear the top secondary overlay reserve: "
+            f"title_bounds={title_bounds} "
+            f"secondary_reserved_bounds={SECONDARY_RESERVED_BOUNDS} "
+            f"clearance_px={title_secondary_clearance_px} "
+            f"required_px={MIN_TITLE_SECONDARY_CLEARANCE_PX}"
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.convert("RGB").save(output_path, format="PNG", optimize=True)
@@ -247,6 +286,19 @@ def build_wide_composition(
             "bottom_padding": sleeve_height - footer_bottom,
         },
         "title_block_x": title_block_x,
+        "title_block_y": TITLE_BLOCK_Y,
+        "title_bounds": title_bounds,
+        "secondary_overlay_contract": {
+            "anchor_y": 12,
+            "font_size_px": 60,
+            "safe_bounds": SECONDARY_OVERLAY_SAFE_BOUNDS,
+            "outline_px": SECONDARY_OVERLAY_OUTLINE_PX,
+            "glow_px": SECONDARY_OVERLAY_GLOW_PX,
+            "reserved_bounds": SECONDARY_RESERVED_BOUNDS,
+        },
+        "secondary_reserved_bounds": SECONDARY_RESERVED_BOUNDS,
+        "title_secondary_clearance_px": title_secondary_clearance_px,
+        "title_secondary_collision": False,
         "title_block_ink_alignment": {
             "label": label_alignment,
             "title": title_alignment,

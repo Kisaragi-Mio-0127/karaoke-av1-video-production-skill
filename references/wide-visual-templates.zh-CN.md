@@ -30,7 +30,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 `--vinyl`作为规范身份输入，在新输出目录中重新生成并校验当前旋转黑胶，再把生成资源传给renderer。频谱完全不处理也不报告vinyl。
 
 workflow先独立写入`karaoke-preflight.ass`，再在MP4渲染阶段写入最终
-`karaoke.ass`，并要求两者SHA-256身份一致。默认使用完整时长且只生成MP4；`--lossless-companion`和`--full-decode`分别是MKV与full-decode诊断的显式opt-in。专辑/批量direct renderer仍仅支持vinyl，不能把这里的频谱能力写成专辑renderer能力。
+`karaoke.ass`，并要求两者SHA-256身份一致。默认使用完整时长且只生成MP4；`--lossless-companion`和`--full-decode`分别是MKV与完整解码诊断的显式opt-in。日文注音验证默认为不阻塞的`optional`。一键workflow与底层renderer使用相同的歌手、叠加层、注音、容器和诊断门禁。专辑/批量direct renderer仍仅支持vinyl，不能把这里的频谱能力写成专辑renderer能力。
 
 ## 构图与渲染
 
@@ -61,7 +61,7 @@ uv run --no-sync python scripts/karaoke_review_preview.py `
 
 ## 当前构图约定
 
-当前宽屏构图采用`wide-layout-v5/no-right-panels`。这里同时删除了宽屏构图额外绘制的outer right panel（大框）和旋转黑胶后方或下方的compact暗色backplate（小框）。黑胶仍然旋转，专辑卡片、卡片footer和底部字幕面板保留；频谱版本不重新引入原黑胶区域背景框。
+当前宽屏构图采用`wide-layout-v6/top-secondary-clearance`。这里同时删除了宽屏构图额外绘制的outer right panel（大框）和旋转黑胶后方或下方的compact暗色backplate（小框）。黑胶仍然旋转，专辑卡片、卡片footer和底部字幕面板保留；频谱版本不重新引入原黑胶区域背景框。
 
 ## 当前宽屏约束
 
@@ -69,6 +69,8 @@ uv run --no-sync python scripts/karaoke_review_preview.py `
 - 下方字幕背景矩形为`(20,576,1900,1050)`，其顶部为`y=576`且继续保留；字幕锚点由`--layout`决定。
 - 黑胶专辑卡为`(x,y,width,height)=(40,30,340,402)`，footer底部留白为`12`，标题块可见左边界为`430`。
 - 日文宽屏上下主字幕锚点分别为`y=660`和`y=870`。
+- 显式的`opera`、`harmony`和`secondary`角色使用独立的顶部居中叠加层，安全带为`y=0..96`、锚点为`y=12`、默认字号为`60 px`，长句最低缩小到`36 px`。实际outline/glow保留区延伸到`y=107`；它独立于主歌词行、提示字幕和注音。
+- 在`wide-layout-v6/top-secondary-clearance`中，标题label/title/artist位置为`y=120/155/220`，标题区使用实际ink bounds，并与secondary保留区至少保持`16 px`间距；须在构图报告和代表帧中验证保留区与标题的间距。
 - 构图报告中的`right_panel: null`/`right_panel_visible: false`以及`outer_right_panel: null`/`outer_right_panel_visible: false`确认没有额外叠加的outer right panel（大框）；`vinyl_backplate: null`、`vinyl_backplate_present: false`和兼容字段`vinyl_backplate_preserved: false`确认compact backplate（小框）也不存在。
 - 频谱专辑卡为`(40,30,460,522)`，标题/频谱/进度的可见左边界为`800`；频谱为`(800,290,1040,220)`，基线`y=516`，进度条为`(800,548,1040,6)`，圆形指示器直径约20 px。频谱的clip-safe区域为`(736,226,1168,348)`，水平辉光余量为64 px，上下辉光余量各56 px，柱体上下安全余量各8 px。
 - 按审核后的可见边界对齐标题字形、频谱柱和进度轨，不只依赖文本绘制原点或辉光图层画布。

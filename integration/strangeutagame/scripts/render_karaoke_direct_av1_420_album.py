@@ -28,23 +28,26 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from . import render_karaoke_direct_av1_album as render_core
+    from . import karaoke_direct_album_planning as render_core
     from .karaoke_album import (
         DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         project_relative,
         sha256_file,
     )
-    from .render_vinyl_karaoke import probe_libass_font
+    from .render_vinyl_karaoke import probe_libass_font, validate_ass_for_render
 except ImportError:  # pragma: no cover - direct script execution
-    import render_karaoke_direct_av1_album as render_core  # type: ignore[no-redef]
+    import karaoke_direct_album_planning as render_core  # type: ignore[no-redef]
     from karaoke_album import (  # type: ignore[no-redef]
         DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         project_relative,
         sha256_file,
     )
-    from render_vinyl_karaoke import probe_libass_font  # type: ignore[no-redef]
+    from render_vinyl_karaoke import (  # type: ignore[no-redef]
+        probe_libass_font,
+        validate_ass_for_render,
+    )
 
 try:
     from .karaoke_language import language_identity as _shared_language_identity
@@ -258,6 +261,10 @@ def validate_current_wide_compositions(
         "spectrum": {"x": 40, "y": 30, "width": 460, "height": 522},
     }
     title_block_x_by_style = {"vinyl": 430, "spectrum": 800}
+    title_block_y = {"label": 120, "title": 155, "artist": 220}
+    secondary_safe_bounds = [0, 0, 1920, 96]
+    secondary_reserved_bounds = [0, 0, 1920, 107]
+    minimum_title_clearance_px = 16
     try:
         expected_sleeve = sleeve_by_style[visual_style]
     except KeyError as error:
@@ -307,6 +314,29 @@ def validate_current_wide_compositions(
                 f"wide composition metadata must be an object: {metadata_path}"
             )
         actual_hash = sha256_file(composition)
+        title_bounds = metadata.get("title_bounds")
+        title_bounds_valid = (
+            isinstance(title_bounds, list)
+            and len(title_bounds) == 4
+            and all(isinstance(value, int) for value in title_bounds)
+            and title_bounds[0] < title_bounds[2]
+            and title_bounds[1] < title_bounds[3]
+        )
+        overlay_contract = metadata.get("secondary_overlay_contract")
+        overlay_contract_valid = (
+            isinstance(overlay_contract, Mapping)
+            and overlay_contract.get("anchor_y") == 12
+            and overlay_contract.get("font_size_px") == 60
+            and overlay_contract.get("safe_bounds") == secondary_safe_bounds
+            and overlay_contract.get("outline_px") == 3
+            and overlay_contract.get("glow_px") == 8
+            and overlay_contract.get("reserved_bounds") == secondary_reserved_bounds
+        )
+        title_clearance = (
+            title_bounds[1] - secondary_reserved_bounds[3]
+            if title_bounds_valid
+            else None
+        )
         checks = {
             "layout_version": metadata.get("layout_version") == current_version,
             "layout_generator_sha256": (
@@ -317,6 +347,19 @@ def validate_current_wide_compositions(
             "sleeve": metadata.get("sleeve") == expected_sleeve,
             "title_block_x": (
                 metadata.get("title_block_x") == title_block_x_by_style[visual_style]
+            ),
+            "title_block_y": metadata.get("title_block_y") == title_block_y,
+            "title_bounds": title_bounds_valid,
+            "secondary_overlay_contract": overlay_contract_valid,
+            "secondary_reserved_bounds": (
+                metadata.get("secondary_reserved_bounds")
+                == secondary_reserved_bounds
+            ),
+            "title_secondary_no_collision": (
+                title_bounds_valid
+                and title_clearance >= minimum_title_clearance_px
+                and metadata.get("title_secondary_clearance_px") == title_clearance
+                and metadata.get("title_secondary_collision") is False
             ),
             "bottom_panel": metadata.get("bottom_panel") == [20, 576, 1900, 1050],
             "outer_right_panel_removed": (
@@ -348,6 +391,11 @@ def validate_current_wide_compositions(
                 "layout_generator_sha256": generator_hash,
                 "visual_style": visual_style,
                 "title_block_x": title_block_x_by_style[visual_style],
+                "title_block_y": title_block_y,
+                "title_bounds": title_bounds,
+                "secondary_reserved_bounds": secondary_reserved_bounds,
+                "title_secondary_clearance_px": title_clearance,
+                "title_secondary_collision": False,
                 "right_panel_visible": False,
                 "outer_right_panel_visible": False,
                 "vinyl_backplate": None,
@@ -726,8 +774,14 @@ def ruby_identity(
         "count": len(rendered_entries),
         "available": bool(rendered_entries),
     }
+    source_values = [(item["text"], item["reading"]) for item in source_entries]
+    rendered_values = [(item["text"], item["reading"]) for item in rendered_entries]
+    available = source["available"] or rendered["available"]
+    consistent = source_values == rendered_values
     return {
-        "status": "pass" if source["available"] and rendered["available"] else "not-available",
+        "status": "pass" if available and consistent else "fail" if available else "not-available",
+        "consistent": consistent,
+        "identity": _identity_digest(source_values) if consistent else None,
         "source": source,
         "rendered": rendered,
     }
@@ -1063,6 +1117,154 @@ def validate_preview_report(
         raise DirectAV1420RenderError(
             f"preview lossless report is invalid: {lossless!r}"
         )
+
+
+def _line_role_identity(line: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (
+        line.get("source_line_index"),
+        line.get("phrase_index"),
+        line.get("voice_role"),
+        line.get("singer_group"),
+    )
+
+
+def _validate_singer_audit(
+    line: Mapping[str, Any],
+    *,
+    known_singer_ids: set[str],
+) -> bool:
+    singer_ids = line.get("effective_singer_ids")
+    runs = line.get("effective_singer_runs")
+    if not isinstance(singer_ids, list) or not isinstance(runs, list):
+        return False
+    if any(not isinstance(value, str) or not value for value in singer_ids):
+        return False
+    if not set(singer_ids) <= known_singer_ids:
+        return False
+    effective = line.get("effective_singer_id")
+    if effective != (singer_ids[0] if len(singer_ids) == 1 else None):
+        return False
+    run_ids = []
+    for run in runs:
+        if not isinstance(run, Mapping):
+            return False
+        singer_id = run.get("singer_id")
+        if singer_id is not None and singer_id not in run_ids:
+            run_ids.append(singer_id)
+    return run_ids == singer_ids
+
+
+def validate_ass_report_generation(
+    task: render_core.RenderTask,
+    ass_path: Path,
+    report: Mapping[str, Any],
+    *,
+    require_current_sources: bool,
+) -> dict[str, Any]:
+    """Validate one ASS/report pair as the same current render generation."""
+
+    font_family = str(
+        getattr(
+            task,
+            "font_family",
+            getattr(render_core, "FONT_FAMILY", "HarmonyOS Sans SC"),
+        )
+    )
+    ass_gate = validate_ass_for_render(ass_path, font_family)
+    if not ass_gate.get("ok"):
+        raise DirectAV1420RenderError(f"ASS validation failed: {ass_gate}")
+
+    ass_report = report.get("ass")
+    if not isinstance(ass_report, Mapping):
+        raise DirectAV1420RenderError("renderer report has no ASS generation facts")
+    reported_ass = ass_report.get("ass")
+    if not isinstance(reported_ass, str) or Path(reported_ass).resolve() != ass_path.resolve():
+        raise DirectAV1420RenderError(
+            f"ASS/report generation path mismatch: {reported_ass!r} != {ass_path}"
+        )
+    current_sug_hash = sha256_file(task.sug_path)
+    if ass_report.get("sug_hash") != current_sug_hash:
+        raise DirectAV1420RenderError("ASS report sug_hash is stale")
+    ruby_gate = ass_report.get("ruby_consistency_gate")
+    if not isinstance(ruby_gate, Mapping) or ruby_gate.get("status") != "pass":
+        raise DirectAV1420RenderError("ASS report ruby consistency did not pass")
+    if ruby_gate.get("sug_hash") != current_sug_hash or any(
+        ruby_gate.get(key) != "canonical-sug" for key in ("sug", "ass", "report")
+    ):
+        raise DirectAV1420RenderError("ASS report ruby consistency is stale")
+
+    singer_mapping = ass_report.get("singer_color_mapping")
+    lines = ass_report.get("lines")
+    secondary_lines = ass_report.get("secondary_lines")
+    if not isinstance(singer_mapping, list) or not isinstance(lines, list) or not isinstance(
+        secondary_lines, list
+    ):
+        raise DirectAV1420RenderError("ASS report lacks singer/line role evidence")
+    known_singer_ids = {
+        str(item["singer_id"])
+        for item in singer_mapping
+        if isinstance(item, Mapping) and item.get("singer_id")
+    }
+    all_lines = [*lines, *secondary_lines]
+    if any(
+        not isinstance(line, Mapping)
+        or not _validate_singer_audit(line, known_singer_ids=known_singer_ids)
+        for line in all_lines
+    ):
+        raise DirectAV1420RenderError("ASS report singer role mapping is inconsistent")
+
+    source_mapping = ass_report.get("source_sentence_to_display_phrases")
+    if not isinstance(source_mapping, list):
+        raise DirectAV1420RenderError("ASS report lacks source/display role mapping")
+    expected_secondary: list[tuple[Any, ...]] = []
+    for item in source_mapping:
+        if not isinstance(item, Mapping):
+            raise DirectAV1420RenderError("ASS report has malformed source role mapping")
+        phrases = item.get("display_phrases")
+        if not isinstance(phrases, list):
+            raise DirectAV1420RenderError("ASS report has malformed display phrase mapping")
+        if item.get("voice_role") is not None:
+            expected_secondary.extend(
+                (
+                    item.get("source_line_index"),
+                    phrase_index,
+                    item.get("voice_role"),
+                    item.get("singer_group"),
+                )
+                for phrase_index in range(len(phrases))
+            )
+    actual_secondary = [
+        _line_role_identity(line)
+        for line in secondary_lines
+        if isinstance(line, Mapping)
+    ]
+    if actual_secondary != expected_secondary:
+        raise DirectAV1420RenderError(
+            "ASS report secondary_lines count or role mapping is inconsistent"
+        )
+    layout_contract = ass_report.get("layout_contract")
+    secondary_contract = (
+        layout_contract.get("secondary") if isinstance(layout_contract, Mapping) else None
+    )
+    if not isinstance(secondary_contract, Mapping) or secondary_contract.get(
+        "line_count"
+    ) != len(secondary_lines):
+        raise DirectAV1420RenderError("ASS report secondary line count is stale")
+    if secondary_lines:
+        secondary_ass = ass_gate.get("secondary")
+        if not isinstance(secondary_ass, Mapping) or not (
+            secondary_ass.get("present") and secondary_ass.get("style_pair")
+        ):
+            raise DirectAV1420RenderError(
+                "secondary role requires Secondary and SecondaryGlow ASS styles"
+            )
+
+    ruby = ruby_identity(task, report)
+    if ruby.get("status") == "fail":
+        raise DirectAV1420RenderError("SUG/rendered ruby content is inconsistent")
+    if require_current_sources:
+        _validate_report_sources(report, task, allow_stale_paths=False)
+    return ass_gate
 
 
 def default_ffmpeg() -> Path:
@@ -1852,14 +2054,17 @@ def render_one(
                 f"(returncode={completed.returncode})\n"
                 f"{completed.stderr[-2500:] or completed.stdout[-1000:]}"
             )
-        ass_gate = render_core._validate_ass_file(temporary_ass, task.profile)
-        if not ass_gate.get("ok"):
-            raise DirectAV1420RenderError(f"ASS validation failed: {ass_gate}")
         preview_report = _read_json(temporary_report)
         validate_preview_report(
             preview_report,
             av1_cq=av1_cq,
             lossless_companion=lossless_companion,
+        )
+        validate_ass_report_generation(
+            task,
+            temporary_ass,
+            preview_report,
+            require_current_sources=False,
         )
         media = verify_av1_420_output(
             temporary_video,
@@ -1936,6 +2141,13 @@ def render_one(
         )
 
         def verify_published_generation() -> None:
+            published_report = _read_json(task.direct_report)
+            validate_ass_report_generation(
+                task,
+                task.ass_output,
+                published_report,
+                require_current_sources=True,
+            )
             published_media = verify_av1_420_output(task.video_output, ffmpeg=ffmpeg)
             if not published_media.get("ok"):
                 raise DirectAV1420RenderError(
@@ -2065,9 +2277,12 @@ def collect_existing_results(
             task,
             allow_stale_paths=allow_stale_durable_paths,
         )
-        ass_gate = render_core._validate_ass_file(task.ass_output, task.profile)
-        if not ass_gate.get("ok"):
-            raise DirectAV1420RenderError(f"published ASS failed validation: {ass_gate}")
+        validate_ass_report_generation(
+            task,
+            task.ass_output,
+            report,
+            require_current_sources=not allow_stale_durable_paths,
+        )
         actual_libass_probe = probe_libass_font(
             (ffmpeg or default_ffmpeg()).resolve(),
             task.fonts_dir,

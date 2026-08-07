@@ -57,6 +57,26 @@ uv run --no-sync python --version
 
 当前宽屏构图为`wide-layout-v5/no-right-panels`：黑胶卡`(40,30,340,402)`，footer底部留白`12`，底部字幕面板从`y=576`开始。右侧大框和黑胶小背板均不存在。频谱版本使用安全区域`(736,226,1168,348)`，水平辉光余量64 px，上下辉光余量56 px，柱体上下安全余量8 px。
 
+## 共享单曲workflow
+
+共享一键入口为`scripts/run_karaoke_japanese_workflow.py`。
+`--visual-style vinyl|spectrum`默认使用`vinyl`，每次运行都必须提供不存在的全新`--output-dir`：
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
+  --sug <project.sug> --audio <post-mix-audio> `
+  --composition <composition-png> --output-dir <new-output-dir> `
+  --title <title> --artist <artist> `
+  --album-title <album-title> --album-artist <album-artist> `
+  --visual-style vinyl --vinyl <canonical-vinyl-png>
+```
+
+频谱使用`--visual-style spectrum`并省略`--vinyl`；可选的
+`--spectrum-color RRGGBB`和`--progress-color RRGGBB`只在频谱模式有效。黑胶的`--vinyl`是身份输入；workflow会在新输出目录中重新生成并校验当前旋转资源，再把生成资源传给渲染。频谱不要求、不探测、不生成、不传递也不报告vinyl。
+
+workflow先独立写入`karaoke-preflight.ass`，再在MP4渲染阶段写入最终
+`karaoke.ass`，并要求两者SHA-256身份一致。默认使用完整时长且只生成MP4；`--lossless-companion`和`--full-decode`是MKV与full-decode诊断的显式opt-in。专辑/批量direct renderer仍仅支持vinyl，不能把它写成支持频谱的路径。
+
 ## 安装文件
 
 公开工作流入口为`scripts/run_karaoke_japanese_workflow.py`，由`scripts/karaoke_workflow.py`协调。共享代码位于`karaoke_common/`，日语布局代码位于`karaoke_japanese/`。

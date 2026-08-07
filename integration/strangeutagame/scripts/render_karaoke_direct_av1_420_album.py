@@ -248,8 +248,22 @@ def validate_current_vinyl_assets(
 
 def validate_current_wide_compositions(
     tasks: Iterable[render_core.RenderTask],
+    *,
+    visual_style: str = "vinyl",
 ) -> list[dict[str, Any]]:
-    """Reject wide vinyl compositions built with an obsolete panel layout."""
+    """Reject wide compositions built for another style or obsolete layout."""
+
+    sleeve_by_style = {
+        "vinyl": {"x": 40, "y": 30, "width": 340, "height": 402},
+        "spectrum": {"x": 40, "y": 30, "width": 460, "height": 522},
+    }
+    title_block_x_by_style = {"vinyl": 430, "spectrum": 800}
+    try:
+        expected_sleeve = sleeve_by_style[visual_style]
+    except KeyError as error:
+        raise DirectAV1420RenderError(
+            f"unsupported wide visual style: {visual_style!r}"
+        ) from error
 
     if not WIDE_ARTWORK_GENERATOR.is_file():
         raise DirectAV1420RenderError(
@@ -293,15 +307,17 @@ def validate_current_wide_compositions(
                 f"wide composition metadata must be an object: {metadata_path}"
             )
         actual_hash = sha256_file(composition)
-        expected_sleeve = {"x": 40, "y": 30, "width": 340, "height": 402}
         checks = {
             "layout_version": metadata.get("layout_version") == current_version,
             "layout_generator_sha256": (
                 metadata.get("layout_generator_sha256") == generator_hash
             ),
             "composition_sha256": metadata.get("composition_sha256") == actual_hash,
-            "visual_style": metadata.get("visual_style") == "vinyl",
+            "visual_style": metadata.get("visual_style") == visual_style,
             "sleeve": metadata.get("sleeve") == expected_sleeve,
+            "title_block_x": (
+                metadata.get("title_block_x") == title_block_x_by_style[visual_style]
+            ),
             "bottom_panel": metadata.get("bottom_panel") == [20, 576, 1900, 1050],
             "outer_right_panel_removed": (
                 metadata.get("right_panel") is None
@@ -330,6 +346,8 @@ def validate_current_wide_compositions(
                 "metadata": str(metadata_path),
                 "layout_version": current_version,
                 "layout_generator_sha256": generator_hash,
+                "visual_style": visual_style,
+                "title_block_x": title_block_x_by_style[visual_style],
                 "right_panel_visible": False,
                 "outer_right_panel_visible": False,
                 "vinyl_backplate": None,

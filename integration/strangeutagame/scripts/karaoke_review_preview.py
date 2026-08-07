@@ -3221,7 +3221,7 @@ def render_review_clip(
         ),
         "hevc_cq": hevc_cq if video_encoder == "hevc_nvenc_444" else None,
         "visual_style": visual_style,
-        "vinyl_motion": vinyl_motion,
+        "vinyl_motion": vinyl_motion if visual_style == "vinyl" else None,
         "vinyl_asset": vinyl_asset,
         "spectrum_color": f"#{color}" if visual_style == "spectrum" else None,
         "spectrum_geometry": (

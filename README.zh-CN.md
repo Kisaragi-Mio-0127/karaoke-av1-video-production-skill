@@ -19,6 +19,7 @@
 - 日文注音验证提供`optional`、`required`和`off`三种模式，默认为`optional`。
 - 通过`scripts/pitch_shift_audio.py`对完整混音变调，使用Rubber Band R3 Finer并默认保持共振峰。
 - 通过JSON提供专辑配置以及歌曲专用的显示、时间和注音决定。
+- 共享单曲一键渲染分别生成preflight/final ASS，并要求ASS身份一致。
 
 ## 安装
 
@@ -81,6 +82,28 @@ uv run --no-sync python "$skillRoot/scripts/check_karaoke_environment.py" --targ
 $env:KARAOKE_ALBUM_MANIFEST = (Resolve-Path .\config\album.json).Path
 uv run --no-sync python scripts/karaoke_timing.py --manifest $env:KARAOKE_ALBUM_MANIFEST --allow-partial-manifest
 ```
+
+## 共享单曲命令
+
+内置一键入口为`scripts/run_karaoke_japanese_workflow.py`，默认使用
+`--visual-style vinyl`；两种视觉风格都必须使用不存在的全新输出目录：
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
+  --sug <project.sug> --audio <post-mix-audio> `
+  --composition <composition-png> --output-dir <new-output-dir> `
+  --title <title> --artist <artist> `
+  --album-title <album-title> --album-artist <album-artist> `
+  --visual-style vinyl --vinyl <canonical-vinyl-png>
+```
+
+频谱使用`--visual-style spectrum`并省略`--vinyl`；可选添加
+`--spectrum-color RRGGBB --progress-color RRGGBB`。黑胶的`--vinyl`只是规范身份输入；workflow会在新输出目录中重新生成并校验当前旋转黑胶，再把生成资源传给renderer。频谱不要求、不探测、不生成、不传递也不报告vinyl。
+
+workflow先独立写入`karaoke-preflight.ass`，再在渲染阶段写入最终
+`karaoke.ass`；同一SUG/配置下两者SHA-256身份不一致就失败。默认使用完整时长，并且只生成带AAC-LC音频的MP4。`--smoke-duration`、`--lossless-companion`和`--full-decode`都必须显式选择；默认运行不生成MKV，也不执行full decode。
+
+专辑/批量direct renderer当前仍是仅支持vinyl的路径。共享单曲workflow或预览路径的频谱能力不等于专辑renderer支持频谱。
 
 ## 参考文档
 

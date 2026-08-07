@@ -7,9 +7,30 @@
 ## 选择模板
 
 - 黑胶旋转布局使用`--visual-style vinyl`，预览时另外提供`--vinyl <vinyl-png>`。
-- 发光实时频谱布局使用`--visual-style spectrum`，省略`--vinyl`；当前CLI对多余的黑胶参数会忽略。
+- 发光实时频谱布局使用`--visual-style spectrum`，省略`--vinyl`。频谱不要求、不探测、不生成、不传递也不报告vinyl资源。
 - 两种效果不能出现在同一输出中，接受的变体使用不同文件名。
 - 模板、构图脚本、频谱行为或布局常量变化后，先渲染并检查短预览，再做全量编码。
+
+## 共享单曲workflow
+
+共享一键入口为`scripts/run_karaoke_japanese_workflow.py`，默认使用
+`--visual-style vinyl`；两种风格都必须使用不存在的全新`--output-dir`：
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
+  --sug <project.sug> --audio <post-mix-audio> `
+  --composition <composition-png> --output-dir <new-output-dir> `
+  --title <title> --artist <artist> `
+  --album-title <album-title> --album-artist <album-artist> `
+  --visual-style vinyl --vinyl <canonical-vinyl-png>
+```
+
+频谱将最后的风格和黑胶参数替换为`--visual-style spectrum`；
+`--spectrum-color RRGGBB`和`--progress-color RRGGBB`可选。黑胶要求
+`--vinyl`作为规范身份输入，在新输出目录中重新生成并校验当前旋转黑胶，再把生成资源传给renderer。频谱完全不处理也不报告vinyl。
+
+workflow先独立写入`karaoke-preflight.ass`，再在MP4渲染阶段写入最终
+`karaoke.ass`，并要求两者SHA-256身份一致。默认使用完整时长且只生成MP4；`--lossless-companion`和`--full-decode`分别是MKV与full-decode诊断的显式opt-in。专辑/批量direct renderer仍仅支持vinyl，不能把这里的频谱能力写成专辑renderer能力。
 
 ## 构图与渲染
 
@@ -36,7 +57,7 @@ uv run --no-sync python scripts/karaoke_review_preview.py `
   --visual-style <vinyl-or-spectrum> <vinyl-only-arguments>
 ```
 
-黑胶替换占位参数为新生成的`--vinyl <current-vinyl-png>`，记录`vinyl_sha256`并把准确路径显式传给renderer；禁止静默复用规范或旧`vinyl.png`。频谱省略它，可加`--spectrum-color RRGGBB --progress-color RRGGBB`。使用时间覆盖时同时传入`--timing-overrides <json>`和`--song-id <id>`。默认全节目AV1 4:2:0直出档为1920x1080、30fps、yuv420p、BT.709、AV1 NVENC CQ38、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、AQ strength8、GOP240，并且必须先通过硬件探测。默认兼容MP4使用AAC-LC 320k，普通测试/重渲染只产MP4。MKV严格opt-in：只有探测源为FLAC或PCM WAV且显式传入`--lossless-output <new-lossless-output-mkv>`（或workflow的`--lossless-companion`）时才生成；MP3/AAC请求必须拒绝。不要显示耗时或播放控制按钮。
+黑胶替换占位参数为新生成的`--vinyl <current-vinyl-png>`，记录`vinyl_sha256`并把准确路径显式传给renderer；禁止静默复用规范或旧`vinyl.png`。频谱省略它，可加`--spectrum-color RRGGBB --progress-color RRGGBB`。使用时间覆盖时同时传入`--timing-overrides <json>`和`--song-id <id>`。默认全节目AV1 4:2:0直出档为1920x1080、30fps、yuv420p、BT.709、AV1 NVENC CQ38、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、AQ strength8、GOP240，并且必须先通过硬件探测。默认兼容MP4使用AAC-LC 320k，普通测试/重渲染只产MP4。MKV严格opt-in：只有探测源为FLAC或PCM WAV且显式传入`--lossless-output <new-lossless-output-mkv>`（或workflow的`--lossless-companion`）时才生成；MP3/AAC请求必须拒绝。不要显示耗时或播放控制按钮。以上覆盖规则仅适用于独立预览；共享单曲workflow无论风格都必须使用全新的`--output-dir`。
 
 ## 当前构图约定
 

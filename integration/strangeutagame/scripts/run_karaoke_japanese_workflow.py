@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the isolated Japanese karaoke workflow with rotating current vinyl."""
+"""Run the isolated Japanese karaoke workflow with vinyl or spectrum visuals."""
 
 from __future__ import annotations
 

@@ -36,7 +36,7 @@
     {
       "path": "karaoke_japanese/__init__.py",
       "category": "package-file",
-      "reason": "Japanese layout package initializer for the rotating-vinyl workflow."
+      "reason": "Japanese layout package initializer for the selectable wide-visual workflow."
     },
     {
       "path": "karaoke_japanese/layout.py",
@@ -93,7 +93,7 @@
     {
       "path": "karaoke_workflow.py",
       "category": "transitive-runtime",
-      "reason": "Runs the isolated language-routed workflow, enforces current wide-composition identity, regenerates rotating vinyl, and keeps MKV plus full-decode diagnostics explicit opt-ins."
+      "reason": "Runs the isolated language-routed workflow, enforces the selected wide-composition identity, conditionally regenerates rotating vinyl, and keeps MKV plus full-decode diagnostics explicit opt-ins."
     },
     {
       "path": "karaoke_review_preview.py",

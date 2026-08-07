@@ -57,6 +57,35 @@ The vinyl remains rotating and is regenerated for formal and test runs with `dir
 
 The current wide composition is `wide-layout-v5/no-right-panels`: vinyl card `(40,30,340,402)`, footer bottom padding `12`, and lower subtitle panel beginning at `y=576`. The outer right panel and compact vinyl backplate are absent. The spectrum variant uses clip-safe region `(736,226,1168,348)` with 64 px horizontal glow clearance, 56 px vertical glow clearance, and 8 px bar clearance at the top and bottom.
 
+## Shared single-track workflow
+
+The shared one-click entry is `scripts/run_karaoke_japanese_workflow.py`.
+`--visual-style vinyl|spectrum` defaults to `vinyl`, and every run requires a
+new, non-existent `--output-dir`:
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
+  --sug <project.sug> --audio <post-mix-audio> `
+  --composition <composition-png> --output-dir <new-output-dir> `
+  --title <title> --artist <artist> `
+  --album-title <album-title> --album-artist <album-artist> `
+  --visual-style vinyl --vinyl <canonical-vinyl-png>
+```
+
+For spectrum, use `--visual-style spectrum` and omit `--vinyl`; the optional
+`--spectrum-color RRGGBB` and `--progress-color RRGGBB` flags are valid only
+there. Vinyl uses `--vinyl` as an identity input, rebuilds and validates the
+current rotating asset inside the new output directory, and passes that
+generated asset to rendering. Spectrum does not require, probe, generate,
+pass, or report vinyl.
+
+The workflow writes an independent `karaoke-preflight.ass` first and the
+final `karaoke.ass` during MP4 rendering, then requires their SHA-256
+identities to match. Full duration and MP4-only output are defaults;
+`--lossless-companion` and `--full-decode` are explicit opt-ins for MKV and
+full-decode diagnostics. The album/batch direct renderer remains vinyl-only
+and must not be documented as a spectrum-capable path.
+
 ## Installed files
 
 The public workflow entry is `scripts/run_karaoke_japanese_workflow.py`, coordinated by `scripts/karaoke_workflow.py`. Shared code lives under `karaoke_common/`, while Japanese layout code lives under `karaoke_japanese/`.

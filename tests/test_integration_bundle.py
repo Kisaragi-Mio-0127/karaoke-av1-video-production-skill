@@ -279,7 +279,11 @@ class IntegrationBundleTests(unittest.TestCase):
         workflow_source = (SCRIPTS / "karaoke_workflow.py").read_text(encoding="utf-8")
         self.assertIn("cover_source_audio", workflow_source)
         self.assertIn("regenerate-current-vinyl", workflow_source)
-        self.assertIn('"vinyl_motion": "rotate"', workflow_source)
+        self.assertIn('VISUAL_STYLES = ("vinyl", "spectrum")', workflow_source)
+        self.assertIn('"--visual-style"', workflow_source)
+        self.assertIn('"rotate" if is_vinyl else None', workflow_source)
+        self.assertIn('output_dir / "karaoke-preflight.ass"', workflow_source)
+        self.assertIn("preflight and final ASS identities differ", workflow_source)
         self.assertIn("--lossless-companion", workflow_source)
         self.assertIn("--lossless-output", workflow_source)
         self.assertIn('else "not-requested"', workflow_source)
@@ -309,6 +313,8 @@ class IntegrationBundleTests(unittest.TestCase):
         for token in (
             "full_decode: bool = False",
             "validate_workflow_composition(config)",
+            "validate_renderer_report(",
+            "visual_style=config.visual_style",
             'if config.full_decode:',
             '"requested": requested',
             '"required": False',
@@ -371,6 +377,8 @@ class IntegrationBundleTests(unittest.TestCase):
             SCRIPTS / "render_karaoke_direct_av1_420_album.py"
         ).read_text(encoding="utf-8")
         self.assertIn("validate_current_wide_compositions", direct_renderer_source)
+        self.assertIn("title_block_x_by_style", direct_renderer_source)
+        self.assertIn('"spectrum": {"x": 40, "y": 30, "width": 460', direct_renderer_source)
         self.assertIn('"outer_right_panel_removed"', direct_renderer_source)
         self.assertIn('"vinyl_backplate_absent"', direct_renderer_source)
         self.assertIn('"wide_compositions": wide_compositions', direct_renderer_source)
@@ -380,6 +388,10 @@ class IntegrationBundleTests(unittest.TestCase):
         )
         self.assertIn('"spectrum_glow_top_padding_px": 56', preview_source)
         self.assertIn('"spectrum_clip_safe_geometry":', preview_source)
+        self.assertIn(
+            '"vinyl_motion": vinyl_motion if visual_style == "vinyl" else None',
+            preview_source,
+        )
 
     def test_pitch_tool_and_dual_audio_contract_are_bundled(self) -> None:
         top_level = ROOT / "scripts" / "pitch_shift_audio.py"

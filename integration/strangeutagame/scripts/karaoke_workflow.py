@@ -56,6 +56,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PREVIEW_SCRIPT = REPO_ROOT / "scripts" / "karaoke_review_preview.py"
 WORKFLOW_REPORT_NAME = "workflow-report.json"
 TEST_ROOT_MARKER = ".karaoke-workflow-test-root"
+VISUAL_STYLES = ("vinyl", "spectrum")
 
 
 class KaraokeWorkflowError(RuntimeError):
@@ -67,7 +68,7 @@ class WorkflowConfig:
     sug: Path
     audio: Path
     composition: Path
-    canonical_vinyl: Path
+    canonical_vinyl: Path | None
     output_dir: Path
     language: str
     layout: str
@@ -80,6 +81,9 @@ class WorkflowConfig:
     font_file: Path = SHARED_FONT_FILE
     smoke_duration: float | None = None
     pronunciation_validation: str = "optional"
+    visual_style: str = "vinyl"
+    spectrum_color: str | None = None
+    progress_color: str | None = None
     cover_url: str = ""
     allow_network: bool = False
     ffmpeg: Path | None = None
@@ -120,6 +124,21 @@ def _has_test_root_marker(path: Path) -> bool:
     return False
 
 
+def validate_visual_contract(config: WorkflowConfig) -> None:
+    if config.visual_style not in VISUAL_STYLES:
+        raise KaraokeWorkflowError(
+            f"unsupported visual style: {config.visual_style!r}"
+        )
+    if config.visual_style == "vinyl" and config.canonical_vinyl is None:
+        raise KaraokeWorkflowError("--vinyl is required when --visual-style=vinyl")
+    if config.visual_style == "vinyl" and (
+        config.spectrum_color is not None or config.progress_color is not None
+    ):
+        raise KaraokeWorkflowError(
+            "--spectrum-color/--progress-color require --visual-style=spectrum"
+        )
+
+
 def validate_output_dir(config: WorkflowConfig) -> Path:
     output_dir = config.output_dir.expanduser().resolve()
     if output_dir.exists():
@@ -132,13 +151,15 @@ def validate_output_dir(config: WorkflowConfig) -> Path:
     output_canonical_root = _nearest_deliverable_root(output_dir)
     if output_canonical_root is not None:
         canonical_roots.add(output_canonical_root)
-    for source in (
+    sources = [
         config.sug,
         config.audio,
         config.cover_source_audio or config.audio,
         config.composition,
-        config.canonical_vinyl,
-    ):
+    ]
+    if config.visual_style == "vinyl" and config.canonical_vinyl is not None:
+        sources.append(config.canonical_vinyl)
+    for source in sources:
         root = _nearest_deliverable_root(source)
         if root is not None:
             canonical_roots.add(root)
@@ -219,13 +240,13 @@ def build_video_stream_hash_command(ffmpeg: Path, path: Path) -> list[str]:
 def build_ass_command(
     config: WorkflowConfig,
     *,
-    generated_vinyl: Path,
+    generated_vinyl: Path | None,
     ass_path: Path,
     report_path: Path,
     output_path: Path,
     duration: float,
 ) -> list[str]:
-    return [
+    command = [
         sys.executable,
         str(PREVIEW_SCRIPT),
         "--sug",
@@ -234,8 +255,6 @@ def build_ass_command(
         str(config.audio.resolve()),
         "--composition",
         str(config.composition.resolve()),
-        "--vinyl",
-        str(generated_vinyl.resolve()),
         "--fonts-dir",
         str(config.fonts_dir.resolve()),
         "--font-file",
@@ -253,19 +272,35 @@ def build_ass_command(
         "--layout",
         config.layout,
         "--visual-style",
-        "vinyl",
-        "--vinyl-motion",
-        "rotate",
+        config.visual_style,
+    ]
+    if config.visual_style == "vinyl":
+        if generated_vinyl is None:
+            raise KaraokeWorkflowError("vinyl workflow did not provide generated artwork")
+        command.extend(
+            ["--vinyl", str(generated_vinyl.resolve()), "--vinyl-motion", "rotate"]
+        )
+    elif generated_vinyl is not None:
+        raise KaraokeWorkflowError("spectrum workflow must not receive vinyl artwork")
+    if config.visual_style == "spectrum":
+        if config.spectrum_color is not None:
+            command.extend(["--spectrum-color", config.spectrum_color])
+        if config.progress_color is not None:
+            command.extend(["--progress-color", config.progress_color])
+    command.extend(
+        [
         "--pronunciation-validation",
         config.pronunciation_validation,
         "--ass-only",
-    ]
+        ]
+    )
+    return command
 
 
 def build_render_command(
     config: WorkflowConfig,
     *,
-    generated_vinyl: Path,
+    generated_vinyl: Path | None,
     ass_path: Path,
     report_path: Path,
     output_path: Path,
@@ -459,12 +494,90 @@ def validate_workflow_composition(config: WorkflowConfig) -> dict[str, Any]:
 
     task = SimpleNamespace(profile="wide", composition_path=config.composition)
     try:
-        results = validate_current_wide_compositions([task])
+        results = validate_current_wide_compositions(
+            [task], visual_style=config.visual_style
+        )
     except DirectAV1420RenderError as error:
         raise KaraokeWorkflowError(str(error)) from error
     if len(results) != 1:
         raise KaraokeWorkflowError("current wide composition gate returned no result")
     return results[0]
+
+
+def validate_renderer_report(
+    config: WorkflowConfig,
+    report_path: Path,
+    *,
+    generated_vinyl: Path | None,
+) -> dict[str, Any]:
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise KaraokeWorkflowError(f"invalid renderer report: {error}") from error
+    video = payload.get("video") if isinstance(payload, dict) else None
+    if not isinstance(video, dict):
+        raise KaraokeWorkflowError("renderer report has no video object")
+    checks: dict[str, bool] = {
+        "visual_style": video.get("visual_style") == config.visual_style,
+    }
+    if config.visual_style == "vinyl":
+        vinyl_asset = video.get("vinyl_asset")
+        checks.update(
+            {
+                "vinyl_motion_rotate": video.get("vinyl_motion") == "rotate",
+                "vinyl_asset_present": isinstance(vinyl_asset, dict),
+                "vinyl_path": (
+                    generated_vinyl is not None
+                    and isinstance(vinyl_asset, dict)
+                    and vinyl_asset.get("path") == str(generated_vinyl.resolve())
+                ),
+                "vinyl_sha256": (
+                    generated_vinyl is not None
+                    and isinstance(vinyl_asset, dict)
+                    and vinyl_asset.get("sha256") == sha256_file(generated_vinyl)
+                ),
+            }
+        )
+    else:
+        checks.update(
+            {
+                "vinyl_motion_absent": video.get("vinyl_motion") is None,
+                "vinyl_asset_absent": video.get("vinyl_asset") is None,
+                "spectrum_geometry": video.get("spectrum_geometry")
+                == {"x": 800, "y": 290, "width": 1040, "height": 220},
+                "spectrum_bar_count": video.get("spectrum_bar_count") == 80,
+                "spectrum_clip_safe_geometry": video.get(
+                    "spectrum_clip_safe_geometry"
+                )
+                == {"x": 736, "y": 226, "width": 1168, "height": 348},
+                "spectrum_bar_top_clearance": video.get(
+                    "spectrum_bar_top_clearance_px"
+                )
+                == 8,
+                "spectrum_bar_bottom_clearance": video.get(
+                    "spectrum_bar_bottom_clearance_px"
+                )
+                == 8,
+                "spectrum_glow_top_padding": video.get(
+                    "spectrum_glow_top_padding_px"
+                )
+                == 56,
+                "spectrum_glow_bottom_padding": video.get(
+                    "spectrum_glow_bottom_padding_px"
+                )
+                == 56,
+                "peak_hold": isinstance(video.get("peak_hold"), dict)
+                and video["peak_hold"].get("enabled") is True,
+                "progress_time_hidden": isinstance(video.get("progress_bar"), dict)
+                and video["progress_bar"].get("show_time") is False,
+            }
+        )
+    failed = [name for name, ok in checks.items() if not ok]
+    if failed:
+        raise KaraokeWorkflowError(
+            "renderer visual-style report gate failed: " + ", ".join(failed)
+        )
+    return {"visual_style": config.visual_style, "checks": checks}
 
 
 def _full_decode_report(
@@ -497,17 +610,24 @@ def run_workflow(
     artwork_builder: Callable[..., dict[str, Any]] = build_artwork,
     media_verifier: Callable[[Path, Path], dict[str, Any]] = inspect_av1_420_media,
 ) -> dict[str, Any]:
+    validate_visual_contract(config)
     output_dir = validate_output_dir(config)
-    cover_source_audio = (config.cover_source_audio or config.audio).resolve()
+    is_vinyl = config.visual_style == "vinyl"
+    cover_source_audio = (
+        (config.cover_source_audio or config.audio).resolve() if is_vinyl else None
+    )
     input_paths = {
         "sug": config.sug,
         "delivery_audio": config.audio,
-        "cover_source_audio": cover_source_audio,
         "composition": config.composition,
-        "canonical_vinyl": config.canonical_vinyl,
         "fonts_dir": config.fonts_dir,
         "font_file": config.font_file,
     }
+    if is_vinyl:
+        if cover_source_audio is None or config.canonical_vinyl is None:
+            raise KaraokeWorkflowError("vinyl workflow inputs are incomplete")
+        input_paths["cover_source_audio"] = cover_source_audio
+        input_paths["canonical_vinyl"] = config.canonical_vinyl
     identities = {
         name: _input_identity(path)
         for name, path in input_paths.items()
@@ -524,7 +644,8 @@ def run_workflow(
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "language": config.language,
         "layout": config.layout,
-        "vinyl_motion": "rotate",
+        "visual_style": config.visual_style,
+        "vinyl_motion": "rotate" if is_vinyl else None,
         "full_decode": _full_decode_report(requested=config.full_decode),
         "lossless_companion": {
             "requested": config.lossless_companion,
@@ -545,16 +666,19 @@ def run_workflow(
             {
                 "name": "current-wide-composition",
                 "status": "ok",
+                "visual_style": config.visual_style,
                 "gate": composition_gate,
             }
         )
+        probe_paths = {
+            "audio": config.audio,
+            "composition": config.composition,
+        }
+        if is_vinyl and config.canonical_vinyl is not None:
+            probe_paths["canonical_vinyl"] = config.canonical_vinyl
         probes = {
             name: _probe_with_ffmpeg(ffmpeg, path.resolve(), runner=runner)
-            for name, path in {
-                "audio": config.audio,
-                "composition": config.composition,
-                "canonical_vinyl": config.canonical_vinyl,
-            }.items()
+            for name, path in probe_paths.items()
         }
         full_duration = _duration_from_probe(probes["audio"])
         lossless_source_codec = (
@@ -571,38 +695,57 @@ def run_workflow(
             {"name": "inventory", "status": "ok", "probes": probes}
         )
 
-        artwork_dir = _assert_output_path(output_dir / "artwork-current", output_dir)
-        artwork = artwork_builder(
-            cover_source_audio,
-            artwork_dir,
-            config.title,
-            config.artist,
-            config.cover_url,
-            config.fonts_dir.resolve(),
-            allow_network=config.allow_network,
-            album_title=config.album_title,
-        )
-        generated_vinyl = _assert_output_path(artwork_dir / "vinyl.png", output_dir)
-        if not generated_vinyl.is_file():
-            raise KaraokeWorkflowError("current artwork builder did not create vinyl.png")
-        if generated_vinyl.resolve() == config.canonical_vinyl.resolve():
-            raise KaraokeWorkflowError("canonical vinyl was reused instead of regenerated")
-        provenance = validate_vinyl_provenance(artwork, generated_vinyl)
-        asset_record = {
-            "generator": "scripts.render_vinyl_karaoke.build_artwork",
-            **provenance,
-            "source": artwork.get("source"),
-            "source_sha256": artwork.get("source_sha256"),
-            "cover_source_audio": identities["cover_source_audio"],
-            "delivery_audio": identities["delivery_audio"],
-            "canonical_vinyl_sha256": identities["canonical_vinyl"]["sha256"],
-            "generated_vinyl": _input_identity(generated_vinyl),
-            "silently_reused": False,
-        }
-        report["stages"].append(
-            {"name": "regenerate-current-vinyl", "status": "ok", **asset_record}
-        )
+        generated_vinyl: Path | None = None
+        if is_vinyl:
+            if cover_source_audio is None or config.canonical_vinyl is None:
+                raise KaraokeWorkflowError("vinyl workflow inputs are incomplete")
+            artwork_dir = _assert_output_path(
+                output_dir / "artwork-current", output_dir
+            )
+            artwork = artwork_builder(
+                cover_source_audio,
+                artwork_dir,
+                config.title,
+                config.artist,
+                config.cover_url,
+                config.fonts_dir.resolve(),
+                allow_network=config.allow_network,
+                album_title=config.album_title,
+            )
+            generated_vinyl = _assert_output_path(
+                artwork_dir / "vinyl.png", output_dir
+            )
+            if not generated_vinyl.is_file():
+                raise KaraokeWorkflowError(
+                    "current artwork builder did not create vinyl.png"
+                )
+            if generated_vinyl.resolve() == config.canonical_vinyl.resolve():
+                raise KaraokeWorkflowError(
+                    "canonical vinyl was reused instead of regenerated"
+                )
+            provenance = validate_vinyl_provenance(artwork, generated_vinyl)
+            asset_record = {
+                "generator": "scripts.render_vinyl_karaoke.build_artwork",
+                **provenance,
+                "source": artwork.get("source"),
+                "source_sha256": artwork.get("source_sha256"),
+                "cover_source_audio": identities["cover_source_audio"],
+                "delivery_audio": identities["delivery_audio"],
+                "canonical_vinyl_sha256": identities["canonical_vinyl"]["sha256"],
+                "generated_vinyl": _input_identity(generated_vinyl),
+                "silently_reused": False,
+            }
+            report["stages"].append(
+                {
+                    "name": "regenerate-current-vinyl",
+                    "status": "ok",
+                    **asset_record,
+                }
+            )
 
+        preflight_ass_path = _assert_output_path(
+            output_dir / "karaoke-preflight.ass", output_dir
+        )
         ass_path = _assert_output_path(output_dir / "karaoke.ass", output_dir)
         ass_report_path = _assert_output_path(output_dir / "ass-report.json", output_dir)
         output_path = _assert_output_path(output_dir / "karaoke-av1.mp4", output_dir)
@@ -619,7 +762,7 @@ def run_workflow(
         ass_command = build_ass_command(
             config,
             generated_vinyl=generated_vinyl,
-            ass_path=ass_path,
+            ass_path=preflight_ass_path,
             report_path=ass_report_path,
             output_path=output_path,
             duration=duration,
@@ -627,11 +770,17 @@ def run_workflow(
         ass_result = runner(ass_command)
         if ass_result.returncode != 0:
             raise KaraokeWorkflowError(f"ASS production failed: {ass_result.stderr[-2000:]}")
-        if not ass_path.is_file() or not ass_report_path.is_file():
+        if not preflight_ass_path.is_file() or not ass_report_path.is_file():
             raise KaraokeWorkflowError("ASS production did not create its declared outputs")
-        contract = enforce_language_contract(config, ass_path)
+        preflight_contract = enforce_language_contract(config, preflight_ass_path)
+        preflight_ass_sha256 = sha256_file(preflight_ass_path)
         report["stages"].append(
-            {"name": "ass-report", "status": "ok", "contract": contract}
+            {
+                "name": "ass-report",
+                "status": "ok",
+                "contract": preflight_contract,
+                "preflight_ass_sha256": preflight_ass_sha256,
+            }
         )
 
         render_command = build_render_command(
@@ -646,22 +795,48 @@ def run_workflow(
         rendered = runner(render_command)
         if rendered.returncode != 0:
             raise KaraokeWorkflowError(f"AV1 render failed: {rendered.stderr[-2000:]}")
-        if not output_path.is_file() or not render_report_path.is_file():
+        if (
+            not output_path.is_file()
+            or not ass_path.is_file()
+            or not render_report_path.is_file()
+        ):
             raise KaraokeWorkflowError("AV1 render did not create its declared outputs")
         if lossless_output is not None and not lossless_output.is_file():
             raise KaraokeWorkflowError(
                 "requested lossless companion was not created"
             )
+        final_contract = enforce_language_contract(config, ass_path)
+        final_ass_sha256 = sha256_file(ass_path)
+        if final_ass_sha256 != preflight_ass_sha256:
+            raise KaraokeWorkflowError(
+                "preflight and final ASS identities differ for the same SUG/config"
+            )
+        visual_report_gate = validate_renderer_report(
+            config,
+            render_report_path,
+            generated_vinyl=generated_vinyl,
+        )
         report["stages"].append(
             {
-                "name": "render-av1-mp4",
+                "name": "ass-render-parity",
                 "status": "ok",
-                "duration_seconds": duration,
-                "mode": "smoke" if config.smoke_duration is not None else "full",
-                "vinyl_motion": "rotate",
-                "vinyl_sha256": sha256_file(generated_vinyl),
+                "preflight_ass_sha256": preflight_ass_sha256,
+                "final_ass_sha256": final_ass_sha256,
+                "contract": final_contract,
             }
         )
+        render_stage = {
+            "name": "render-av1-mp4",
+            "status": "ok",
+            "duration_seconds": duration,
+            "mode": "smoke" if config.smoke_duration is not None else "full",
+            "visual_style": config.visual_style,
+            "vinyl_motion": "rotate" if is_vinyl else None,
+            "visual_report_gate": visual_report_gate,
+        }
+        if generated_vinyl is not None:
+            render_stage["vinyl_sha256"] = sha256_file(generated_vinyl)
+        report["stages"].append(render_stage)
 
         final_probe = _probe_with_ffmpeg(ffmpeg, output_path, runner=runner)
         existing_gate = media_verifier(ffmpeg, output_path)
@@ -740,12 +915,14 @@ def run_workflow(
                 ),
             }
         report["outputs"] = {
+            "preflight_ass": _input_identity(preflight_ass_path),
             "ass": _input_identity(ass_path),
             "ass_report": _input_identity(ass_report_path),
             "render_report": _input_identity(render_report_path),
             "video": _input_identity(output_path),
-            "generated_vinyl": _input_identity(generated_vinyl),
         }
+        if generated_vinyl is not None:
+            report["outputs"]["generated_vinyl"] = _input_identity(generated_vinyl)
         if lossless_output is not None:
             report["outputs"]["lossless_video"] = _input_identity(lossless_output)
         report["stages"].append(
@@ -780,12 +957,22 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--composition", type=Path, required=True)
     parser.add_argument(
+        "--visual-style",
+        choices=VISUAL_STYLES,
+        default="vinyl",
+        help="choose exactly one right-side visual effect (default: vinyl)",
+    )
+    parser.add_argument(
         "--vinyl",
         dest="canonical_vinyl",
         type=Path,
-        required=True,
-        help="canonical vinyl identity input; it is inventoried but never reused",
+        help=(
+            "canonical vinyl identity input; required for vinyl, ignored for spectrum, "
+            "and never reused"
+        ),
     )
+    parser.add_argument("--spectrum-color")
+    parser.add_argument("--progress-color")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--title", required=True)
     parser.add_argument("--artist", required=True)
@@ -832,7 +1019,7 @@ def config_from_args(
     pronunciation_validation: str,
 ) -> WorkflowConfig:
     language = normalize_language(language)
-    return WorkflowConfig(
+    config = WorkflowConfig(
         sug=args.sug,
         audio=args.audio,
         cover_source_audio=args.cover_source_audio,
@@ -849,6 +1036,9 @@ def config_from_args(
         font_file=args.font_file,
         smoke_duration=args.smoke_duration,
         pronunciation_validation=pronunciation_validation,
+        visual_style=args.visual_style,
+        spectrum_color=args.spectrum_color,
+        progress_color=args.progress_color,
         cover_url=args.cover_url,
         allow_network=args.allow_network,
         ffmpeg=args.ffmpeg,
@@ -856,6 +1046,8 @@ def config_from_args(
         full_decode=args.full_decode,
         canonical_deliverables=tuple(args.canonical_deliverables),
     )
+    validate_visual_contract(config)
+    return config
 
 
 def print_result(report: dict[str, Any]) -> int:

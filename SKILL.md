@@ -36,6 +36,41 @@ variant must also use the clip-safe geometry documented in
 [wide-visual-templates.md](references/wide-visual-templates.md), leaving top
 and bottom glow clearance so peaks are not clipped.
 
+## Shared single-track workflow
+
+For the bundled single-song one-click route, run
+`scripts/run_karaoke_japanese_workflow.py` from the StrangeUtaGame checkout.
+It accepts `--visual-style vinyl|spectrum` and defaults to `vinyl`. Both
+styles require a new, non-existent `--output-dir` for every run:
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
+  --sug <project.sug> --audio <post-mix-audio> `
+  --composition <composition-png> --output-dir <new-output-dir> `
+  --title <title> --artist <artist> `
+  --album-title <album-title> --album-artist <album-artist> `
+  --visual-style vinyl --vinyl <canonical-vinyl-png>
+```
+
+For `spectrum`, replace the final style and vinyl arguments with
+`--visual-style spectrum`; `--spectrum-color RRGGBB` and
+`--progress-color RRGGBB` are optional. Vinyl requires `--vinyl` as the
+canonical identity input, then rebuilds and validates the current rotating
+vinyl inside the new output directory before rendering. Spectrum does not
+require, probe, generate, pass, or report any vinyl asset.
+
+The workflow first creates an independent `karaoke-preflight.ass` in ASS-only
+mode, then creates the final `karaoke.ass` during MP4 rendering. It compares
+their SHA-256 identities for the same SUG/configuration and fails if they
+differ. Full probed duration and MP4-only output with AAC-LC audio are the
+defaults. Use `--smoke-duration`, `--lossless-companion`, or `--full-decode`
+only as explicit opt-ins; a default run does not create MKV or run a full
+decode.
+
+The album/batch direct renderer (`render_karaoke_direct_av1_420_album.py`)
+remains the current vinyl-only path. Do not document spectrum support for that
+renderer based on the shared single-track workflow or preview path.
+
 Read [subtitle-timing-quality.md](references/subtitle-timing-quality.md) / [中文](references/subtitle-timing-quality.zh-CN.md) when changing phrase segmentation, cue behavior, ruby, MMS-derived timing, highlight release, visual-fit rules, or opening an editable timing project for review.
 
 Read [asr-sug-pitch.md](references/asr-sug-pitch.md) / [中文](references/asr-sug-pitch.zh-CN.md) before using independent ASR evidence, validating a newer StrangeUtaGame/SUG version, or pitch-shifting delivery audio. Use the bundled `scripts/check_sug_compatibility.py` and `scripts/pitch_shift_audio.py` instead of one-off commands.

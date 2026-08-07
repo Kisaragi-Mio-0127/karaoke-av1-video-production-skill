@@ -19,6 +19,7 @@ The bundled workflow uses Japanese (`ja`) and starts from `run_karaoke_japanese_
 - Japanese pronunciation validation modes `optional`, `required`, and `off`, with `optional` as the default.
 - Complete-mix pitch shifting through `scripts/pitch_shift_audio.py` with Rubber Band R3 Finer and formant preservation.
 - JSON-based album configuration and song-specific display, timing, and ruby decisions.
+- Shared single-track one-click rendering with separate preflight/final ASS generation and ASS identity parity.
 
 ## Install
 
@@ -81,6 +82,37 @@ Example manifest configuration:
 $env:KARAOKE_ALBUM_MANIFEST = (Resolve-Path .\config\album.json).Path
 uv run --no-sync python scripts/karaoke_timing.py --manifest $env:KARAOKE_ALBUM_MANIFEST --allow-partial-manifest
 ```
+
+## Shared single-track command
+
+The bundled one-click route is `scripts/run_karaoke_japanese_workflow.py`.
+It defaults to `--visual-style vinyl`; both visual styles require a new
+non-existent output directory:
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
+  --sug <project.sug> --audio <post-mix-audio> `
+  --composition <composition-png> --output-dir <new-output-dir> `
+  --title <title> --artist <artist> `
+  --album-title <album-title> --album-artist <album-artist> `
+  --visual-style vinyl --vinyl <canonical-vinyl-png>
+```
+
+For spectrum, use `--visual-style spectrum` and omit `--vinyl`; optionally
+add `--spectrum-color RRGGBB --progress-color RRGGBB`. Vinyl uses `--vinyl`
+as a canonical identity input, rebuilds and validates the current rotating
+vinyl in the new output directory, and passes the generated asset to the
+renderer. Spectrum does not require, probe, generate, pass, or report vinyl.
+
+The workflow first writes the independent `karaoke-preflight.ass`, then the
+final `karaoke.ass` during rendering, and fails when their SHA-256 identities
+do not match. Full duration and MP4-only output with AAC-LC audio are the
+defaults. `--smoke-duration`, `--lossless-companion`, and `--full-decode` are
+explicit opt-ins; default runs do not create MKV or perform full decode.
+
+The album/batch direct renderer remains the current vinyl-only path. Spectrum
+support in the shared single-track workflow or preview is not album-renderer
+support.
 
 ## References
 

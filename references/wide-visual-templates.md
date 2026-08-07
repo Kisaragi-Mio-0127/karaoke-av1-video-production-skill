@@ -7,9 +7,39 @@ Select exactly one right-side visual effect for each wide render. Use the same s
 ## Choose the template
 
 - Use `vinyl` for the rotating-record layout. Pass `--visual-style vinyl` to both scripts and provide `--vinyl` to the preview renderer.
-- Use `spectrum` for the glowing real-time spectrum layout. Pass `--visual-style spectrum` to both scripts and omit `--vinyl`; the current CLI ignores an unnecessary vinyl argument instead of rejecting it.
+- Use `spectrum` for the glowing real-time spectrum layout. Pass `--visual-style spectrum` to both scripts and omit `--vinyl`. Spectrum does not require, probe, generate, pass, or report a vinyl asset.
 - Never combine the rotating record and spectrum in one output. Preserve accepted variants under distinct filenames.
 - Render and inspect a short representative preview before a full encode whenever the template, artwork renderer, spectrum behavior, or layout constants change.
+
+## Shared single-track workflow
+
+The shared one-click entry is `scripts/run_karaoke_japanese_workflow.py`.
+It defaults to `--visual-style vinyl`, and both styles require a new,
+non-existent `--output-dir`:
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
+  --sug <project.sug> --audio <post-mix-audio> `
+  --composition <composition-png> --output-dir <new-output-dir> `
+  --title <title> --artist <artist> `
+  --album-title <album-title> --album-artist <album-artist> `
+  --visual-style vinyl --vinyl <canonical-vinyl-png>
+```
+
+For `spectrum`, replace the final style and vinyl arguments with
+`--visual-style spectrum`; `--spectrum-color RRGGBB` and
+`--progress-color RRGGBB` are optional. Vinyl requires `--vinyl` as the
+canonical identity input, rebuilds and validates the current rotating vinyl
+inside the new output directory, and passes that generated asset to the
+renderer. Spectrum omits all vinyl handling and reporting.
+
+The workflow first writes an independent `karaoke-preflight.ass`, then
+writes the final `karaoke.ass` during MP4 rendering. It requires their
+SHA-256 identities to match. Full duration and MP4-only output are the
+defaults; `--lossless-companion` and `--full-decode` are explicit opt-ins for
+MKV and full-decode diagnostics. The album/batch direct renderer remains
+vinyl-only, so spectrum support here must not be documented as album-renderer
+support.
 
 ## Use the shared scripts
 
@@ -24,7 +54,7 @@ uv run --no-sync python scripts/build_karaoke_wide_artwork.py `
   --visual-style <vinyl-or-spectrum> --output <composition-png>
 ```
 
-Render with `scripts/karaoke_review_preview.py` and the same `--visual-style`. Pass `--layout wide`; omitting it selects the standard subtitle lanes and standard vinyl placement. Pass the exact post-mix audio source intended for delivery. The same trimmed `--audio` input drives the spectrum and muxed audio, although the MP4 audio is re-encoded. Use a new output, ASS, and report path for every spectrum run because spectrum mode refuses to overwrite them. Vinyl mode can overwrite video, ASS, and report targets, and the artwork builder can overwrite its PNG and JSON; use new paths or rollback copies for accepted artifacts.
+Render with `scripts/karaoke_review_preview.py` and the same `--visual-style`. Pass `--layout wide`; omitting it selects the standard subtitle lanes and standard vinyl placement. Pass the exact post-mix audio source intended for delivery. The same trimmed `--audio` input drives the spectrum and muxed audio, although the MP4 audio is re-encoded. Use a new output, ASS, and report path for every spectrum run because spectrum mode refuses to overwrite them. Vinyl mode can overwrite video, ASS, and report targets, and the artwork builder can overwrite its PNG and JSON; use new paths or rollback copies for accepted artifacts. These standalone-preview overwrite rules do not apply to the shared one-click workflow, which always uses a new `--output-dir` for either style.
 
 ```powershell
 uv run --no-sync python scripts/karaoke_review_preview.py `

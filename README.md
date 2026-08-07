@@ -115,9 +115,36 @@ to non-blocking `optional`; `required` and `off` remain explicit choices. The on
 underlying renderer share the same singer, overlay, ruby, container, and
 diagnostic gates.
 
-The album/batch direct renderer remains the current vinyl-only path. Spectrum
-support in the shared single-track workflow or preview is not album-renderer
-support.
+## AV1 4:2:0 batch command
+
+The AV1 4:2:0 batch entry is
+`scripts/render_karaoke_direct_av1_420_album.py`. It accepts
+`--visual-style vinyl|spectrum|both` and defaults to `vinyl`:
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> `
+  --visual-style <vinyl|spectrum|both>
+```
+
+`spectrum` does not require, probe, generate, pass, or report a vinyl asset.
+`both` runs the vinyl and spectrum styles as two independent AV1 4:2:0
+outputs with distinct media and report identities. The two styles for one
+song/profile share the same hash-identical profile ASS and publish serially;
+they are not a combined visual effect. `--single-track` selects exactly one song and one
+profile, so `--single-track --visual-style both` can produce two style
+variants for that one song/profile:
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> --song <song-id> --profile wide `
+  --single-track --visual-style both
+```
+
+`--lossless-companion` and `--full-decode` remain explicit opt-ins for the
+selected style or styles. Neither option is implied by `both`. Apply the
+per-output release and rollback gates in
+[batch-release-gates.md](references/batch-release-gates.md).
 
 ## References
 

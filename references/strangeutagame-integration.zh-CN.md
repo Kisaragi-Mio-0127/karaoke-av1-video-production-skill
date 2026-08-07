@@ -59,6 +59,23 @@ uv run --no-sync python --version
 
 专辑直出入口按编码器区分：`render_karaoke_direct_av1_420_album.py`是AV1 4:2:0命令，`render_karaoke_direct_hevc444_album.py`是HEVC 4:4:4命令。旧名称`render_karaoke_direct_av1_album.py`仅作为HEVC的弃用兼容入口保留。两个编码通道都通过中性的`karaoke_direct_album_planning.py`处理清单选择和任务规划。
 
+## AV1 4:2:0 批量workflow
+
+AV1 4:2:0批量入口支持`--visual-style vinyl|spectrum|both`，默认使用
+`vinyl`：
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> `
+  --visual-style <vinyl|spectrum|both>
+```
+
+`spectrum`不要求、不探测、不生成、不传递也不报告vinyl资源。
+`both`分别生成vinyl和spectrum两个独立的AV1 4:2:0成品，每个变体都有独立的媒体与报告身份。同一song/profile的两种风格共享哈希一致的profile ASS，并按顺序发布；它不是在一个输出中合并两种效果。`--single-track`只选择一个song和一个profile；使用`--visual-style both`时，同一选择可以生成两个视觉版本。
+
+`--lossless-companion`和`--full-decode`仍是对所选风格显式开启的opt-in，
+`both`不会隐式开启任一选项。
+
 ## 共享单曲workflow
 
 共享一键入口为`scripts/run_karaoke_japanese_workflow.py`。
@@ -77,7 +94,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 `--spectrum-color RRGGBB`和`--progress-color RRGGBB`只在频谱模式有效。黑胶的`--vinyl`是身份输入；workflow会在新输出目录中重新生成并校验当前旋转资源，再把生成资源传给渲染。频谱不要求、不探测、不生成、不传递也不报告vinyl。
 
 workflow先独立写入`karaoke-preflight.ass`，再在MP4渲染阶段写入最终
-`karaoke.ass`，并要求两者SHA-256身份一致。默认使用完整时长且只生成MP4；`--lossless-companion`和`--full-decode`是MKV与完整解码诊断的显式opt-in。日文注音验证默认为不阻塞的`optional`。一键workflow与底层renderer使用相同的歌手、叠加层、注音、容器和诊断门禁。专辑/批量direct renderer仍仅支持vinyl，不能把它写成支持频谱的路径。
+`karaoke.ass`，并要求两者SHA-256身份一致。默认使用完整时长且只生成MP4；`--lossless-companion`和`--full-decode`是MKV与完整解码诊断的显式opt-in。日文注音验证默认为不阻塞的`optional`。一键workflow与底层renderer使用相同的歌手、叠加层、注音、容器和诊断门禁。一键入口之外的AV1 4:2:0批量路径遵循上面的风格契约，并为每个风格保持独立的输出与验证身份。
 
 ## 安装文件
 

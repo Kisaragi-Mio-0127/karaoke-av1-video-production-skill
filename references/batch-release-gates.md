@@ -4,6 +4,27 @@
 
 Use these gates when encoding, promoting, or packaging multiple songs or delivery profiles together. Apply the same gates to one-click and underlying renderer routes.
 
+## AV1 4:2:0 batch visual styles
+
+The AV1 4:2:0 batch entry accepts `--visual-style vinyl|spectrum|both` and
+defaults to `vinyl`:
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> `
+  --visual-style <vinyl|spectrum|both>
+```
+
+`spectrum` does not require a vinyl input or asset. `both` creates two
+independent products—one vinyl and one spectrum—with separate media, report,
+hash, and promotion identities. The pair shares one hash-identical profile
+ASS and publishes serially; it is not a combined visual output.
+`--single-track` selects exactly one song and one profile; with
+`--visual-style both`, it can produce two variants for that song/profile.
+`--lossless-companion` and `--full-decode` remain explicit opt-ins and are not
+implied by the selected style or by `both`. Run the release gates separately
+for every produced variant.
+
 ## Freeze the generation
 
 Before full encoding, record a parameter fingerprint covering source files, timing overrides, renderer, report and test identities, explicit singer resolution and colours, secondary roles and top-overlay geometry, encoder, pixel format, quality control, preset, audio, container, fonts, lyric and ruby sizes, spacing, render options, timing evidence, and delivery profile. Keep song counts, cue counts, quality values, font sizes, and filenames in project configuration rather than the generic skill.

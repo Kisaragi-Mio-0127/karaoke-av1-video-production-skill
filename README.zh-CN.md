@@ -105,7 +105,32 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 workflow先独立写入`karaoke-preflight.ass`，再在渲染阶段写入最终
 `karaoke.ass`；同一SUG/配置下两者SHA-256身份不一致就失败。默认使用完整时长，并且只生成带AAC-LC音频的MP4。MKV和完整解码必须显式选择；默认运行不生成MKV，也不执行完整解码。日文注音验证默认为不阻塞的`optional`，`required`和`off`仍需显式选择。一键入口与底层renderer使用相同的歌手、叠加层、注音、容器和诊断门禁。
 
-专辑/批量direct renderer当前仍是仅支持vinyl的路径。共享单曲workflow或预览路径的频谱能力不等于专辑renderer支持频谱。
+## AV1 4:2:0 批量命令
+
+AV1 4:2:0 批量入口为
+`scripts/render_karaoke_direct_av1_420_album.py`，支持
+`--visual-style vinyl|spectrum|both`，默认使用`vinyl`：
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> `
+  --visual-style <vinyl|spectrum|both>
+```
+
+`spectrum`不要求、不探测、不生成、不传递也不报告vinyl资源。
+`both`会分别生成vinyl和spectrum两个独立的AV1 4:2:0成品，并为每个变体保留独立的媒体与报告身份。同一song/profile的两种风格共享哈希一致的profile ASS，并按顺序发布；它不是把两种效果合成到同一个文件。
+`--single-track`表示只选择一个song和一个profile，因此
+`--single-track --visual-style both`可以为同一个song/profile生成两个视觉版本：
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> --song <song-id> --profile wide `
+  --single-track --visual-style both
+```
+
+`--lossless-companion`和`--full-decode`仍然是对所选风格显式开启的opt-in；
+`both`不会隐式开启任一选项。每个独立成品都必须执行
+[批量发布门禁](references/batch-release-gates.zh-CN.md)中的发布与回滚检查。
 
 ## 参考文档
 

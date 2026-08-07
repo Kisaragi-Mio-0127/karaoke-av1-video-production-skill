@@ -59,6 +59,28 @@ The current wide composition is `wide-layout-v6/top-secondary-clearance`: vinyl 
 
 Direct album entry points are codec-specific: `render_karaoke_direct_av1_420_album.py` is the AV1 4:2:0 command and `render_karaoke_direct_hevc444_album.py` is the HEVC 4:4:4 command. The older `render_karaoke_direct_av1_album.py` name remains a deprecated compatibility entry for HEVC. Both codec lanes use the neutral `karaoke_direct_album_planning.py` module for manifest selection and task planning.
 
+## AV1 4:2:0 batch workflow
+
+The AV1 4:2:0 batch entry accepts `--visual-style vinyl|spectrum|both` and
+defaults to `vinyl`:
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> `
+  --visual-style <vinyl|spectrum|both>
+```
+
+`spectrum` does not require, probe, generate, pass, or report a vinyl asset.
+`both` creates separate vinyl and spectrum AV1 4:2:0 artifacts, each with
+its own media and report identity. Both variants for one song/profile share
+a hash-identical profile ASS and publish serially. They are two independent
+products, not one output containing both effects. `--single-track` selects exactly one
+song and one profile; with `--visual-style both`, that selection can produce
+two style variants.
+
+`--lossless-companion` and `--full-decode` remain explicit opt-ins for the
+selected style or styles. Neither option is implied by `both`.
+
 ## Shared single-track workflow
 
 The shared one-click entry is `scripts/run_karaoke_japanese_workflow.py`.
@@ -88,8 +110,8 @@ identities to match. Full duration and MP4-only output are defaults;
 full-decode diagnostics. Japanese pronunciation validation defaults to
 non-blocking `optional`. The one-click route and the underlying renderer share the same
 singer, overlay, ruby, container, and diagnostic gates. The album/batch direct
-renderer remains vinyl-only and must not be documented as a spectrum-capable
-path.
+renderer follows the AV1 4:2:0 batch contract above; keep each style's output
+and validation identity separate.
 
 ## Installed files
 

@@ -112,3 +112,31 @@ def test_public_hevc_batch_size_is_manifest_driven() -> None:
         assert project_specific_phrase not in source.casefold()
     assert "len(PROFILES) * len(song_ids)" in source
     assert "every manifest song and both profiles" in source
+
+
+def test_public_visual_style_selection_and_spectrum_artwork_fallback(
+    tmp_path: Path,
+) -> None:
+    track = SimpleNamespace(artifact_slug="sample-song")
+    fallback = (
+        tmp_path / "wide" / "sample-song" / "composition_spectrum.png"
+    )
+    preferred = (
+        tmp_path / "wide-spectrum" / "sample-song" / "composition.png"
+    )
+    fallback.parent.mkdir(parents=True)
+    fallback.write_bytes(b"fallback")
+
+    assert planning.select_visual_styles(None) == ("vinyl",)
+    assert planning.select_visual_styles("both") == ("vinyl", "spectrum")
+    assert planning._artwork_paths(tmp_path, track, "wide", "spectrum") == (
+        fallback.resolve(),
+        None,
+    )
+
+    preferred.parent.mkdir(parents=True)
+    preferred.write_bytes(b"preferred")
+    assert planning._artwork_paths(tmp_path, track, "wide", "spectrum") == (
+        preferred.resolve(),
+        None,
+    )

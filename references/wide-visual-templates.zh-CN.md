@@ -2,7 +2,7 @@
 
 [English](wide-visual-templates.md) | 简体中文
 
-每次宽屏渲染只能选择一个右侧视觉效果。黑胶唱片和实时频谱必须互斥，使用同一套构图与预览脚本，不为单曲分叉渲染器。
+每个输出的宽屏渲染只能选择一个右侧视觉效果。黑胶唱片和实时频谱必须互斥，使用同一套构图与预览脚本，不为单曲分叉渲染器。批量请求`both`会生成两个输出，每个输出只包含一种效果，而不是把两种效果合并到一个渲染中。
 
 ## 选择模板
 
@@ -10,6 +10,23 @@
 - 发光实时频谱布局使用`--visual-style spectrum`，省略`--vinyl`。频谱不要求、不探测、不生成、不传递也不报告vinyl资源。
 - 两种效果不能出现在同一输出中，接受的变体使用不同文件名。
 - 模板、构图脚本、频谱行为或布局常量变化后，先渲染并检查短预览，再做全量编码。
+
+## AV1 4:2:0 批量workflow
+
+AV1 4:2:0批量入口支持`--visual-style vinyl|spectrum|both`，默认使用
+`vinyl`：
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> `
+  --visual-style <vinyl|spectrum|both>
+```
+
+`spectrum`不要求、不探测、不生成、不传递也不报告vinyl资源。
+`both`会生成两个独立的AV1 4:2:0成品，一个使用vinyl、一个使用spectrum，
+并分别保留媒体与报告身份。同一song/profile的两个变体共享哈希一致的profile ASS，并按顺序发布。`--single-track`只选择一个song和一个profile；
+使用`both`时，同一选择可以生成两个视觉版本。`--lossless-companion`和
+`--full-decode`仍然是显式opt-in，`both`不会隐式开启任一选项。
 
 ## 共享单曲workflow
 
@@ -30,7 +47,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 `--vinyl`作为规范身份输入，在新输出目录中重新生成并校验当前旋转黑胶，再把生成资源传给renderer。频谱完全不处理也不报告vinyl。
 
 workflow先独立写入`karaoke-preflight.ass`，再在MP4渲染阶段写入最终
-`karaoke.ass`，并要求两者SHA-256身份一致。默认使用完整时长且只生成MP4；`--lossless-companion`和`--full-decode`分别是MKV与完整解码诊断的显式opt-in。日文注音验证默认为不阻塞的`optional`。一键workflow与底层renderer使用相同的歌手、叠加层、注音、容器和诊断门禁。专辑/批量direct renderer仍仅支持vinyl，不能把这里的频谱能力写成专辑renderer能力。
+`karaoke.ass`，并要求两者SHA-256身份一致。默认使用完整时长且只生成MP4；`--lossless-companion`和`--full-decode`分别是MKV与完整解码诊断的显式opt-in。日文注音验证默认为不阻塞的`optional`。一键workflow与底层renderer使用相同的歌手、叠加层、注音、容器和诊断门禁。批量入口遵循上面的AV1 4:2:0风格契约，并为每个风格保持独立的输出与验证身份。
 
 ## 构图与渲染
 
@@ -54,7 +71,7 @@ uv run --no-sync python scripts/karaoke_review_preview.py `
   --font-file <main-font> --output <new-output-mp4> `
   --ass-output <new-output-ass> --report-output <new-report-json> `
   --start <seconds> --duration <seconds> --layout wide `
-  --visual-style <vinyl-or-spectrum> <vinyl-only-arguments>
+  --visual-style <vinyl-or-spectrum> <style-specific-arguments>
 ```
 
 黑胶替换占位参数为新生成的`--vinyl <current-vinyl-png>`，记录`vinyl_sha256`并把准确路径显式传给renderer；禁止静默复用规范或旧`vinyl.png`。频谱省略它，可加`--spectrum-color RRGGBB --progress-color RRGGBB`。使用时间覆盖时同时传入`--timing-overrides <json>`和`--song-id <id>`。默认全节目AV1 4:2:0直出档为1920x1080、30fps、yuv420p、BT.709、AV1 NVENC CQ38、preset p7、tune hq、VBR、全分辨率multipass、lookahead32、空间与时间AQ、AQ strength8、GOP240，并且必须先通过硬件探测。默认兼容MP4使用AAC-LC 320k，普通测试/重渲染只产MP4。MKV严格opt-in：只有探测源为FLAC或PCM WAV且显式传入`--lossless-output <new-lossless-output-mkv>`（或workflow的`--lossless-companion`）时才生成；MP3/AAC请求必须拒绝。不要显示耗时或播放控制按钮。以上覆盖规则仅适用于独立预览；共享单曲workflow无论风格都必须使用全新的`--output-dir`。

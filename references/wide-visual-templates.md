@@ -2,7 +2,10 @@
 
 [简体中文](wide-visual-templates.zh-CN.md) | English
 
-Select exactly one right-side visual effect for each wide render. Use the same shared production scripts for both choices; do not fork a song-specific renderer.
+Select exactly one right-side visual effect for each output. Use the same
+shared production scripts for either choice; do not fork a song-specific
+renderer. A batch request for `both` creates two outputs, each with one
+effect, rather than combining the effects in one render.
 
 ## Choose the template
 
@@ -10,6 +13,25 @@ Select exactly one right-side visual effect for each wide render. Use the same s
 - Use `spectrum` for the glowing real-time spectrum layout. Pass `--visual-style spectrum` to both scripts and omit `--vinyl`. Spectrum does not require, probe, generate, pass, or report a vinyl asset.
 - Never combine the rotating record and spectrum in one output. Preserve accepted variants under distinct filenames.
 - Render and inspect a short representative preview before a full encode whenever the template, artwork renderer, spectrum behavior, or layout constants change.
+
+## AV1 4:2:0 batch workflow
+
+The AV1 4:2:0 batch entry accepts `--visual-style vinyl|spectrum|both` and
+defaults to `vinyl`:
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> `
+  --visual-style <vinyl|spectrum|both>
+```
+
+`spectrum` does not require, probe, generate, pass, or report a vinyl asset.
+`both` creates two independent AV1 4:2:0 products, one vinyl and one
+spectrum, with separate media and report identities. The pair shares one
+hash-identical profile ASS and publishes serially. `--single-track`
+means exactly one selected song and one profile; with `both`, that selection
+can produce two style variants. `--lossless-companion` and `--full-decode`
+remain explicit opt-ins and are not implied by `both`.
 
 ## Shared single-track workflow
 
@@ -39,9 +61,9 @@ SHA-256 identities to match. Full duration and MP4-only output are the
 defaults; `--lossless-companion` and `--full-decode` are explicit opt-ins for
 MKV and full-decode diagnostics. Japanese pronunciation validation defaults to
 non-blocking `optional`. The one-click route and the underlying renderer share the same
-singer, overlay, ruby, container, and diagnostic gates. The album/batch direct
-renderer remains vinyl-only, so spectrum support here must not be documented as
-album-renderer support.
+singer, overlay, ruby, container, and diagnostic gates. The batch entry follows
+the separate AV1 4:2:0 style contract above; keep each style's artifacts and
+validation identities separate.
 
 ## Use the shared scripts
 
@@ -65,10 +87,10 @@ uv run --no-sync python scripts/karaoke_review_preview.py `
   --font-file <main-font> --output <new-output-mp4> `
   --ass-output <new-output-ass> --report-output <new-report-json> `
   --start <seconds> --duration <seconds> --layout wide `
-  --visual-style <vinyl-or-spectrum> <vinyl-only-arguments>
+  --visual-style <vinyl-or-spectrum> <style-specific-arguments>
 ```
 
-For `vinyl`, replace `<vinyl-only-arguments>` with `--vinyl <current-vinyl-png>` and record the exact `vinyl_sha256`; the renderer must receive that path explicitly and must not silently reuse a canonical/old `vinyl.png`. For `spectrum`, omit it and optionally add `--spectrum-color RRGGBB --progress-color RRGGBB`. If timing overrides are used, pass `--timing-overrides <json>` and `--song-id <id>` together. The default full-program AV1 4:2:0 direct-render profile is 1920x1080 at 30 fps, `yuv420p`, BT.709, AV1 NVENC CQ38, `preset p7`, `tune hq`, VBR, full-resolution multipass, lookahead 32, spatial and temporal AQ, AQ strength 8, and GOP 240 after a successful hardware probe. The default compatibility MP4 uses AAC-LC 320k and is the only output for ordinary tests/re-renders. MKV is opt-in only: pass `--lossless-output <new-lossless-output-mkv>` (or use a workflow's explicit `--lossless-companion`) only after probing a FLAC or PCM WAV source; reject MP3/AAC. Do not show elapsed time or playback-control buttons.
+For `vinyl`, replace `<vinyl-arguments>` with `--vinyl <current-vinyl-png>` and record the exact `vinyl_sha256`; the renderer must receive that path explicitly and must not silently reuse a canonical/old `vinyl.png`. For `spectrum`, omit it and optionally add `--spectrum-color RRGGBB --progress-color RRGGBB`. If timing overrides are used, pass `--timing-overrides <json>` and `--song-id <id>` together. The default full-program AV1 4:2:0 direct-render profile is 1920x1080 at 30 fps, `yuv420p`, BT.709, AV1 NVENC CQ38, `preset p7`, `tune hq`, VBR, full-resolution multipass, lookahead 32, spatial and temporal AQ, AQ strength 8, and GOP 240 after a successful hardware probe. The default compatibility MP4 uses AAC-LC 320k and is the only output for ordinary tests/re-renders. MKV is opt-in only: pass `--lossless-output <new-lossless-output-mkv>` (or use a workflow's explicit `--lossless-companion`) only after probing a FLAC or PCM WAV source; reject MP3/AAC. Do not show elapsed time or playback-control buttons.
 
 ## Current composition contract
 

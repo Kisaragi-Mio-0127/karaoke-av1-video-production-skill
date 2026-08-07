@@ -74,8 +74,24 @@ underlying renderer must apply the same singer, overlay, ruby, container, and
 diagnostic gates.
 
 The album/batch direct renderer (`render_karaoke_direct_av1_420_album.py`)
-remains the current vinyl-only path. Do not document spectrum support for that
-renderer based on the shared single-track workflow or preview path.
+is the AV1 4:2:0 batch entry and accepts `--visual-style vinyl|spectrum|both`,
+defaulting to `vinyl`:
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> `
+  --visual-style <vinyl|spectrum|both>
+```
+
+`spectrum` does not require, probe, generate, pass, or report a vinyl asset.
+`both` produces two independent AV1 4:2:0 outputs with separate media and
+report identities. Both styles for one song/profile share a hash-identical
+profile ASS and publish serially; they are not combined in one file.
+`--single-track` means exactly one selected song and one profile, so
+`--single-track --visual-style both` can produce two variants for that pair.
+`--lossless-companion` and `--full-decode` remain explicit opt-ins and are
+not implied by `both`. Apply the per-output batch release gates before
+promotion.
 Use `render_karaoke_direct_hevc444_album.py` for the explicit HEVC 4:4:4 lane.
 Treat `render_karaoke_direct_av1_album.py` only as its deprecated compatibility
 name; shared manifest selection and task planning belong to

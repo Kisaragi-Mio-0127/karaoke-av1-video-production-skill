@@ -98,6 +98,10 @@ SOURCE_PATH_KEYS = frozenset(
 )
 
 
+def _task_visual_style(task: Any) -> str:
+    return str(getattr(task, "visual_style", "vinyl"))
+
+
 class DirectAV1420RenderError(RuntimeError):
     """Raised when an AV1 4:2:0 artifact fails a publication gate."""
 
@@ -164,6 +168,10 @@ def validate_current_vinyl_assets(
     checked: set[Path] = set()
     results: list[dict[str, Any]] = []
     for task in tasks:
+        if _task_visual_style(task) != "vinyl":
+            continue
+        if task.vinyl_path is None:
+            raise DirectAV1420RenderError("vinyl task has no vinyl asset")
         vinyl = task.vinyl_path.resolve()
         if vinyl in checked:
             continue
@@ -252,7 +260,7 @@ def validate_current_vinyl_assets(
 def validate_current_wide_compositions(
     tasks: Iterable[render_core.RenderTask],
     *,
-    visual_style: str = "vinyl",
+    visual_style: str | None = None,
 ) -> list[dict[str, Any]]:
     """Reject wide compositions built for another style or obsolete layout."""
 
@@ -265,13 +273,6 @@ def validate_current_wide_compositions(
     secondary_safe_bounds = [0, 0, 1920, 96]
     secondary_reserved_bounds = [0, 0, 1920, 107]
     minimum_title_clearance_px = 16
-    try:
-        expected_sleeve = sleeve_by_style[visual_style]
-    except KeyError as error:
-        raise DirectAV1420RenderError(
-            f"unsupported wide visual style: {visual_style!r}"
-        ) from error
-
     if not WIDE_ARTWORK_GENERATOR.is_file():
         raise DirectAV1420RenderError(
             f"wide artwork generator is missing: {WIDE_ARTWORK_GENERATOR}"
@@ -293,6 +294,22 @@ def validate_current_wide_compositions(
     for task in tasks:
         if task.profile != "wide":
             continue
+        task_style = str(getattr(task, "visual_style", "vinyl"))
+        if (
+            visual_style is not None
+            and hasattr(task, "visual_style")
+            and task_style != visual_style
+        ):
+            raise DirectAV1420RenderError(
+                f"task visual_style={task_style!r} does not match requested {visual_style!r}"
+            )
+        current_style = visual_style or task_style
+        try:
+            expected_sleeve = sleeve_by_style[current_style]
+        except KeyError as error:
+            raise DirectAV1420RenderError(
+                f"unsupported wide visual style: {current_style!r}"
+            ) from error
         composition = task.composition_path.resolve()
         if composition in checked:
             continue
@@ -343,10 +360,10 @@ def validate_current_wide_compositions(
                 metadata.get("layout_generator_sha256") == generator_hash
             ),
             "composition_sha256": metadata.get("composition_sha256") == actual_hash,
-            "visual_style": metadata.get("visual_style") == visual_style,
+            "visual_style": metadata.get("visual_style") == current_style,
             "sleeve": metadata.get("sleeve") == expected_sleeve,
             "title_block_x": (
-                metadata.get("title_block_x") == title_block_x_by_style[visual_style]
+                metadata.get("title_block_x") == title_block_x_by_style[current_style]
             ),
             "title_block_y": metadata.get("title_block_y") == title_block_y,
             "title_bounds": title_bounds_valid,
@@ -389,8 +406,8 @@ def validate_current_wide_compositions(
                 "metadata": str(metadata_path),
                 "layout_version": current_version,
                 "layout_generator_sha256": generator_hash,
-                "visual_style": visual_style,
-                "title_block_x": title_block_x_by_style[visual_style],
+                "visual_style": current_style,
+                "title_block_x": title_block_x_by_style[current_style],
                 "title_block_y": title_block_y,
                 "title_bounds": title_bounds,
                 "secondary_reserved_bounds": secondary_reserved_bounds,
@@ -496,41 +513,24 @@ def _source_record(
 
     timing_overrides = _timing_overrides_path(task)
     published_ass = ass_path or task.ass_output
-    vinyl_provenance = task.vinyl_path.parent / "artwork.json"
+    visual_style = _task_visual_style(task)
+    vinyl_path = task.vinyl_path if visual_style == "vinyl" else None
+    if visual_style == "vinyl" and vinyl_path is None:
+        raise DirectAV1420RenderError("vinyl task has no vinyl asset")
+    vinyl_provenance = vinyl_path.parent / "artwork.json" if vinyl_path else None
     vinyl_metadata: Mapping[str, Any] = {}
-    if vinyl_provenance.is_file():
+    if vinyl_provenance is not None and vinyl_provenance.is_file():
         try:
             candidate = json.loads(vinyl_provenance.read_text(encoding="utf-8"))
             if isinstance(candidate, Mapping):
                 vinyl_metadata = candidate
         except (OSError, ValueError):
             pass
-    return {
+    sources: dict[str, str | None] = {
         "audio": relative(task.track.audio_path),
         "audio_sha256": identity(task.track.audio_path),
         "composition": relative(task.composition_path),
         "composition_sha256": identity(task.composition_path),
-        "vinyl": relative(task.vinyl_path),
-        "vinyl_sha256": identity(task.vinyl_path),
-        "vinyl_provenance": relative(vinyl_provenance),
-        "vinyl_provenance_sha256": identity(vinyl_provenance),
-        "vinyl_generated_at_utc": vinyl_metadata.get("generated_at_utc"),
-        "vinyl_source_sha256": vinyl_metadata.get("source_sha256"),
-        "vinyl_style_version": vinyl_metadata.get("vinyl_style_version"),
-        "vinyl_metadata_sha256": vinyl_metadata.get("vinyl_sha256"),
-        "vinyl_metadata_generator_sha256": vinyl_metadata.get(
-            "vinyl_generator_sha256"
-        )
-        or vinyl_metadata.get("render_vinyl_karaoke_sha256"),
-        "vinyl_metadata_generator_sha256_field": (
-            "vinyl_generator_sha256"
-            if vinyl_metadata.get("vinyl_generator_sha256")
-            else "render_vinyl_karaoke_sha256"
-            if vinyl_metadata.get("render_vinyl_karaoke_sha256")
-            else None
-        ),
-        "vinyl_generator": relative(VINYL_GENERATOR),
-        "vinyl_generator_sha256": identity(VINYL_GENERATOR),
         "sug": relative(task.sug_path),
         "sug_sha256": identity(task.sug_path),
         # Record the profile ASS destination, not the pre-render discovery
@@ -544,6 +544,33 @@ def _source_record(
             sha256_file(timing_overrides) if timing_overrides is not None else None
         ),
     }
+    if vinyl_path is not None:
+        sources.update(
+            {
+                "vinyl": relative(vinyl_path),
+                "vinyl_sha256": identity(vinyl_path),
+                "vinyl_provenance": relative(vinyl_provenance),
+                "vinyl_provenance_sha256": identity(vinyl_provenance),
+                "vinyl_generated_at_utc": vinyl_metadata.get("generated_at_utc"),
+                "vinyl_source_sha256": vinyl_metadata.get("source_sha256"),
+                "vinyl_style_version": vinyl_metadata.get("vinyl_style_version"),
+                "vinyl_metadata_sha256": vinyl_metadata.get("vinyl_sha256"),
+                "vinyl_metadata_generator_sha256": vinyl_metadata.get(
+                    "vinyl_generator_sha256"
+                )
+                or vinyl_metadata.get("render_vinyl_karaoke_sha256"),
+                "vinyl_metadata_generator_sha256_field": (
+                    "vinyl_generator_sha256"
+                    if vinyl_metadata.get("vinyl_generator_sha256")
+                    else "render_vinyl_karaoke_sha256"
+                    if vinyl_metadata.get("render_vinyl_karaoke_sha256")
+                    else None
+                ),
+                "vinyl_generator": relative(VINYL_GENERATOR),
+                "vinyl_generator_sha256": identity(VINYL_GENERATOR),
+            }
+        )
+    return sources
 
 
 def _canonical_json(value: Any) -> str:
@@ -828,6 +855,7 @@ def aggregate_language_ruby_identity(
                 "language_identity": language,
                 "ruby_identity": ruby,
                 "profiles": [],
+                "visual_styles": [],
             },
         )
         if _identity_key(bucket["language_identity"]) != _identity_key(language):
@@ -838,7 +866,12 @@ def aggregate_language_ruby_identity(
             raise DirectAV1420RenderError(
                 f"aggregate ruby identity mismatch for song {song_id}"
             )
-        bucket["profiles"].append(str(item.get("profile")))
+        profile = str(item.get("profile"))
+        visual_style = str(item.get("visual_style", "vinyl"))
+        if profile not in bucket["profiles"]:
+            bucket["profiles"].append(profile)
+        if visual_style not in bucket["visual_styles"]:
+            bucket["visual_styles"].append(visual_style)
     if not by_song:
         status = "not-provided"
     elif incomplete:
@@ -858,10 +891,13 @@ def configure_av1_tasks(
 ) -> tuple[render_core.RenderTask, ...]:
     configured: list[render_core.RenderTask] = []
     for task in tasks:
+        visual_style = _task_visual_style(task)
+        style_parts = () if visual_style == "vinyl" else (visual_style,)
         task.video_output = (
             root
             / "video"
             / AV1_OUTPUT_DIR
+            / Path(*style_parts)
             / task.profile
             / task.track.numbered_video_filename
         ).resolve()
@@ -869,17 +905,35 @@ def configure_av1_tasks(
             root
             / "video"
             / LOSSLESS_OUTPUT_DIR
+            / Path(*style_parts)
             / task.profile
             / Path(task.track.numbered_video_filename).with_suffix(".mkv")
         ).resolve()
         task.direct_report = (
             root
             / "validation"
+            / Path(*style_parts)
             / task.profile
-            / f"{task.track.artifact_slug}_direct_av1_420_render_report.json"
+            / (
+                f"{task.track.artifact_slug}_direct_av1_420_render_report.json"
+                if visual_style == "vinyl"
+                else f"{task.track.artifact_slug}_{visual_style}_direct_av1_420_render_report.json"
+            )
         ).resolve()
         configured.append(task)
     return tuple(configured)
+
+
+def group_tasks_for_render(
+    tasks: Iterable[render_core.RenderTask],
+) -> tuple[tuple[render_core.RenderTask, ...], ...]:
+    """Serialize styles sharing one song/profile ASS while preserving parallel groups."""
+
+    groups: dict[tuple[str, str], list[render_core.RenderTask]] = {}
+    for task in tasks:
+        key = (task.profile, str(task.track.song_id))
+        groups.setdefault(key, []).append(task)
+    return tuple(tuple(group) for group in groups.values())
 
 
 def lossless_companion_policy(
@@ -933,6 +987,7 @@ def build_preview_command(
     vinyl_motion: str = "rotate",
     lossless_companion: bool = False,
 ) -> list[str]:
+    visual_style = _task_visual_style(task)
     command = [
         sys.executable,
         str(preview_script.resolve()),
@@ -942,8 +997,8 @@ def build_preview_command(
         str(task.track.audio_path),
         "--composition",
         str(task.composition_path),
-        "--vinyl",
-        str(task.vinyl_path),
+        "--visual-style",
+        visual_style,
         "--fonts-dir",
         str(task.fonts_dir),
         "--font-file",
@@ -966,9 +1021,11 @@ def build_preview_command(
         str(av1_cq),
         "--pronunciation-validation",
         pronunciation_validation,
-        "--vinyl-motion",
-        vinyl_motion,
     ]
+    if visual_style == "vinyl":
+        if task.vinyl_path is None:
+            raise DirectAV1420RenderError("vinyl task has no vinyl asset")
+        command.extend(["--vinyl", str(task.vinyl_path), "--vinyl-motion", vinyl_motion])
     lossless_policy = lossless_companion_policy(
         task.track.audio_path,
         requested=lossless_companion,
@@ -1003,11 +1060,21 @@ def _flag_value(command: Sequence[str], flag: str) -> str:
 def validate_direct_source_command(command: Sequence[str]) -> None:
     if _flag_value(command, "--video-encoder") != "av1_nvenc":
         raise DirectAV1420RenderError("AV1 lane must use video_encoder=av1_nvenc")
+    visual_style = (
+        _flag_value(command, "--visual-style")
+        if "--visual-style" in command
+        else "vinyl"
+    )
+    if visual_style not in {"vinyl", "spectrum"}:
+        raise DirectAV1420RenderError(f"unsupported visual style: {visual_style!r}")
     expected_suffixes = {
         "--sug": ".sug",
         "--composition": ".png",
-        "--vinyl": ".png",
     }
+    if visual_style == "vinyl":
+        expected_suffixes["--vinyl"] = ".png"
+    elif "--vinyl" in command:
+        raise DirectAV1420RenderError("spectrum task must not receive --vinyl")
     for flag, suffix in expected_suffixes.items():
         source = Path(_flag_value(command, flag))
         if source.suffix.casefold() != suffix:
@@ -1022,7 +1089,7 @@ def validate_direct_source_command(command: Sequence[str]) -> None:
     ).suffix.casefold() != ".mkv":
         raise DirectAV1420RenderError("lossless AV1 output must use Matroska (.mkv)")
     forbidden_video_suffixes = {".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v"}
-    for flag in ("--sug", "--audio", "--composition", "--vinyl"):
+    for flag in expected_suffixes:
         source = Path(_flag_value(command, flag))
         if source.suffix.casefold() in forbidden_video_suffixes:
             raise DirectAV1420RenderError(f"video master input is forbidden: {source}")
@@ -1065,6 +1132,7 @@ def validate_preview_report(
     *,
     av1_cq: int,
     lossless_companion: bool = False,
+    visual_style: str | None = None,
 ) -> None:
     if report.get("status") != "ok":
         raise DirectAV1420RenderError(
@@ -1076,6 +1144,11 @@ def validate_preview_report(
     video = report.get("video")
     if not isinstance(video, dict):
         raise DirectAV1420RenderError("preview report has no video artifact")
+    if visual_style is not None and video.get("visual_style") != visual_style:
+        raise DirectAV1420RenderError(
+            f"preview report mismatch: visual_style={video.get('visual_style')!r}, "
+            f"expected {visual_style!r}"
+        )
     expected = {
         "video_encoder": "av1_nvenc",
         "pixel_format": "yuv420p",
@@ -1811,6 +1884,7 @@ def normalise_report(
     video.update(
         {
             "video": str(task.video_output.resolve()),
+            "visual_style": _task_visual_style(task),
             "video_encoder": "av1_nvenc",
             "pixel_format": "yuv420p",
             "color_range": "tv",
@@ -1839,6 +1913,7 @@ def normalise_report(
     result.update(
         {
             "profile": task.profile,
+            "visual_style": _task_visual_style(task),
             "song_id": str(task.track.song_id),
             "title": task.track.title,
             "artist": task.track.artist,
@@ -1848,7 +1923,9 @@ def normalise_report(
             "intermediate_h264": False,
             "intermediate_hevc": False,
             "source_chain": (
-                "manifest audio + composition + vinyl + latest SUG/ASS -> "
+                "manifest audio + composition"
+                + (" + vinyl" if _task_visual_style(task) == "vinyl" else "")
+                + " + latest SUG/ASS -> "
                 "AV1/yuv420p + AAC-LC 320k MP4"
                 + (
                     "; copied AV1 + source-derived FLAC Matroska companion"
@@ -1952,7 +2029,7 @@ def _refresh_report_durable_paths(
     media_checks["path"] = video_path
 
     vinyl_asset = video.get("vinyl_asset")
-    if isinstance(vinyl_asset, dict):
+    if isinstance(vinyl_asset, dict) and task.vinyl_path is not None:
         vinyl_asset["path"] = str(task.vinyl_path.resolve())
         provenance = task.vinyl_path.parent / "artwork.json"
         if "provenance_path" in vinyl_asset:
@@ -2059,6 +2136,7 @@ def render_one(
             preview_report,
             av1_cq=av1_cq,
             lossless_companion=lossless_companion,
+            visual_style=_task_visual_style(task),
         )
         validate_ass_report_generation(
             task,
@@ -2195,6 +2273,7 @@ def render_one(
         return {
             "status": "ok",
             "profile": task.profile,
+            "visual_style": _task_visual_style(task),
             "song_id": str(task.track.song_id),
             "title": task.track.title,
             "artifact_slug": task.track.artifact_slug,
@@ -2256,6 +2335,7 @@ def collect_existing_results(
             report,
             av1_cq=av1_cq,
             lossless_companion=lossless_companion,
+            visual_style=_task_visual_style(task),
         )
         expected = {
             "profile": task.profile,
@@ -2272,6 +2352,12 @@ def collect_existing_results(
                     f"published report mismatch for {task.profile}:"
                     f"{task.track.artifact_slug}: {key}={report.get(key)!r}"
                 )
+        if report.get("visual_style", "vinyl") != _task_visual_style(task):
+            raise DirectAV1420RenderError(
+                f"published report mismatch for {task.profile}:"
+                f"{task.track.artifact_slug}: visual_style="
+                f"{report.get('visual_style')!r}"
+            )
         _validate_report_sources(
             report,
             task,
@@ -2399,6 +2485,7 @@ def collect_existing_results(
             {
                 "status": "ok",
                 "profile": task.profile,
+                "visual_style": _task_visual_style(task),
                 "song_id": str(task.track.song_id),
                 "title": task.track.title,
                 "artifact_slug": task.track.artifact_slug,
@@ -2496,6 +2583,7 @@ def build_av1_420_report(
     full_decode: bool,
     full_decode_exception_reason: str | None = None,
     profiles: Sequence[str] = PROFILES,
+    visual_styles: Sequence[str] = ("vinyl",),
     expected_song_count: int = 5,
 ) -> dict[str, Any]:
     selected_profiles = tuple(dict.fromkeys(str(profile) for profile in profiles))
@@ -2505,20 +2593,45 @@ def build_av1_420_report(
         )
     if expected_song_count <= 0:
         raise DirectAV1420RenderError("expected_song_count must be positive")
-    expected_output_count = expected_song_count * len(selected_profiles)
+    selected_visual_styles = tuple(
+        dict.fromkeys(str(style) for style in visual_styles)
+    )
+    if not selected_visual_styles or any(
+        style not in render_core.VISUAL_STYLES for style in selected_visual_styles
+    ):
+        raise DirectAV1420RenderError(
+            f"AV1 aggregate report has invalid visual styles: {selected_visual_styles!r}"
+        )
+    expected_output_count = (
+        expected_song_count * len(selected_profiles) * len(selected_visual_styles)
+    )
     if len(results) != expected_output_count:
         raise DirectAV1420RenderError(
             "AV1 aggregate report has an unexpected output count: "
             f"expected {expected_output_count}, got {len(results)}"
         )
-    keys = {(str(item["profile"]), str(item["song_id"])) for item in results}
+    keys = {
+        (
+            str(item["profile"]),
+            str(item.get("visual_style", "vinyl")),
+            str(item["song_id"]),
+        )
+        for item in results
+    }
     if len(keys) != expected_output_count:
         raise DirectAV1420RenderError("AV1 aggregate report has duplicate outputs")
     for profile in selected_profiles:
-        if sum(item["profile"] == profile for item in results) != expected_song_count:
-            raise DirectAV1420RenderError(
-                f"AV1 report requires {expected_song_count} {profile} outputs"
+        for visual_style in selected_visual_styles:
+            count = sum(
+                item["profile"] == profile
+                and item.get("visual_style", "vinyl") == visual_style
+                for item in results
             )
+            if count != expected_song_count:
+                raise DirectAV1420RenderError(
+                    f"AV1 report requires {expected_song_count} "
+                    f"{profile}/{visual_style} outputs"
+                )
     def has_lossless_companion(item: Mapping[str, Any]) -> bool:
         companion = item.get("lossless_companion")
         if isinstance(companion, Mapping):
@@ -2579,7 +2692,11 @@ def build_av1_420_report(
     outputs: list[dict[str, Any]] = []
     for item in sorted(
         results,
-        key=lambda value: (str(value["profile"]), str(value["artifact_slug"])),
+        key=lambda value: (
+            str(value["profile"]),
+            str(value.get("visual_style", "vinyl")),
+            str(value["artifact_slug"]),
+        ),
     ):
         has_lossless = has_lossless_companion(item)
         companion = item.get("lossless_companion")
@@ -2596,6 +2713,7 @@ def build_av1_420_report(
             }
         output = {
             "profile": item["profile"],
+            "visual_style": item.get("visual_style", "vinyl"),
             "song_id": str(item["song_id"]),
             "title": item["title"],
             "artifact_slug": item["artifact_slug"],
@@ -2640,6 +2758,7 @@ def build_av1_420_report(
         "verification_status": verification_status,
         "release_decision": release_decision,
         "profiles": list(selected_profiles),
+        "visual_styles": list(selected_visual_styles),
         "encoder": "av1_nvenc",
         "default_delivery": "compatibility_mp4",
         "containers": (
@@ -2761,7 +2880,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--single-track",
         action="store_true",
-        help="require exactly one song and one profile task",
+        help="require exactly one selected song/profile pair",
     )
     parser.add_argument(
         "--profile",
@@ -2770,6 +2889,12 @@ def make_parser() -> argparse.ArgumentParser:
         action="append",
         choices=PROFILES,
         default=[],
+    )
+    parser.add_argument(
+        "--visual-style",
+        choices=("vinyl", "spectrum", "both"),
+        default="vinyl",
+        help="render vinyl (default), spectrum, or both as isolated artifacts",
     )
     parser.add_argument("--timing-dir", type=Path, default=None)
     parser.add_argument("--artwork-dir", type=Path, default=None)
@@ -2839,6 +2964,7 @@ def main(argv: list[str] | None = None) -> int:
         root = _resolve_path(args.root) if args.root else album.deliverable_dir.resolve()
         tracks = render_core.select_tracks(album, args.songs)
         profiles = render_core.select_profiles(args.profiles)
+        visual_styles = render_core.select_visual_styles(args.visual_style)
         if args.single_track and (len(tracks) != 1 or len(profiles) != 1):
             raise ValueError(
                 "--single-track requires exactly one selected song and one profile"
@@ -2853,6 +2979,7 @@ def main(argv: list[str] | None = None) -> int:
                 root=root,
                 tracks=tracks,
                 profiles=profiles,
+                visual_styles=visual_styles,
                 timing_dir=_resolve_path(args.timing_dir) if args.timing_dir else None,
                 artwork_root=_resolve_path(args.artwork_dir)
                 if args.artwork_dir
@@ -2862,9 +2989,10 @@ def main(argv: list[str] | None = None) -> int:
             ),
             root=root,
         )
-        if args.single_track and len(tasks) != 1:
+        if args.single_track and len(tasks) != len(visual_styles):
             raise ValueError(
-                f"--single-track produced {len(tasks)} tasks; expected exactly one"
+                f"--single-track produced {len(tasks)} tasks; "
+                f"expected {len(visual_styles)} style task(s)"
             )
         pronunciation_validation = validate_editable_pronunciation_sources(
             tasks,
@@ -2904,10 +3032,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             results = []
-            with ThreadPoolExecutor(max_workers=min(args.jobs, len(tasks))) as executor:
-                futures = {
-                    executor.submit(
-                        render_one,
+            task_groups = group_tasks_for_render(tasks)
+
+            def render_group(
+                group: Sequence[render_core.RenderTask],
+            ) -> list[dict[str, Any]]:
+                return [
+                    render_one(
                         task,
                         preview_script=preview_script,
                         ffmpeg=ffmpeg,
@@ -2916,13 +3047,21 @@ def main(argv: list[str] | None = None) -> int:
                         vinyl_motion=args.vinyl_motion,
                         lossless_companion=args.lossless_companion,
                         full_decode=args.full_decode,
-                    ): task
-                    for task in tasks
+                    )
+                    for task in group
+                ]
+
+            with ThreadPoolExecutor(
+                max_workers=min(args.jobs, len(task_groups))
+            ) as executor:
+                futures = {
+                    executor.submit(render_group, group): group
+                    for group in task_groups
                 }
                 for future in as_completed(futures):
-                    item = future.result()
-                    results.append(item)
-                    print(json.dumps(_summary(item), ensure_ascii=False), flush=True)
+                    for item in future.result():
+                        results.append(item)
+                        print(json.dumps(_summary(item), ensure_ascii=False), flush=True)
 
         aggregate_report: Path | None = None
         if complete_track_selection:
@@ -2936,6 +3075,7 @@ def main(argv: list[str] | None = None) -> int:
                     full_decode=args.full_decode,
                     full_decode_exception_reason=args.skip_full_decode_reason,
                     profiles=profiles,
+                    visual_styles=visual_styles,
                     expected_song_count=len(tracks),
                 ),
             )
@@ -2946,6 +3086,7 @@ def main(argv: list[str] | None = None) -> int:
                     "release_decision": "verified",
                     "task_count": len(results),
                     "profiles": list(profiles),
+                    "visual_styles": list(visual_styles),
                     "songs": [str(track.song_id) for track in tracks],
                     "pixel_format": "yuv420p",
                     "pronunciation_validation": pronunciation_validation,

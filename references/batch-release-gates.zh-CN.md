@@ -4,6 +4,23 @@
 
 多首歌曲或多个交付配置一起编码、提升或打包时使用这些门禁。一键入口与底层渲染器必须执行同一套门禁。
 
+## AV1 4:2:0 批量视觉风格
+
+AV1 4:2:0批量入口支持`--visual-style vinyl|spectrum|both`，默认使用
+`vinyl`：
+
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
+  --manifest <album-manifest> `
+  --visual-style <vinyl|spectrum|both>
+```
+
+`spectrum`不要求vinyl输入或资源。`both`分别生成两个独立成品，一个使用vinyl、
+一个使用spectrum，并分别记录媒体、报告、哈希和提升身份。同一song/profile的两种风格共享哈希一致的profile ASS，并按顺序发布；它不是合并视觉效果的单个输出。`--single-track`只选择一个song和一个profile；使用
+`--visual-style both`时，可以为该song/profile生成两个版本。
+`--lossless-companion`和`--full-decode`仍是显式opt-in，不会因所选风格或`both`
+而隐式开启。每个生成的变体都必须单独执行发布门禁。
+
 ## 冻结生成
 
 全量编码前记录参数指纹：源文件、时间轴覆盖、渲染器、报告和测试身份；显式歌手解析与颜色、副唱角色和顶部叠加几何；编码器、像素格式、CQ/CRF、预设、配置、音频、容器、字体、主歌词/注音字号、间距和渲染选项；以及选定的时间证据链和交付配置。不要把歌曲数量、提示数量、CQ、字号或文件名写死进通用技能。

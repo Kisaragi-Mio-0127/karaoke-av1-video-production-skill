@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - direct script execution
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("standard", "wide")
+VISUAL_STYLES = ("vinyl", "spectrum")
 FONT_FAMILY = "HarmonyOS Sans SC"
 SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
 PROFILE_LAYOUTS = {
@@ -42,6 +43,7 @@ __all__ = [
     "resolve_font_paths",
     "resolve_path",
     "select_profiles",
+    "select_visual_styles",
     "select_tracks",
 ]
 
@@ -56,10 +58,11 @@ class RenderTask:
         root: Path,
         track: AlbumTrack,
         profile: str,
+        visual_style: str = "vinyl",
         sug_path: Path,
         ass_source: Path | None,
         composition_path: Path,
-        vinyl_path: Path,
+        vinyl_path: Path | None,
         fonts_dir: Path,
         font_file: Path,
         ass_output: Path,
@@ -72,6 +75,7 @@ class RenderTask:
         self.root = root
         self.track = track
         self.profile = profile
+        self.visual_style = visual_style
         self.sug_path = sug_path
         self.ass_source = ass_source
         self.composition_path = composition_path
@@ -90,7 +94,9 @@ class RenderTask:
 
     @property
     def report_stem(self) -> str:
-        return self.track.artifact_slug
+        if self.visual_style == "vinyl":
+            return self.track.artifact_slug
+        return f"{self.track.artifact_slug}_{self.visual_style}"
 
 
 def resolve_path(value: Path | str, *, base: Path = REPO_ROOT) -> Path:
@@ -209,6 +215,19 @@ def select_profiles(values: Iterable[str] | None) -> tuple[str, ...]:
         )
     requested_set = set(requested)
     return tuple(profile for profile in PROFILES if profile in requested_set)
+
+
+def select_visual_styles(value: str | None) -> tuple[str, ...]:
+    """Expand the batch visual-style selector in stable render order."""
+
+    selected = value or "vinyl"
+    if selected == "both":
+        return VISUAL_STYLES
+    if selected not in VISUAL_STYLES:
+        raise ValueError(
+            f"unknown --visual-style value: {selected}; expected vinyl, spectrum, or both"
+        )
+    return (selected,)
 
 
 def _is_temporary_name(path: Path) -> bool:
@@ -339,13 +358,25 @@ def _artwork_paths(
     artwork_root: Path,
     track: AlbumTrack,
     profile: str,
-) -> tuple[Path, Path]:
+    visual_style: str = "vinyl",
+) -> tuple[Path, Path | None]:
     track_artwork = artwork_root / track.artifact_slug
     profile_artwork = (
         artwork_root / "wide" / track.artifact_slug
         if profile == "wide"
         else track_artwork
     )
+    if visual_style == "spectrum":
+        preferred = (
+            artwork_root / "wide-spectrum" / track.artifact_slug / "composition.png"
+            if profile == "wide"
+            else artwork_root / "spectrum" / track.artifact_slug / "composition.png"
+        )
+        fallback = profile_artwork / "composition_spectrum.png"
+        composition = preferred if preferred.is_file() else fallback
+        return composition.resolve(), None
+    if visual_style != "vinyl":
+        raise ValueError(f"unsupported visual style: {visual_style}")
     composition = profile_artwork / "composition.png"
     vinyl = track_artwork / "vinyl.png"
     if not vinyl.is_file():
@@ -361,6 +392,7 @@ def plan_tasks(
     root: Path,
     tracks: Sequence[AlbumTrack],
     profiles: Sequence[str],
+    visual_styles: Sequence[str] = ("vinyl",),
     timing_dir: Path | None = None,
     artwork_root: Path | None = None,
     fonts_dir: Path | None = None,
@@ -383,59 +415,57 @@ def plan_tasks(
     for profile in profiles:
         if profile not in PROFILES:
             raise ValueError(f"unsupported profile: {profile}")
-        for track in tracks:
-            sug_path = find_latest_sug(timing_root, track)
-            ass_source = find_latest_ass(timing_root, track, profile)
-            composition_path, vinyl_path = _artwork_paths(
-                artwork_root, track, profile
-            )
-            missing.extend(
-                str(path)
-                for path in (
-                    track.audio_path,
-                    sug_path,
-                    composition_path,
-                    vinyl_path,
+        for visual_style in visual_styles:
+            if visual_style not in VISUAL_STYLES:
+                raise ValueError(f"unsupported visual style: {visual_style}")
+            for track in tracks:
+                sug_path = find_latest_sug(timing_root, track)
+                ass_source = find_latest_ass(timing_root, track, profile)
+                composition_path, vinyl_path = _artwork_paths(
+                    artwork_root, track, profile, visual_style
                 )
-                if not path.is_file()
-            )
-            validation_root = root / "validation" / profile
-            tasks.append(
-                RenderTask(
-                    album=album,
-                    root=root,
-                    track=track,
-                    profile=profile,
-                    sug_path=sug_path,
-                    ass_source=ass_source,
-                    composition_path=composition_path,
-                    vinyl_path=vinyl_path,
-                    fonts_dir=resolved_fonts_dir,
-                    font_file=resolved_font_file,
-                    ass_output=(
-                        timing_root / profile / f"{track.timing_stem}.ass"
-                    ).resolve(),
-                    video_output=(
-                        root
-                        / "video"
-                        / "hevc444"
-                        / profile
-                        / f"{track.artifact_slug}.mp4"
-                    ).resolve(),
-                    direct_report=(
-                        validation_root
-                        / f"{track.artifact_slug}_direct_hevc444_render_report.json"
-                    ).resolve(),
-                    ass_report=(
-                        validation_root / f"{track.artifact_slug}_ass_report.json"
-                    ).resolve(),
-                    duration_seconds=(
-                        float(duration_seconds)
-                        if duration_seconds is not None
-                        else track.expected_duration_ms / 1000.0
-                    ),
+                required_paths = [track.audio_path, sug_path, composition_path]
+                if vinyl_path is not None:
+                    required_paths.append(vinyl_path)
+                missing.extend(str(path) for path in required_paths if not path.is_file())
+                validation_root = root / "validation" / profile
+                tasks.append(
+                    RenderTask(
+                        album=album,
+                        root=root,
+                        track=track,
+                        profile=profile,
+                        visual_style=visual_style,
+                        sug_path=sug_path,
+                        ass_source=ass_source,
+                        composition_path=composition_path,
+                        vinyl_path=vinyl_path,
+                        fonts_dir=resolved_fonts_dir,
+                        font_file=resolved_font_file,
+                        ass_output=(
+                            timing_root / profile / f"{track.timing_stem}.ass"
+                        ).resolve(),
+                        video_output=(
+                            root
+                            / "video"
+                            / "hevc444"
+                            / profile
+                            / f"{track.artifact_slug}.mp4"
+                        ).resolve(),
+                        direct_report=(
+                            validation_root
+                            / f"{track.artifact_slug}_direct_hevc444_render_report.json"
+                        ).resolve(),
+                        ass_report=(
+                            validation_root / f"{track.artifact_slug}_ass_report.json"
+                        ).resolve(),
+                        duration_seconds=(
+                            float(duration_seconds)
+                            if duration_seconds is not None
+                            else track.expected_duration_ms / 1000.0
+                        ),
+                    )
                 )
-            )
     if missing:
         raise FileNotFoundError(
             "missing direct-render inputs:\n"

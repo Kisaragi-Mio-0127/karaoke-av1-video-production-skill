@@ -11,7 +11,7 @@
 
 ## 独立ASR规则
 
-- stable-ts和MMS_FA接收已知歌词或音素，属于强制对齐证据；独立ASR不接收歌词提示，是独立复核流程。
+- `stable-ts`和`MMS_FA`接收已知歌词或音素，属于强制对齐证据。`audit_karaoke_mms_alignment.py`是显式MMS审计；`build_karaoke_mms_overrides.py`单独把接受的visual-release覆盖冻结到`timing_overrides.json`。一键入口没有MMS参数，不会生成、消费或校验MMS；正式AV1 4:2:0批量渲染不会运行MMS，只会自动消费已有的`<album-root>/sources/timing_overrides.json`。
 - 不能把确定性插值称为ASR后备方案。独立ASR无法运行时记录`unresolved`和工具/模型错误，不能伪造识别词、置信度或通过结论。
 - ASR只能支持、否决或保持未解决，不能改写冻结歌词，也不能直接决定最终时间戳。
 - profile 专用的归一化必须显式处理；Unicode归一化后保留源文本和读音。不通过未经验证的 adapter 推断其他语言支持。

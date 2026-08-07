@@ -104,6 +104,39 @@ def test_grayscale_cover_still_produces_readable_unique_colours(tmp_path: Path):
         assert max(red, green, blue) - min(red, green, blue) >= 55
 
 
+def test_pale_peach_gradient_beats_tiny_near_black_hue_noise(tmp_path: Path):
+    cover = tmp_path / "peach-gradient-with-dark-noise.png"
+    image = Image.new("RGB", (128, 128))
+    for y in range(image.height):
+        for x in range(image.width):
+            image.putpixel(
+                (x, y),
+                (210 + x % 32, 140 + y % 32, 115 + (x + y) % 24),
+            )
+    for y in range(16):
+        for x in range(16):
+            image.putpixel((x, y), (4, 1, 2))
+    image.save(cover)
+
+    first = extract_cover_palette(cover)
+    second = extract_cover_palette(cover)
+
+    _assert_palette_contract(first)
+    red, green, blue = (
+        int(first["primary"][index : index + 2], 16) for index in (1, 3, 5)
+    )
+    assert red > green > blue
+    assert red >= 200 and green >= 130 and blue >= 100
+    assert first["colors"] == second["colors"]
+    dark_noise = next(
+        candidate
+        for candidate in first["candidates"]
+        if candidate["source_color"] == "#040102"
+    )
+    assert dark_noise["eligible"] is False
+    assert dark_noise["chroma"] < 0.06
+
+
 def test_near_monochrome_cover_produces_visually_separated_singer_slots(
     tmp_path: Path,
 ):

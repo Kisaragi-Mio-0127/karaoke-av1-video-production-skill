@@ -2,7 +2,7 @@
 
 [简体中文](subtitle-timing-quality.zh-CN.md) | English
 
-Use these gates for semantic phrase segmentation, cue display, Japanese ruby, explicit multi-singer identity, secondary overlays, MMS timing evidence, and adjacent-line highlight release. Read [singer-overlays.md](singer-overlays.md) for the complete singer and top-overlay contract.
+Use these gates for semantic phrase segmentation, cue display, Japanese ruby, explicit multi-singer identity, secondary overlays, timing evidence from explicit MMS audit/override, and adjacent-line highlight release. Read [singer-overlays.md](singer-overlays.md) for the complete singer and top-overlay contract.
 
 ## Fact chain and semantic phrases
 
@@ -31,7 +31,9 @@ Skip manual timing review when automatic evidence and release checks agree. When
 
 ## Editor, MMS, and independent ASR
 
-MMS and separated-vocal results are timing evidence rather than delivery tracks. Record tool, model, version, input channel, generation identity, onset evidence, release evidence, and any A/B decision.
+MMS and separated-vocal results are timing evidence rather than delivery tracks. Record tool, model, version, input channel, generation identity, onset evidence, release evidence, and any A/B decision. The one-click route has no MMS parameters and does not generate, consume, or validate MMS. Use `audit_karaoke_mms_alignment.py` and `build_karaoke_mms_overrides.py` as explicit standalone scripts; formal batch rendering does not run MMS.
+
+If the formal AV1 4:2:0 batch finds the fixed path `<album-root>/sources/timing_overrides.json`, it consumes existing visual-release overrides only; it does not create the file or perform an MMS audit.
 
 Independent ASR is separate from forced alignment. The documented route uses the configured Japanese profile; another profile requires a validated adapter. When independent ASR is unavailable, fails, or cannot match the frozen lyric window, record `unresolved` instead of substituting interpolation or forced-alignment output.
 
@@ -43,6 +45,6 @@ Derive adjacent-line release from ASS karaoke tags, event timing, post-roll, and
 
 For per-character highlighting, record acoustic onset, visual onset, visual release, line release, event end, and fade end separately. Ensure every visible character has a strictly increasing visual start after ASS time quantization, including long marks, small kana, digits, and punctuation.
 
-For cover-derived colors, record the extraction method, candidates, accepted RGB value, and review decision. Apply the resolved singer colour consistently to the editable singer colour, ASS `Main`/`Glow`, active cue, and any top secondary subtitle layers; keep inactive text white, verify RGB-to-ASS-BGR conversion, and inspect frames before, during, and after highlight.
+For cover-derived colors, record the extraction method, candidates, accepted RGB value, and review decision. The current extractor excludes near-black chroma noise and aggregates candidate pixel area across neighbouring colours in Lab space; do not promote rare JPEG noise into the primary colour. Apply the resolved singer colour consistently to the editable singer colour, ASS `Main`/`Glow`, active cue, and any top secondary subtitle layers; keep inactive text white, verify RGB-to-ASS-BGR conversion, and inspect frames before, during, and after highlight.
 
-Run renderer, preview, segmentation, cue, ruby, release, and packaging tests in a writable project-local temporary directory. Cover override reachability, phrase recomposition, cue timing, font-size exceptions, three-layer ruby status, editable-project identity, relative media resolution, audio-load evidence, MMS source identity, ASS/report identity, release fields, and boundary frames.
+Run renderer, preview, segmentation, cue, ruby, release, and packaging tests in a writable project-local temporary directory. Cover override reachability, phrase recomposition, cue timing, font-size exceptions, three-layer ruby status, editable-project identity, relative media resolution, audio-load evidence, MMS source identity when explicit MMS audit/override evidence is in scope, ASS/report identity, release fields, and boundary frames.

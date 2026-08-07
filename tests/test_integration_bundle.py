@@ -60,7 +60,7 @@ class IntegrationBundleTests(unittest.TestCase):
             if "__pycache__" not in path.parts
         }
         self.assertEqual(recorded_paths, bundled_paths)
-        self.assertEqual(len(script_paths), 23)
+        self.assertEqual(len(script_paths), 22)
         self.assertEqual(len(package_paths), 5)
         self.assertEqual(shared_paths, INTERNAL_MODULES)
         self.assertTrue(
@@ -123,7 +123,7 @@ class IntegrationBundleTests(unittest.TestCase):
             for path in SCRIPTS.rglob("*.py")
             if "__pycache__" not in path.parts
         )
-        self.assertEqual(len(files), 31)
+        self.assertEqual(len(files), 30)
         for path in files:
             with self.subTest(path=path.relative_to(SCRIPTS).as_posix()):
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

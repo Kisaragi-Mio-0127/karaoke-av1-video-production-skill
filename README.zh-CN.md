@@ -4,12 +4,12 @@
 
 这是一个面向Codex的卡拉OK视频制作Skill，同时提供StrangeUtaGame集成，用于制作、审核、渲染、验证和打包带有可编辑时间轴来源与AV1 4:2:0发布检查的视频。
 
-内置工作流使用日语（`ja`），入口为`run_karaoke_japanese_workflow.py`。其他语言工作流需要各自经过验证的适配器。
+内置公共工作流使用日语（`ja`），入口为`run_karaoke_japanese_workflow.py`。当前公共分发路径经验证仅支持日语（`ja`）；其他语言工作流需要各自经过验证的适配器，且不属于此分发。
 
 ## 功能
 
 - 检查→预览→编码→验证的制作流程。
-- 语义分段、日文注音词边界审核、可编辑SUG一致性、MMS证据、独立ASR复核和视觉适配检查。
+- 语义分段、日文注音词边界审核、可编辑SUG一致性、显式MMS审计/覆盖证据、独立ASR复核和视觉适配检查。
 - 通过确定性离线封面提取生成有序8色调色板、封面和提取器身份，并为所有受支持配置构建唯一的`karaoke-color-plan/v1`。
 - 按显式SUG的`singer_id`路由多演唱者，先解析字符级→句级→项目默认的有效歌手，只为实际出现的歌手按歌词首字符出现顺序分配颜色槽位；应用明确的颜色优先级，活动的Main、Glow、提示字幕和顶部叠加层使用一致的歌手颜色，未激活文字保持白色。
 - 显式的`opera`、`harmony`和`secondary`角色使用顶部居中叠加层，安全带为`y=0..96`、锚点为`y=12`，默认字号为`60 px`，长句最低缩小到`36 px`；实际outline/glow保留区延伸到`y=107`；跨歌手注音必须拒绝。
@@ -27,6 +27,8 @@
 ## 颜色计划
 
 确定性离线封面提取器输出恰好8种有序颜色，并生成`cover_sha256`和当前提取器哈希。renderer只构建一个`karaoke-color-plan/v1`；一键和批量只是同一实现的两个入口。
+
+当前取色器会先排除近黑色相噪声，并按Lab邻域的像素面积聚合候选颜色；稀有JPEG噪声不应被提亮成主色。
 
 解析有效歌手后，按歌词字符首次出现的顺序，为实际出现的`singer_id`依次分配主色、次色和第三色；未出现的歌手不占用槽位。颜色优先级为：
 `explicit singer_id=#RRGGBB` > 显式主色或次色槽覆盖 > 封面调色板 > 项目策略SUG颜色。主色同步首位歌手和频谱；次色同步第二歌手，单歌手时使用`palette[1]`，并同步进度条。
@@ -69,7 +71,7 @@ if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
 uv run --no-sync python --version
 ```
 
-另行安装`ffmpeg`和`ffprobe`。Rubber Band仅在变调时需要；Whisper、MMS和外部MSST属于可选证据链。使用以下命令检查目标环境：
+另行安装`ffmpeg`和`ffprobe`。Rubber Band仅在变调时需要；Whisper和外部MSST属于可选证据链。MMS仅通过显式独立审计/覆盖脚本使用；一键入口没有MMS参数，也不会生成、消费或校验MMS。使用以下命令检查目标环境：
 
 ```powershell
 $skillRoot = (Resolve-Path .).Path
@@ -84,7 +86,7 @@ uv run --no-sync python "$skillRoot/scripts/check_karaoke_environment.py" --targ
 2. 探测源媒体并选择输出配置。
 3. 构建或更新规范SUG，然后审核语义分段和适用的注音范围。
 4. 运行确定性离线封面提取器，记录有序8色调色板以及封面和提取器身份，并构建共享颜色计划。
-5. 制作需要额外时间证据时，使用MMS、独立ASR或MSST派生证据。
+5. 制作需要额外时间证据时，单独运行显式MMS审计/覆盖脚本，或使用独立ASR/MSST派生证据；MMS不属于一键或批量渲染。
 6. 构建当前宽屏构图；使用黑胶布局时重新生成当前旋转黑胶资源。
 7. 渲染隔离预览、检查代表帧，并编码所选MP4输出。
 8. 验证媒体结构和抽样输出，然后最终化、提升或打包已接受文件。
@@ -114,6 +116,8 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 
 workflow先构建共享的`karaoke-color-plan/v1`，再独立写入`karaoke-preflight.ass`，并在渲染阶段写入最终`karaoke.ass`。ASS、视频和工作流输出记录相同的`color_plan_sha256`；构图颜色记录过时或不一致时必须 fail closed，源SUG保持不变。默认使用完整时长，并且只生成带AAC-LC音频的MP4。MKV和完整解码必须显式选择；默认运行不生成MKV，也不执行完整解码。注音验证默认是可选的；日文结构性注音检查仍然必须通过，`required`和`off`仍需显式选择。一键和批量入口使用同一renderer和门禁。仅在需要显式覆盖某个歌手颜色时，才在任一入口重复传入`--singer-color <singer-id>=#RRGGBB`；该设置优先于颜色槽和封面调色板。
 
+一键入口没有MMS参数，不会生成、消费或校验MMS。`audit_karaoke_mms_alignment.py`和`build_karaoke_mms_overrides.py`是显式独立脚本；只有需要MMS证据时才单独运行它们。
+
 ## AV1 4:2:0 批量命令
 
 AV1 4:2:0 批量入口为
@@ -141,6 +145,9 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
 `both`不会隐式开启任一选项。每个独立成品都必须执行
 [批量发布门禁](references/batch-release-gates.zh-CN.md)中的发布与回滚检查。
 
+正式AV1 4:2:0批量渲染不会运行MMS。如果固定路径
+`<album-root>/sources/timing_overrides.json`存在，批量renderer会自动消费其中已有的visual-release覆盖（并记录文件身份）；这不是MMS运行、审计或参数，批量renderer也不会创建该文件。
+
 ## 参考文档
 
 每份参考文档都有内容对应的英文和中文版本：
@@ -164,7 +171,7 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
 | 配置与文本 | `karaoke_album.py`、`karaoke_language.py` |
 | 时间轴与可编辑SUG | `karaoke_timing.py`、`karaoke_review_preview.py`、`sync_karaoke_editable_ruby.py`、`sug_ruby.py` |
 | 对齐证据 | `audit_karaoke_asr_recognition.py`、`audit_karaoke_mms_alignment.py`、`build_karaoke_mms_overrides.py`、`prepare_karaoke_msst_vocals.py` |
-| 构图与渲染 | `karaoke_cover_palette.py`、`karaoke_color_plan.py`、`build_karaoke_wide_artwork.py`、`render_vinyl_karaoke.py`、`karaoke_direct_album_planning.py`、`render_karaoke_direct_av1_420_album.py`、`render_karaoke_direct_hevc444_album.py`、`render_karaoke_direct_av1_album.py`（旧名称兼容入口） |
+| 构图与渲染 | `karaoke_cover_palette.py`、`karaoke_color_plan.py`、`build_karaoke_wide_artwork.py`、`render_vinyl_karaoke.py`、`karaoke_direct_album_planning.py`、`render_karaoke_direct_av1_420_album.py`、`render_karaoke_direct_hevc444_album.py` |
 | 日语工作流 | `karaoke_workflow.py`、`run_karaoke_japanese_workflow.py` |
 | 媒体与发布 | `inspect_karaoke_media.py`、`transcode_karaoke_av1.py`、`finalize_karaoke_release.py`、`karaoke_release_snapshot.py`、`package_karaoke_numbered_archives.py` |
 | 完整混音变调 | `pitch_shift_audio.py` |
@@ -173,7 +180,7 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
 
 仓库支持工具为`check_sug_compatibility.py`、`check_karaoke_environment.py`、`install_strangeutagame_integration.py`、`open_editable_project_with_audio_probe.py`以及`pitch_shift_audio.py`的独立镜像。
 
-专辑直出时，AV1 4:2:0使用`render_karaoke_direct_av1_420_album.py`，HEVC 4:4:4使用`render_karaoke_direct_hevc444_album.py`。`render_karaoke_direct_av1_album.py`仅保留为HEVC命令的旧名称兼容入口，运行时会显示弃用提示。清单选择和任务规划等共享流程位于`karaoke_direct_album_planning.py`。
+专辑直出时，AV1 4:2:0使用`render_karaoke_direct_av1_420_album.py`，HEVC 4:4:4使用`render_karaoke_direct_hevc444_album.py`。清单选择和任务规划等共享流程位于`karaoke_direct_album_planning.py`。
 
 ## 仓库结构与测试
 

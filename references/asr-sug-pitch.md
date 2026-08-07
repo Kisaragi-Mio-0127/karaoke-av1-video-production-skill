@@ -11,7 +11,7 @@
 
 ## Independent ASR policy
 
-- stable-ts and MMS_FA receive known lyrics or tokens and are forced-alignment evidence. Independent ASR transcribes without lyric prompts and is a separate review lane.
+- `stable-ts` and `MMS_FA` receive known lyrics or tokens and are forced-alignment evidence. `audit_karaoke_mms_alignment.py` is the explicit MMS audit; `build_karaoke_mms_overrides.py` separately freezes accepted visual-release overrides into `timing_overrides.json`. The one-click route has no MMS parameters and does not generate, consume, or validate MMS; formal AV1 4:2:0 batch rendering does not run MMS and only auto-consumes an existing `<album-root>/sources/timing_overrides.json`.
 - Never call deterministic interpolation an ASR fallback. When independent ASR cannot run, record `unresolved` with the tool/model error; do not synthesize recognized tokens, confidence, or a passing disposition.
 - Allow ASR to support, veto, or remain unresolved. It must not rewrite frozen lyrics or directly choose timestamps.
 - Keep profile-specific normalization explicit and preserve source text and readings after Unicode normalization. Do not infer support for another language without a validated adapter.

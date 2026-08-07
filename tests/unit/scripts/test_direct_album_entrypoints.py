@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +12,6 @@ if str(SCRIPTS) not in sys.path:
 
 planning = importlib.import_module("karaoke_direct_album_planning")
 av1 = importlib.import_module("render_karaoke_direct_av1_420_album")
-legacy = importlib.import_module("render_karaoke_direct_av1_album")
 hevc = importlib.import_module("render_karaoke_direct_hevc444_album")
 
 
@@ -30,49 +28,11 @@ def _task(tmp_path: Path) -> SimpleNamespace:
     )
 
 
-def test_public_legacy_entry_preserves_argv_exit_and_warns(monkeypatch, capsys) -> None:
-    observed = []
-
-    def fake_main(argv):
-        observed.append(argv)
-        return 19
-
-    monkeypatch.setattr(legacy, "_hevc_main", fake_main)
-
-    assert legacy.main(["--profile", "wide"]) == 19
-    assert observed == [["--profile", "wide"]]
-    assert "DEPRECATED" in capsys.readouterr().err
-
-
-def test_public_legacy_entry_supports_direct_and_module_execution() -> None:
-    script = SCRIPTS / "render_karaoke_direct_av1_album.py"
-    commands = (
-        [sys.executable, str(script), "--help"],
-        [sys.executable, "-m", "render_karaoke_direct_av1_album", "--help"],
-    )
-    for command in commands:
-        completed = subprocess.run(
-            command,
-            cwd=SCRIPTS,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-        assert completed.returncode == 0
-        assert "DEPRECATED" in completed.stderr
-        assert "--ass-only" in completed.stdout
-
-
 def test_public_renderers_share_neutral_planning_and_keep_codecs_isolated(
     tmp_path: Path,
 ) -> None:
     assert hevc.plan_tasks is planning.plan_tasks
     assert av1.render_core is planning
-    assert "render_karaoke_direct_av1_album as render_core" not in Path(
-        av1.__file__
-    ).read_text(encoding="utf-8")
 
     task = _task(tmp_path)
     hevc_command = hevc.build_preview_command(

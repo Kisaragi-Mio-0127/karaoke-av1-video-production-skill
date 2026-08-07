@@ -15,12 +15,14 @@ from typing import Any
 from PIL import Image, ImageOps
 
 SCHEMA_VERSION = "karaoke-cover-palette/v1"
-METHOD = "fixed-grid-rgb5-lab-distance-hsv-fallback/v1"
+METHOD = "fixed-grid-rgb5-lab-neighborhood-readable-hsv-fallback/v2"
 _HEX_COLOR = re.compile(r"^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")
 _MAX_COLOR_COUNT = 32
 _MAX_SAMPLE_AXIS = 256
 _MIN_SOURCE_SATURATION = 0.16
+_MIN_SOURCE_CHROMA = 0.06
 _MIN_LAB_DISTANCE = 28.0
+_PRIMARY_NEIGHBOR_LAB_DISTANCE = 18.0
 
 
 def _sha256_file(path: Path) -> str:
@@ -74,8 +76,8 @@ def _rgb_to_hex(rgb: Iterable[int]) -> str:
 def _readable_rgb(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
     red, green, blue = (channel / 255.0 for channel in rgb)
     hue, saturation, value = colorsys.rgb_to_hsv(red, green, blue)
-    saturation = min(0.88, max(0.48, saturation))
-    value = min(0.92, max(0.70, value))
+    saturation = min(0.88, max(0.40, saturation))
+    value = min(0.90, max(0.70, value))
     return tuple(
         round(channel * 255) for channel in colorsys.hsv_to_rgb(hue, saturation, value)
     )
@@ -171,11 +173,12 @@ def _build_candidates(
         _, saturation, value = colorsys.rgb_to_hsv(
             *(channel / 255.0 for channel in rgb)
         )
-        raw_candidates.append((key, count, rgb, saturation, value))
+        chroma = (max(rgb) - min(rgb)) / 255.0
+        raw_candidates.append((key, count, rgb, saturation, value, chroma))
 
     raw_candidates.sort(key=lambda item: (-item[1], -item[3], item[0]))
     candidates = []
-    for key, count, rgb, saturation, value in raw_candidates[:64]:
+    for key, count, rgb, saturation, value, chroma in raw_candidates[:64]:
         readable = _readable_rgb(rgb)
         candidates.append(
             {
@@ -186,10 +189,37 @@ def _build_candidates(
                 "share": round(count / total, 8),
                 "saturation": round(saturation, 6),
                 "value": round(value, 6),
-                "eligible": saturation >= _MIN_SOURCE_SATURATION,
+                "chroma": round(chroma, 6),
+                "eligible": (
+                    saturation >= _MIN_SOURCE_SATURATION
+                    and chroma >= _MIN_SOURCE_CHROMA
+                ),
                 "readability_adjusted": readable != rgb,
             }
         )
+
+    # A smooth sky or skin-tone region is normally split across many RGB5 bins.
+    # Rank its representative by the total nearby Lab population instead of
+    # letting one tiny, highly saturated (often near-black) bin dominate.
+    eligible = [candidate for candidate in candidates if candidate["eligible"]]
+    for candidate in candidates:
+        neighborhood_share = 0.0
+        primary_score = 0.0
+        if candidate["eligible"]:
+            source_rgb = _hex_to_rgb(candidate["source_color"])
+            neighborhood_share = sum(
+                neighbor["share"]
+                for neighbor in eligible
+                if _lab_distance(
+                    source_rgb, _hex_to_rgb(neighbor["source_color"])
+                )
+                <= _PRIMARY_NEIGHBOR_LAB_DISTANCE
+            )
+            value_fit = max(0.35, 1.0 - 1.8 * abs(candidate["value"] - 0.86))
+            colorfulness = 0.10 + 0.90 * candidate["saturation"]
+            primary_score = neighborhood_share * colorfulness * value_fit
+        candidate["neighborhood_share"] = round(neighborhood_share, 8)
+        candidate["primary_score"] = round(primary_score, 10)
     return candidates
 
 
@@ -208,10 +238,8 @@ def _select_source_colours(
 
     pool.sort(
         key=lambda candidate: (
-            -(
-                candidate["share"] * (0.55 + 0.45 * candidate["saturation"])
-                + 0.08 * candidate["saturation"]
-            ),
+            -candidate["primary_score"],
+            -candidate["population"],
             candidate["color"],
         )
     )

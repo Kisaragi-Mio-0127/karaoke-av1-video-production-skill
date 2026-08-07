@@ -18,6 +18,9 @@ The generic default remains Japanese (`ja`) for legacy manifests. Use
 language policies require separately validated adapters, but colour planning
 is shared: every supported profile uses one `karaoke-color-plan/v1`, with no
 language-specific colour fork.
+The public/shared route is validated only for Japanese (`ja`); non-Japanese
+output requires a separately validated language adapter and does not inherit
+Japanese validation.
 
 Before rendering, the deterministic offline cover extractor emits an ordered
 palette of exactly eight colours plus the cover identity and current extractor
@@ -37,6 +40,12 @@ hash, and the ordered `palette`; stale or inconsistent metadata fails closed.
 Both formal entries accept repeatable `--singer-color
 <singer-id>=#RRGGBB`; pass the same ordered overrides to preflight and final
 rendering, and let explicit singer overrides win over slot and palette colours.
+The shared palette contract excludes near-black absolute-chroma noise before
+Lab-neighbourhood area aggregation, emits exactly eight colours
+deterministically, and never hard-codes song-specific colours. Recheck the
+selected colours in representative rendered frames, including active sweep,
+progress, and cue frames, against the plan; frame evidence is required
+alongside metadata and hash checks.
 
 Use `tts-voice-workflow-ops` separately when generating or cloning voices, separating vocals, or converting a singer. This skill starts from authorized media, lyrics, subtitles, fonts, and audio stems.
 
@@ -94,6 +103,12 @@ optional by default; Japanese structural ruby gates still apply, and `required`
 or `off` remain explicit choices. The one-click and batch entry points are
 thin front ends over the same renderer and must apply the same singer, colour
 plan, overlay, ruby, container, and diagnostic gates.
+Neither entry invokes MMS by default or exposes an MMS interface. Any MMS audit
+or timing-override generation must be a separate, explicitly invoked run.
+If the fixed-path `timing_overrides` artifact exists, batch rendering passes
+its existing visual-release overrides through and records the file identity;
+it never invokes MMS or creates timing overrides. The renderer does not prove
+MMS provenance, so validate that artifact before starting the batch.
 
 The album/batch direct renderer (`render_karaoke_direct_av1_420_album.py`)
 is the AV1 4:2:0 batch entry and accepts `--visual-style vinyl|spectrum|both`,
@@ -116,9 +131,9 @@ combined in one file.
 not implied by `both`. Apply the per-output batch release gates before
 promotion.
 Use `render_karaoke_direct_hevc444_album.py` for the explicit HEVC 4:4:4 lane.
-Treat `render_karaoke_direct_av1_album.py` only as its deprecated compatibility
-name; shared manifest selection and task planning belong to
-`karaoke_direct_album_planning.py`, not either codec-specific entry point.
+These are the only codec-specific direct album entries; shared manifest
+selection and task planning belong to `karaoke_direct_album_planning.py`, not
+either codec-specific entry point.
 
 Read [subtitle-timing-quality.md](references/subtitle-timing-quality.md) / [中文](references/subtitle-timing-quality.zh-CN.md) when changing phrase segmentation, cue behavior, ruby, MMS-derived timing, highlight release, visual-fit rules, or opening an editable timing project for review.
 
@@ -175,8 +190,8 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - For a held syllable reported as too short, inspect the following character's sweep onset as well as the current character's release. If the following onset was assigned inside the held vowel, move the reviewed following onset (or a renderer-only visual onset) so the held glyph consumes the sustain; do not misuse a line-level preload or event boundary to create the effect. Distinguish sustained sound from a silent breath before accepting the change.
 - Record the cover-derived palette and current extractor hash in composition metadata, together with `cover_sha256`. Bind the composition, ASS, video, and workflow report to the same `color_plan_sha256`; stale or inconsistent cover/extractor/palette metadata fails closed. Synchronize the plan's approved RGB values across the resolved singer colour projection, ASS `Main`/`Glow` primary colour, spectrum, progress, and active cue colours while retaining the approved unhighlighted, outline, alpha, and ruby colours. Verify the RGB-to-ASS BGR conversion and inspect a partial-sweep frame. The source SUG remains unchanged.
 - For wide-layout karaoke output, fix the default typography at `1.5x` the project's established `1x` baseline for main lyrics, ruby, and countdown cues. For the current 72/34/26 px baseline, require 108/51/39 px respectively. Use a 35 px ruby-to-main anchor gap and place countdown cues 16 px above the ruby anchor. Apply both spacing values consistently to upper, lower, outro, and cue layouts. Do not switch to `2x`, silently shrink, or change only one of these layers unless the user explicitly requests it or measured overflow is accepted as a recorded, rollback-safe exception.
-- Treat original-mix and separated-vocal MMS results as timing evidence, not delivery tracks. Resolve conflicts with recorded confidence and human A/B review.
-- Use the configured language profile for the documented ASR and alignment path; require a validated adapter for any non-default profile. Keep independent ASR separate from stable-ts and MMS forced alignment; it may support, veto, or remain unresolved, but is never a silent fallback that replaces failed alignment. If ASR is unavailable or errors, record `unresolved` and require other evidence or human review.
+- Treat externally produced original-mix and separated-vocal MMS audit results as timing evidence, not delivery tracks. MMS is not run by the one-click or batch renderer. Resolve conflicts with recorded confidence and human A/B review.
+- Use the configured language profile for the documented ASR and alignment path; require a validated adapter for any non-default profile. Keep independent ASR separate from stable-ts and any explicitly run MMS forced alignment; it may support, veto, or remain unresolved, but is never a silent fallback that replaces failed alignment. If ASR is unavailable or errors, record `unresolved` and require other evidence or human review.
 - In StrangeUtaGame, pronunciation validation is an explicit `optional`, `required`, or `off` mode and defaults to non-blocking `optional`. `optional` keeps structural ruby checks and SUG/ASS/frame agreement mandatory, but a missing semantic sidecar is recorded as not performed and does not block release. Use `required` only when explicitly requested; use `off` to disable semantic-sidecar review.
 - Resolve CJK fonts explicitly and inspect missing-glyph or fallback-font warnings.
 - Correct odd dimensions by an explicit pad or scale decision before subtitle rendering; prefer padding when cropping would discard content.

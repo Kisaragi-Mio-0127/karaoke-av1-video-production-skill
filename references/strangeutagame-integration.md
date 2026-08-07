@@ -28,7 +28,7 @@ if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
 uv run --no-sync python --version
 ```
 
-Install `ffmpeg` and `ffprobe` separately and verify libass plus an available AV1 encoder. Rubber Band is required only for pitch shifting. Whisper, MMS, MSST, and CJK fonts are selected according to the production configuration.
+Install `ffmpeg` and `ffprobe` separately and verify libass plus an available AV1 encoder. Rubber Band is required only for pitch shifting. Whisper and MSST are optional evidence lanes. MMS is used only through the explicit standalone `audit_karaoke_mms_alignment.py` and `build_karaoke_mms_overrides.py` scripts; the one-click route has no MMS parameters and never generates, consumes, or validates MMS. CJK fonts are selected according to the production configuration.
 
 The tested compatibility baseline is StrangeUtaGame 1.4.5 with SUG storage format 0.3.0. Read the application version from `src/strange_uta_game/__version__.py` and the storage format from `SugMigrator.CURRENT_VERSION`.
 
@@ -41,7 +41,8 @@ Song-specific display, ruby-group, and timing-reading decisions can be supplied 
 ## Production order
 
 ```text
-manifest -> Japanese workflow -> optional MSST evidence -> ASR/MMS review
+manifest -> Japanese workflow -> optional MSST evidence -> independent ASR review
+-> optional explicit MMS audit/override
 -> source lyrics -> candidate ruby in canonical SUG -> contextual ruby review
 -> timing and phrase decisions -> read-only renderer -> ASS/report/frames
 -> composition -> AV1 render -> media inspection -> finalization -> archive
@@ -57,7 +58,11 @@ The vinyl remains rotating and is regenerated for formal and test runs with `dir
 
 The current wide composition is `wide-layout-v6/top-secondary-clearance`: vinyl card `(40,30,340,402)`, footer bottom padding `12`, and lower subtitle panel beginning at `y=576`. The outer right panel and compact vinyl backplate are absent. The spectrum variant uses clip-safe region `(736,226,1168,348)` with 64 px horizontal glow clearance, 56 px vertical glow clearance, and 8 px bar clearance at the top and bottom. The secondary overlay uses anchor `y=12`, default `60 px`, minimum `36 px`, content safe band `y=0..96`, and outline/glow reserve through `y=107`; title label/title/artist positions are `y=120/155/220`, using actual ink bounds with at least `16 px` clearance from the reserve.
 
-Direct album entry points are codec-specific: `render_karaoke_direct_av1_420_album.py` is the AV1 4:2:0 command and `render_karaoke_direct_hevc444_album.py` is the HEVC 4:4:4 command. The older `render_karaoke_direct_av1_album.py` name remains a deprecated compatibility entry for HEVC. Both codec lanes use the neutral `karaoke_direct_album_planning.py` module for manifest selection and task planning.
+The cover extractor excludes near-black chroma noise and aggregates candidate pixel area across neighbouring colours in Lab space, so a rare JPEG-noise sample is not brightened into the primary colour.
+
+Direct album entry points are codec-specific: `render_karaoke_direct_av1_420_album.py` is the AV1 4:2:0 command and `render_karaoke_direct_hevc444_album.py` is the HEVC 4:4:4 command. Both codec lanes use the neutral `karaoke_direct_album_planning.py` module for manifest selection and task planning.
+
+Formal AV1 4:2:0 batch rendering does not run MMS. If the fixed path `<album-root>/sources/timing_overrides.json` exists, the batch entry automatically consumes its existing visual-release overrides; it does not run an MMS audit or create the file.
 
 ## AV1 4:2:0 batch workflow
 
@@ -115,7 +120,7 @@ and validation identity separate.
 
 ## Installed files
 
-The public workflow entry is `scripts/run_karaoke_japanese_workflow.py`, coordinated by `scripts/karaoke_workflow.py`. Shared code lives under `karaoke_common/`, while Japanese layout code lives under `karaoke_japanese/`.
+The public workflow entry is `scripts/run_karaoke_japanese_workflow.py`, coordinated by `scripts/karaoke_workflow.py`. Shared code lives under `karaoke_common/`, while Japanese layout code lives under `karaoke_japanese/`. The public distribution path currently has only the Japanese (`ja`) implementation verified; other language profiles require a separately validated adapter and are not part of this public path.
 
 The compatibility checker remains in the Skill repository. Run it and the environment checker with the target checkout's project-local Python:
 

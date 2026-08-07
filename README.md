@@ -4,12 +4,12 @@
 
 A Codex skill and StrangeUtaGame integration for producing, reviewing, rendering, validating, and packaging karaoke videos with editable timing provenance and AV1 4:2:0 release checks.
 
-The bundled workflow uses Japanese (`ja`) and starts from `run_karaoke_japanese_workflow.py`. Additional language workflows require their own validated adapters.
+The bundled public workflow uses Japanese (`ja`) and starts from `run_karaoke_japanese_workflow.py`. The public distribution path is currently verified for Japanese (`ja`) only; additional language workflows require their own validated adapters and are not part of this distribution.
 
 ## Capabilities
 
 - Inspect → preview → encode → verify production flow.
-- Semantic phrase segmentation, Japanese ruby word-boundary review, editable SUG parity, MMS evidence, independent ASR review, and visual-fit checks.
+- Semantic phrase segmentation, Japanese ruby word-boundary review, editable SUG parity, explicit MMS audit/override evidence, independent ASR review, and visual-fit checks.
 - Deterministic offline cover extraction with an ordered eight-colour palette, cover/extractor identities, and one shared `karaoke-color-plan/v1` for every supported profile.
 - Explicit multi-singer SUG `singer_id` routing with character → sentence → project-default effective-singer resolution, first-character slot allocation for active singers only, explicit colour precedence, consistent active colours across Main/Glow/cues/top overlays, and white inactive text.
 - Dedicated top-centred `opera`/`harmony`/`secondary` overlays use the `y=0..96` safe band at anchor `y=12`, a default `60 px` font, and a `36 px` minimum for long-line fitting; the actual outline/glow reserve extends through `y=107`; cross-singer ruby is rejected.
@@ -30,6 +30,10 @@ The deterministic offline cover extractor emits an ordered palette of exactly
 eight colours plus `cover_sha256` and the current extractor hash. The renderer
 builds exactly one `karaoke-color-plan/v1`; one-click and batch are entry
 points to this same implementation.
+
+The extractor excludes near-black chroma noise and aggregates candidate area
+across neighbouring colours in Lab space. A rare JPEG-noise sample must not be
+brightened into the primary colour.
 
 After effective singer resolution, assign primary, secondary, and tertiary
 slots by the first lyric-character appearance of active `singer_id` values;
@@ -80,7 +84,7 @@ if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
 uv run --no-sync python --version
 ```
 
-Install `ffmpeg` and `ffprobe` separately. Rubber Band is needed for pitch shifting; Whisper, MMS, and external MSST are optional evidence lanes. Check the target environment with:
+Install `ffmpeg` and `ffprobe` separately. Rubber Band is needed for pitch shifting; Whisper and external MSST are optional evidence lanes. MMS is available only through explicit standalone audit/override scripts; the one-click route has no MMS parameters and never generates, consumes, or validates MMS. Check the target environment with:
 
 ```powershell
 $skillRoot = (Resolve-Path .).Path
@@ -95,7 +99,7 @@ uv run --no-sync python "$skillRoot/scripts/check_karaoke_environment.py" --targ
 2. Probe source media and select the output profile.
 3. Build or update the canonical SUG, then review phrase segmentation and applicable ruby spans.
 4. Run the deterministic offline cover extractor, record the ordered eight-colour palette and cover/extractor identities, and build the shared colour plan.
-5. Use MMS, independent ASR, or MSST-derived evidence when the production requires additional timing evidence.
+5. When additional timing evidence is required, run the explicit standalone MMS audit/override scripts, independent ASR, or MSST-derived evidence; MMS is not part of one-click or batch rendering.
 6. Build the current wide composition and regenerate the current rotating vinyl asset when using the vinyl layout.
 7. Render an isolated preview, inspect representative frames, and encode the selected MP4 output.
 8. Verify media structure and sampled output, then finalize, promote, or package the accepted files.
@@ -142,6 +146,11 @@ batch entries use the same renderer and gates. Repeat `--singer-color
 <singer-id>=#RRGGBB` on either entry only when an explicit per-singer override
 is required; it takes precedence over slot and palette colours.
 
+The one-click route has no MMS parameters. It does not generate, consume, or
+validate MMS. `audit_karaoke_mms_alignment.py` and
+`build_karaoke_mms_overrides.py` are explicit independent scripts; run them
+separately only when MMS evidence is required.
+
 ## AV1 4:2:0 batch command
 
 The AV1 4:2:0 batch entry is
@@ -175,6 +184,12 @@ selected style or styles. Neither option is implied by `both`. Apply the
 per-output release and rollback gates in
 [batch-release-gates.md](references/batch-release-gates.md).
 
+Formal AV1 4:2:0 batch rendering does not run MMS. If the fixed path
+`<album-root>/sources/timing_overrides.json` exists, the batch renderer
+automatically consumes its existing visual-release overrides (and records the
+file identity); this is not an MMS run, audit, or parameter, and the batch
+renderer does not create the file.
+
 ## References
 
 Each reference has matching English and Chinese versions:
@@ -198,7 +213,7 @@ The dependency manifest is authoritative for the installed file set.
 | Configuration and text | `karaoke_album.py`, `karaoke_language.py` |
 | Timing and editable SUG | `karaoke_timing.py`, `karaoke_review_preview.py`, `sync_karaoke_editable_ruby.py`, `sug_ruby.py` |
 | Alignment evidence | `audit_karaoke_asr_recognition.py`, `audit_karaoke_mms_alignment.py`, `build_karaoke_mms_overrides.py`, `prepare_karaoke_msst_vocals.py` |
-| Artwork and rendering | `karaoke_cover_palette.py`, `karaoke_color_plan.py`, `build_karaoke_wide_artwork.py`, `render_vinyl_karaoke.py`, `karaoke_direct_album_planning.py`, `render_karaoke_direct_av1_420_album.py`, `render_karaoke_direct_hevc444_album.py`, `render_karaoke_direct_av1_album.py` (legacy compatibility name) |
+| Artwork and rendering | `karaoke_cover_palette.py`, `karaoke_color_plan.py`, `build_karaoke_wide_artwork.py`, `render_vinyl_karaoke.py`, `karaoke_direct_album_planning.py`, `render_karaoke_direct_av1_420_album.py`, `render_karaoke_direct_hevc444_album.py` |
 | Japanese workflow | `karaoke_workflow.py`, `run_karaoke_japanese_workflow.py` |
 | Media and release | `inspect_karaoke_media.py`, `transcode_karaoke_av1.py`, `finalize_karaoke_release.py`, `karaoke_release_snapshot.py`, `package_karaoke_numbered_archives.py` |
 | Pitch shifting | `pitch_shift_audio.py` |
@@ -207,7 +222,7 @@ Recursive package files are `karaoke_common/__init__.py`, `karaoke_common/layout
 
 Repository support tools are `check_sug_compatibility.py`, `check_karaoke_environment.py`, `install_strangeutagame_integration.py`, `open_editable_project_with_audio_probe.py`, and the standalone mirror of `pitch_shift_audio.py`.
 
-For direct album rendering, use `render_karaoke_direct_av1_420_album.py` for AV1 4:2:0 or `render_karaoke_direct_hevc444_album.py` for HEVC 4:4:4. `render_karaoke_direct_av1_album.py` is retained only as the legacy name for the HEVC command and emits a deprecation notice. Shared manifest selection and task planning live in `karaoke_direct_album_planning.py`.
+For direct album rendering, use `render_karaoke_direct_av1_420_album.py` for AV1 4:2:0 or `render_karaoke_direct_hevc444_album.py` for HEVC 4:4:4. Shared manifest selection and task planning live in `karaoke_direct_album_planning.py`.
 
 ## Repository layout and tests
 

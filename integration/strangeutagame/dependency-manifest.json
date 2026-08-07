@@ -143,11 +143,6 @@
       "reason": "Uses codec-neutral album planning and executes the StrangeUtaGame-backed preview renderer with AV1 4:2:0-only encoding, language/pronunciation policy, durable final-ASS reports, and explicit-only MKV/full-decode gates."
     },
     {
-      "path": "render_karaoke_direct_av1_album.py",
-      "category": "transitive-runtime",
-      "reason": "Deprecated argv/exit-code-compatible wrapper for render_karaoke_direct_hevc444_album.py."
-    },
-    {
       "path": "render_karaoke_direct_hevc444_album.py",
       "category": "transitive-runtime",
       "reason": "Formal HEVC 4:4:4 implementation using codec-neutral album planning and the SUG preview renderer with hevc_nvenc_444/yuv444p MP4 output."

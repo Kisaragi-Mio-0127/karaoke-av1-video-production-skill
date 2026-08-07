@@ -60,9 +60,20 @@ class IntegrationBundleTests(unittest.TestCase):
             if "__pycache__" not in path.parts
         }
         self.assertEqual(recorded_paths, bundled_paths)
-        self.assertEqual(len(script_paths), 22)
+        self.assertEqual(len(script_paths), 23)
         self.assertEqual(len(package_paths), 5)
         self.assertEqual(shared_paths, INTERNAL_MODULES)
+        self.assertTrue(
+            {
+                "run_karaoke_japanese_mms_workflow.py",
+                "audit_karaoke_mms_alignment.py",
+                "build_karaoke_mms_overrides.py",
+                "karaoke_workflow.py",
+                "karaoke_album.py",
+                "karaoke_review_preview.py",
+            }.issubset(script_paths),
+            "the dedicated MMS workflow installation closure must be complete",
+        )
         self.assertTrue(
             all(
                 record.get("category") == "shared-internal-module"
@@ -119,11 +130,9 @@ class IntegrationBundleTests(unittest.TestCase):
 
     def test_all_bundled_python_parses(self) -> None:
         files = sorted(
-            path
-            for path in SCRIPTS.rglob("*.py")
-            if "__pycache__" not in path.parts
+            path for path in SCRIPTS.rglob("*.py") if "__pycache__" not in path.parts
         )
-        self.assertEqual(len(files), 30)
+        self.assertEqual(len(files), 31)
         for path in files:
             with self.subTest(path=path.relative_to(SCRIPTS).as_posix()):
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -135,7 +144,9 @@ class IntegrationBundleTests(unittest.TestCase):
     def test_documentation_has_bilingual_pairs_without_cjk_word_spacing(self) -> None:
         references = ROOT / "references"
         english_references = sorted(
-            path for path in references.glob("*.md") if not path.name.endswith(".zh-CN.md")
+            path
+            for path in references.glob("*.md")
+            if not path.name.endswith(".zh-CN.md")
         )
         self.assertGreaterEqual(len(english_references), 6)
         document_pairs = [(ROOT / "README.md", ROOT / "README.zh-CN.md")]
@@ -159,7 +170,9 @@ class IntegrationBundleTests(unittest.TestCase):
                     if (match := re.match(r"^(#{1,6})\s+", line))
                 ]
                 bullet_count = sum(line.startswith("- ") for line in lines)
-                numbered_count = sum(bool(re.match(r"^\d+\.\s+", line)) for line in lines)
+                numbered_count = sum(
+                    bool(re.match(r"^\d+\.\s+", line)) for line in lines
+                )
                 fence_count = sum(line.startswith("```") for line in lines)
                 return heading_levels, bullet_count, numbered_count, fence_count
 
@@ -244,18 +257,14 @@ class IntegrationBundleTests(unittest.TestCase):
         self.assertIn("--pronunciation-validation", preview_source)
         self.assertIn("--vinyl-motion", preview_source)
 
-        vinyl_source = (SCRIPTS / "render_vinyl_karaoke.py").read_text(
-            encoding="utf-8"
-        )
+        vinyl_source = (SCRIPTS / "render_vinyl_karaoke.py").read_text(encoding="utf-8")
         vinyl_tree = ast.parse(vinyl_source)
         vinyl_strings = {
             node.value
             for node in ast.walk(vinyl_tree)
             if isinstance(node, ast.Constant) and isinstance(node.value, str)
         }
-        self.assertTrue(
-            {"wide-bottom-zh", "wide-bottom-en"}.isdisjoint(vinyl_strings)
-        )
+        self.assertTrue({"wide-bottom-zh", "wide-bottom-en"}.isdisjoint(vinyl_strings))
         for forbidden in (
             "natural_advance",
             "english_wide",
@@ -280,6 +289,7 @@ class IntegrationBundleTests(unittest.TestCase):
             ("optional", "required", "off"),
         )
         self.assertTrue((SCRIPTS / "run_karaoke_japanese_workflow.py").is_file())
+        self.assertTrue((SCRIPTS / "run_karaoke_japanese_mms_workflow.py").is_file())
         workflow_source = (SCRIPTS / "karaoke_workflow.py").read_text(encoding="utf-8")
         self.assertIn("cover_source_audio", workflow_source)
         self.assertIn("regenerate-current-vinyl", workflow_source)
@@ -295,6 +305,8 @@ class IntegrationBundleTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn('default="optional"', japanese_source)
+        self.assertNotIn("MMS", japanese_source)
+        self.assertNotIn("mms", japanese_source)
         common_layout = (SCRIPTS / "karaoke_common" / "layout.py").read_text(
             encoding="utf-8"
         )
@@ -309,9 +321,9 @@ class IntegrationBundleTests(unittest.TestCase):
 
     def test_current_workflow_direct_and_vinyl_contracts_are_merged(self) -> None:
         workflow = (SCRIPTS / "karaoke_workflow.py").read_text(encoding="utf-8")
-        direct = (
-            SCRIPTS / "render_karaoke_direct_av1_420_album.py"
-        ).read_text(encoding="utf-8")
+        direct = (SCRIPTS / "render_karaoke_direct_av1_420_album.py").read_text(
+            encoding="utf-8"
+        )
         vinyl = (SCRIPTS / "render_vinyl_karaoke.py").read_text(encoding="utf-8")
 
         for token in (
@@ -319,7 +331,7 @@ class IntegrationBundleTests(unittest.TestCase):
             "validate_workflow_composition(config)",
             "validate_renderer_report(",
             "visual_style=config.visual_style",
-            'if config.full_decode:',
+            "if config.full_decode:",
             '"requested": requested',
             '"required": False',
             '"recommended": False',
@@ -329,12 +341,12 @@ class IntegrationBundleTests(unittest.TestCase):
 
         for token in (
             'default="optional"',
-            'choices=PRONUNCIATION_VALIDATION_MODES',
+            "choices=PRONUNCIATION_VALIDATION_MODES",
             '"--lossless-companion",',
             '"--full-decode", action="store_true"',
             'default="rotate"',
             'ass["ass"] = str(task.ass_output.resolve())',
-            'def refresh_existing_reports(',
+            "def refresh_existing_reports(",
             '"--refresh-existing-reports",',
             '"--refresh-existing-reports requires --report-only"',
             '"--refresh-existing-reports does not permit --full-decode"',
@@ -350,7 +362,7 @@ class IntegrationBundleTests(unittest.TestCase):
             '"aac_low",',
             'choices=("static", "rotate")',
             'default="rotate"',
-            '_vinyl_filter(vinyl_motion=vinyl_motion',
+            "_vinyl_filter(vinyl_motion=vinyl_motion",
         ):
             with self.subTest(vinyl_token=token):
                 self.assertIn(token, vinyl)
@@ -385,7 +397,9 @@ class IntegrationBundleTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("validate_current_wide_compositions", direct_renderer_source)
         self.assertIn("title_block_x_by_style", direct_renderer_source)
-        self.assertIn('"spectrum": {"x": 40, "y": 30, "width": 460', direct_renderer_source)
+        self.assertIn(
+            '"spectrum": {"x": 40, "y": 30, "width": 460', direct_renderer_source
+        )
         self.assertIn('"outer_right_panel_removed"', direct_renderer_source)
         self.assertIn('"vinyl_backplate_absent"', direct_renderer_source)
         self.assertIn('"wide_compositions": wide_compositions', direct_renderer_source)
@@ -416,12 +430,8 @@ class IntegrationBundleTests(unittest.TestCase):
         renderer = (SCRIPTS / "render_karaoke_direct_av1_420_album.py").read_text(
             encoding="utf-8"
         )
-        transcoder = (SCRIPTS / "transcode_karaoke_av1.py").read_text(
-            encoding="utf-8"
-        )
-        preview = (SCRIPTS / "karaoke_review_preview.py").read_text(
-            encoding="utf-8"
-        )
+        transcoder = (SCRIPTS / "transcode_karaoke_av1.py").read_text(encoding="utf-8")
+        preview = (SCRIPTS / "karaoke_review_preview.py").read_text(encoding="utf-8")
         for source in (renderer, transcoder, preview):
             self.assertIn("DEFAULT_AV1_CQ = 38", source)
             self.assertIn('DEFAULT_AV1_PRESET = "p7"', source)
@@ -475,6 +485,7 @@ class IntegrationBundleTests(unittest.TestCase):
                     re.search(r"[ぁ-んァ-ヶ一-龯]{12,}", node.value),
                     "the generic preview renderer must not embed lyric-like literals",
                 )
+
     def test_example_manifest_loads_without_private_media(self) -> None:
         sys.path.insert(0, str(SCRIPTS))
         try:
@@ -524,6 +535,9 @@ class IntegrationBundleTests(unittest.TestCase):
             self.assertTrue(
                 (target / "scripts" / "run_karaoke_japanese_workflow.py").is_file()
             )
+            self.assertTrue(
+                (target / "scripts" / "run_karaoke_japanese_mms_workflow.py").is_file()
+            )
             self.assertFalse((target / "scripts" / "karaoke_zh_en").exists())
             self.assertFalse(
                 (target / "scripts" / "run_karaoke_zh_en_workflow.py").exists()
@@ -532,7 +546,9 @@ class IntegrationBundleTests(unittest.TestCase):
                 (target / "scripts" / "convert_english_sug_word_tokens.py").exists()
             )
             second = installer.install(target, force=False, dry_run=False)
-            self.assertTrue(all(item["action"] == "unchanged" for item in second["files"]))
+            self.assertTrue(
+                all(item["action"] == "unchanged" for item in second["files"])
+            )
             self.assertEqual(len(first["files"]), len(second["files"]))
             modified = target / "scripts" / "karaoke_album.py"
             modified.write_text("# local change\n", encoding="utf-8")
@@ -542,7 +558,9 @@ class IntegrationBundleTests(unittest.TestCase):
                 installer.install(target, force=False, dry_run=False)
             replaced = installer.install(target, force=True, dry_run=False)
             self.assertTrue(replaced["backups"])
-            self.assertNotEqual(modified.read_text(encoding="utf-8"), "# local change\n")
+            self.assertNotEqual(
+                modified.read_text(encoding="utf-8"), "# local change\n"
+            )
 
     def test_installer_rejects_directory_and_link_destinations(self) -> None:
         installer = load_module(
@@ -604,8 +622,12 @@ class IntegrationBundleTests(unittest.TestCase):
             ):
                 with self.assertRaises(RuntimeError):
                     installer.install(target, force=True, dry_run=False)
-            self.assertEqual(first.read_text(encoding="utf-8"), "# first local change\n")
-            self.assertEqual(second.read_text(encoding="utf-8"), "# second local change\n")
+            self.assertEqual(
+                first.read_text(encoding="utf-8"), "# first local change\n"
+            )
+            self.assertEqual(
+                second.read_text(encoding="utf-8"), "# second local change\n"
+            )
             self.assertFalse(list(target.glob(".karaoke-skill-stage-*")))
 
     def test_network_access_is_explicit_opt_in(self) -> None:
@@ -613,9 +635,7 @@ class IntegrationBundleTests(unittest.TestCase):
         renderer = (SCRIPTS / "render_vinyl_karaoke.py").read_text(encoding="utf-8")
         tree = ast.parse(timing)
         functions = {
-            node.name: node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef)
+            node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
         }
         namespace = {
             "SONGS": (),
@@ -688,8 +708,7 @@ class IntegrationBundleTests(unittest.TestCase):
         }
         self.assertTrue(forbidden.isdisjoint(manifested))
         workflow_closure = "\n".join(
-            (SCRIPTS / relative).read_text(encoding="utf-8")
-            for relative in manifested
+            (SCRIPTS / relative).read_text(encoding="utf-8") for relative in manifested
         )
         self.assertNotIn("scripts.karaoke_zh_en", workflow_closure)
 
@@ -713,19 +732,25 @@ class IntegrationBundleTests(unittest.TestCase):
         for relative in guarded_modules:
             source = (SCRIPTS / relative).read_text(encoding="utf-8")
             tree = ast.parse(source, filename=relative)
-            names = {
-                node.id.casefold()
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Name)
-            } | {
-                node.name.casefold()
-                for node in ast.walk(tree)
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-            } | {
-                node.attr.casefold()
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Attribute)
-            }
+            names = (
+                {
+                    node.id.casefold()
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Name)
+                }
+                | {
+                    node.name.casefold()
+                    for node in ast.walk(tree)
+                    if isinstance(
+                        node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                    )
+                }
+                | {
+                    node.attr.casefold()
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Attribute)
+                }
+            )
             exact_string_constants = {
                 node.value.casefold()
                 for node in ast.walk(tree)
@@ -764,11 +789,14 @@ class IntegrationBundleTests(unittest.TestCase):
         )
         redirect_opener = mock.MagicMock()
         redirect_opener.open.side_effect = redirect
-        with mock.patch.object(
-            renderer.socket, "getaddrinfo", return_value=public_address
-        ), mock.patch.object(
-            renderer.urllib.request, "build_opener", return_value=redirect_opener
-        ) as build_opener:
+        with (
+            mock.patch.object(
+                renderer.socket, "getaddrinfo", return_value=public_address
+            ),
+            mock.patch.object(
+                renderer.urllib.request, "build_opener", return_value=redirect_opener
+            ) as build_opener,
+        ):
             with self.assertRaises(urllib.error.HTTPError):
                 renderer.fetch_cover("https://example.com/cover.jpg")
             handler = build_opener.call_args.args[0]
@@ -796,10 +824,14 @@ class IntegrationBundleTests(unittest.TestCase):
 
         oversize_opener = mock.MagicMock()
         oversize_opener.open.return_value = OversizeResponse()
-        with mock.patch.object(renderer, "MAX_NETWORK_COVER_BYTES", 8), mock.patch.object(
-            renderer.socket, "getaddrinfo", return_value=public_address
-        ), mock.patch.object(
-            renderer.urllib.request, "build_opener", return_value=oversize_opener
+        with (
+            mock.patch.object(renderer, "MAX_NETWORK_COVER_BYTES", 8),
+            mock.patch.object(
+                renderer.socket, "getaddrinfo", return_value=public_address
+            ),
+            mock.patch.object(
+                renderer.urllib.request, "build_opener", return_value=oversize_opener
+            ),
         ):
             with self.assertRaises(RuntimeError):
                 renderer.fetch_cover("https://example.com/cover.jpg")

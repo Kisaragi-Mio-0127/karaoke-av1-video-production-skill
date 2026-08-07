@@ -28,7 +28,7 @@ if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
 uv run --no-sync python --version
 ```
 
-Install `ffmpeg` and `ffprobe` separately and verify libass plus an available AV1 encoder. Rubber Band is required only for pitch shifting. Whisper and MSST are optional evidence lanes. MMS is used only through the explicit standalone `audit_karaoke_mms_alignment.py` and `build_karaoke_mms_overrides.py` scripts; the one-click route has no MMS parameters and never generates, consumes, or validates MMS. CJK fonts are selected according to the production configuration.
+Install `ffmpeg` and `ffprobe` separately and verify libass plus an available AV1 encoder. Rubber Band is required only for pitch shifting. Whisper and MSST are optional evidence lanes. The default one-click and batch routes never generate, consume, or validate MMS. The explicit MMS entry described below is offline by default; the standalone `audit_karaoke_mms_alignment.py` and `build_karaoke_mms_overrides.py` scripts remain available as separate evidence tools. CJK fonts are selected according to the production configuration.
 
 The tested compatibility baseline is StrangeUtaGame 1.4.5 with SUG storage format 0.3.0. Read the application version from `src/strange_uta_game/__version__.py` and the storage format from `SugMigrator.CURRENT_VERSION`.
 
@@ -41,9 +41,13 @@ Song-specific display, ruby-group, and timing-reading decisions can be supplied 
 ## Production order
 
 ```text
-manifest -> Japanese workflow -> optional MSST evidence -> independent ASR review
--> optional explicit MMS audit/override
+default: manifest -> Japanese default workflow (no MMS)
+-> optional MSST evidence -> independent ASR review
 -> source lyrics -> candidate ruby in canonical SUG -> contextual ruby review
+-> timing and phrase decisions -> read-only renderer -> ASS/report/frames
+-> composition -> AV1 render -> media inspection -> finalization -> archive
+explicit MMS: existing manifest/SUG/frozen lyrics/MSST Vocals
+-> audit -> build -> render
 -> timing and phrase decisions -> read-only renderer -> ASS/report/frames
 -> composition -> AV1 render -> media inspection -> finalization -> archive
 ```
@@ -118,9 +122,70 @@ singer, overlay, ruby, container, and diagnostic gates. The album/batch direct
 renderer follows the AV1 4:2:0 batch contract above; keep each style's output
 and validation identity separate.
 
+## Explicit MMS single-track workflow
+
+`scripts/run_karaoke_japanese_mms_workflow.py` is the installed explicit MMS
+entry in the public integration.
+
+Before invoking it, the selected project configuration must already resolve
+the manifest and source audio, the canonical reviewed SUG, frozen lyrics, and
+project-local MSST Vocals with their provenance. Every run must use a new,
+non-deliverables output root; it must not write directly to a deliverables
+directory or reuse an earlier output root. The wrapper creates exactly
+`audit/`, `build/`, and `render/` beneath it; `render/` is the final-video
+working directory.
+
+The stages are mandatory and ordered:
+
+```text
+audit -> build -> render
+```
+
+The audit gate fails closed for missing, stale, mismatched, unresolved, or
+vetoed inputs/evidence. The build gate consumes only a passing audit, binds the
+manifest, SUG, frozen lyrics, MSST Vocals, MMS access policy, and audit
+identity into the provenance, and writes `build/timing_overrides.json`. Of the
+MMS build outputs, only the `visual_release_overrides_ms` field is copied into
+the render input and may affect the ASS/video; it is a conceptual field in the
+build artifact, not a directory name. `character_overrides_ms` remains
+evidence and provenance and is not applied to the SUG, ASS timing, or encoded
+video. The render gate requires matching audit/build provenance and records
+audit/build/render identities.
+
+MMS model access is offline by default. The optional
+`--mms-model-path <local-mms-model>` override has highest priority. Without
+it, the wrapper automatically discovers the project-local
+`.cache/torch/hub/checkpoints/model.pt`, then another local `.pt` checkpoint
+in that directory. It fails before inference only when no local checkpoint is
+available and `--allow-mms-network` was not granted. Cover retrieval remains
+independently offline unless `--allow-cover-network` is passed; neither
+permission authorizes the other lane. No generic model-path or
+network-permission aliases are accepted.
+
+The installed wrapper CLI is:
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
+  --manifest <existing-manifest> --song-id <song-id> `
+  --composition <composition.png> `
+  --output-dir <new-non-existent-mms-output-dir> `
+  --visual-style spectrum
+```
+
+The manifest resolves the selected track's canonical SUG and source audio;
+by default the wrapper resolves frozen lyrics from the selected manifest
+deliverable's `sources/netease_lyrics.json` and the matching MSST stem from the
+project's `.cache/msst-vocals` tree. Use `--source <frozen-lyrics>` and
+`--vocals-root <msst-vocals-root>` only as explicit overrides. The model path
+override is also optional. The only network permissions are
+`--allow-mms-network` and the independent `--allow-cover-network`.
+
 ## Installed files
 
 The public workflow entry is `scripts/run_karaoke_japanese_workflow.py`, coordinated by `scripts/karaoke_workflow.py`. Shared code lives under `karaoke_common/`, while Japanese layout code lives under `karaoke_japanese/`. The public distribution path currently has only the Japanese (`ja`) implementation verified; other language profiles require a separately validated adapter and are not part of this public path.
+
+The parallel `run_karaoke_japanese_mms_workflow.py` entry is included in the
+dependency manifest and installed with the public integration.
 
 The compatibility checker remains in the Skill repository. Run it and the environment checker with the target checkout's project-local Python:
 

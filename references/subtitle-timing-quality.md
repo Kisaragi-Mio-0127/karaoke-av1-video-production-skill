@@ -17,6 +17,18 @@ source lyrics -> candidate ruby fill -> canonical SUG
 
 Record a hash or equivalent generation ID at every layer. The canonical SUG is the editable source of truth: candidate generation fills missing ruby, review writes accepted corrections, and rendering reads the reviewed project. The reviewed phrases must recompose each normalized source line exactly. Identify overrides by complete source line plus stable segment or occurrence identity, assert their hit counts, and reject unreachable, duplicate, or overly broad rules.
 
+For the explicit MMS entry, keep the MMS lane in the same fact chain:
+
+```text
+manifest + canonical SUG + frozen lyrics + MSST Vocals
+-> MMS audit (audit gate) -> override build (build gate)
+-> visual-release projection -> read-only renderer -> ASS/report/video
+```
+
+The audit, build, and render outputs must carry matching input and generation
+identities. Keep all of them in a new, non-deliverables staging output; do not
+promote or overwrite a deliverable until the ordinary release gates pass.
+
 Record long but semantically complete phrases as reviewed exceptions and verify visual fit at the target font and size. Add semantic spacing only at approved breath or semantic boundaries, recording the character index and one pixel or em increment.
 
 ## Ruby and editable projects
@@ -31,7 +43,11 @@ Skip manual timing review when automatic evidence and release checks agree. When
 
 ## Editor, MMS, and independent ASR
 
-MMS and separated-vocal results are timing evidence rather than delivery tracks. Record tool, model, version, input channel, generation identity, onset evidence, release evidence, and any A/B decision. The one-click route has no MMS parameters and does not generate, consume, or validate MMS. Use `audit_karaoke_mms_alignment.py` and `build_karaoke_mms_overrides.py` as explicit standalone scripts; formal batch rendering does not run MMS.
+MMS and separated-vocal results are timing evidence rather than delivery tracks. Record tool, model, version, input channel, generation identity, onset evidence, release evidence, and any A/B decision. The default one-click and batch routes never generate, consume, or validate MMS. The installed `run_karaoke_japanese_mms_workflow.py` entry requires an existing manifest, canonical SUG, frozen lyrics, and project-local MSST Vocals before it starts. It must run `audit -> build -> render` in that order in a new, non-deliverables staging output.
+
+The audit gate fails closed for missing, stale, mismatched, unresolved, or vetoed evidence. The build gate consumes only a passing audit and binds the manifest, SUG, frozen lyrics, MSST Vocals, MMS access policy, and audit identity into its provenance. Of the MMS build outputs, only `visual_release_overrides_ms` may enter the render input and affect the ASS/video. `character_overrides_ms` remains evidence and provenance and is not applied to the SUG, ASS timing, or encoded video. The render gate requires matching audit/build provenance and records the audit/build/render identities. `audit_karaoke_mms_alignment.py` and `build_karaoke_mms_overrides.py` remain explicit standalone tools; formal batch rendering does not run MMS.
+
+MMS model access is offline by default. Provide `--mms-model-path <local-mms-model>` or explicitly authorize model network access with `--allow-mms-network`. Cover retrieval is an independent policy and remains offline unless `--allow-cover-network` is passed; neither flag authorizes the other lane.
 
 If the formal AV1 4:2:0 batch finds the fixed path `<album-root>/sources/timing_overrides.json`, it consumes existing visual-release overrides only; it does not create the file or perform an MMS audit.
 
@@ -47,4 +63,4 @@ For per-character highlighting, record acoustic onset, visual onset, visual rele
 
 For cover-derived colors, record the extraction method, candidates, accepted RGB value, and review decision. The current extractor excludes near-black chroma noise and aggregates candidate pixel area across neighbouring colours in Lab space; do not promote rare JPEG noise into the primary colour. Apply the resolved singer colour consistently to the editable singer colour, ASS `Main`/`Glow`, active cue, and any top secondary subtitle layers; keep inactive text white, verify RGB-to-ASS-BGR conversion, and inspect frames before, during, and after highlight.
 
-Run renderer, preview, segmentation, cue, ruby, release, and packaging tests in a writable project-local temporary directory. Cover override reachability, phrase recomposition, cue timing, font-size exceptions, three-layer ruby status, editable-project identity, relative media resolution, audio-load evidence, MMS source identity when explicit MMS audit/override evidence is in scope, ASS/report identity, release fields, and boundary frames.
+Run renderer, preview, segmentation, cue, ruby, release, and packaging tests in a writable project-local temporary directory. Cover override reachability, phrase recomposition, cue timing, font-size exceptions, three-layer ruby status, editable-project identity, relative media resolution, audio-load evidence, MMS audit/build/render gates and provenance when the explicit MMS entry is in scope, the distinction between `visual_release_overrides_ms` and `character_overrides_ms`, ASS/report identity, release fields, and boundary frames.

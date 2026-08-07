@@ -4,7 +4,7 @@
 
 A Codex skill and StrangeUtaGame integration for producing, reviewing, rendering, validating, and packaging karaoke videos with editable timing provenance and AV1 4:2:0 release checks.
 
-The bundled public workflow uses Japanese (`ja`) and starts from `run_karaoke_japanese_workflow.py`. The public distribution path is currently verified for Japanese (`ja`) only; additional language workflows require their own validated adapters and are not part of this distribution.
+The bundled public distribution provides two parallel Japanese (`ja`) single-track entries. `run_karaoke_japanese_workflow.py` is the default entry and never runs MMS. `run_karaoke_japanese_mms_workflow.py` is the installed explicit MMS entry; it runs `audit -> build -> render` from an existing manifest, canonical SUG, frozen lyrics, and project-local MSST Vocals. The public distribution path is currently verified for Japanese (`ja`) only; additional language workflows require their own validated adapters and are not part of this distribution.
 
 ## Capabilities
 
@@ -84,7 +84,7 @@ if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
 uv run --no-sync python --version
 ```
 
-Install `ffmpeg` and `ffprobe` separately. Rubber Band is needed for pitch shifting; Whisper and external MSST are optional evidence lanes. MMS is available only through explicit standalone audit/override scripts; the one-click route has no MMS parameters and never generates, consumes, or validates MMS. Check the target environment with:
+Install `ffmpeg` and `ffprobe` separately. Rubber Band is needed for pitch shifting; Whisper and external MSST are optional evidence lanes. The default one-click and batch routes never generate, consume, or validate MMS. The explicit MMS entry described below is offline by default; standalone audit/build scripts remain available for evidence preparation. Check the target environment with:
 
 ```powershell
 $skillRoot = (Resolve-Path .).Path
@@ -99,7 +99,7 @@ uv run --no-sync python "$skillRoot/scripts/check_karaoke_environment.py" --targ
 2. Probe source media and select the output profile.
 3. Build or update the canonical SUG, then review phrase segmentation and applicable ruby spans.
 4. Run the deterministic offline cover extractor, record the ordered eight-colour palette and cover/extractor identities, and build the shared colour plan.
-5. When additional timing evidence is required, run the explicit standalone MMS audit/override scripts, independent ASR, or MSST-derived evidence; MMS is not part of one-click or batch rendering.
+5. Choose the timing-evidence lane explicitly: the default one-click and batch routes never run MMS; the installed MMS entry requires an existing manifest, SUG, frozen lyrics, and MSST Vocals and runs `audit -> build -> render`; standalone MMS audit/build scripts, independent ASR, and MSST-derived evidence remain separate evidence tools.
 6. Build the current wide composition and regenerate the current rotating vinyl asset when using the vinyl layout.
 7. Render an isolated preview, inspect representative frames, and encode the selected MP4 output.
 8. Verify media structure and sampled output, then finalize, promote, or package the accepted files.
@@ -111,7 +111,9 @@ $env:KARAOKE_ALBUM_MANIFEST = (Resolve-Path .\config\album.json).Path
 uv run --no-sync python scripts/karaoke_timing.py --manifest $env:KARAOKE_ALBUM_MANIFEST --allow-partial-manifest
 ```
 
-## Shared single-track command
+## Single-track workflow entries
+
+### Default single-track command
 
 The bundled one-click route is `scripts/run_karaoke_japanese_workflow.py`.
 It defaults to `--visual-style vinyl`; both visual styles require a new
@@ -146,10 +148,78 @@ batch entries use the same renderer and gates. Repeat `--singer-color
 <singer-id>=#RRGGBB` on either entry only when an explicit per-singer override
 is required; it takes precedence over slot and palette colours.
 
-The one-click route has no MMS parameters. It does not generate, consume, or
-validate MMS. `audit_karaoke_mms_alignment.py` and
-`build_karaoke_mms_overrides.py` are explicit independent scripts; run them
-separately only when MMS evidence is required.
+The default entry has no MMS parameters. It never generates, consumes, or
+validates MMS. `audit_karaoke_mms_alignment.py` and
+`build_karaoke_mms_overrides.py` remain explicit independent scripts; use them
+only as a separately requested evidence lane or through the explicit entry
+described next.
+
+### Explicit MMS single-track workflow
+
+`scripts/run_karaoke_japanese_mms_workflow.py` is the installed explicit MMS
+entry in the public integration.
+
+Before invoking it, these inputs must already exist and be resolvable from the
+selected project configuration:
+
+- the manifest and its selected source audio;
+- the canonical reviewed SUG;
+- the frozen lyrics used for the audit;
+- project-local MSST Vocals with their own provenance.
+
+Every run writes to a new, non-deliverables output root. It must not write
+directly to a deliverables directory or reuse an earlier output root. The
+wrapper creates exactly `audit/`, `build/`, and `render/` beneath it;
+`render/` is the final-video working directory. The stages are ordered and
+mandatory:
+
+```text
+audit -> build -> render
+```
+
+`audit` runs MMS against the existing SUG, frozen lyrics, source audio, and
+MSST Vocals. The audit gate fails closed when a required input or identity is
+missing, stale, mismatched, unresolved, or vetoed. `build` may run only from a
+passing audit and creates `build/timing_overrides.json`. The build
+gate carries the manifest, SUG, frozen lyrics, MSST Vocals, MMS access policy,
+and audit identity forward.
+
+Of the MMS build outputs, only the `visual_release_overrides_ms` field is
+copied into the render input and may affect the ASS/video; it is a conceptual
+field in the build artifact, not a directory name. `character_overrides_ms`
+remains audit/build evidence and provenance; it is not applied to the SUG,
+ASS timing, or encoded video. The render gate requires the passing build gate
+and matching provenance, then records audit/build/render identities in the
+output report. No stage may be skipped or silently substituted by the default
+route.
+
+MMS model access is offline by default. The optional
+`--mms-model-path <local-mms-model>` override has highest priority. Without
+it, the wrapper first discovers the project-local
+`.cache/torch/hub/checkpoints/model.pt`, then another local `.pt` checkpoint
+in that directory. It fails before inference only when no local checkpoint is
+available and `--allow-mms-network` was not granted. Cover extraction has a
+separate policy and remains offline unless `--allow-cover-network` is passed.
+Neither permission authorizes the other lane, and the wrapper accepts no
+generic model-path or network-permission aliases.
+
+The installed wrapper CLI is:
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
+  --manifest <existing-manifest> --song-id <song-id> `
+  --composition <composition.png> `
+  --output-dir <new-non-existent-mms-output-dir> `
+  --visual-style spectrum
+```
+
+The manifest resolves the selected track's canonical SUG and source audio;
+by default the wrapper resolves frozen lyrics from the selected manifest
+deliverable's `sources/netease_lyrics.json` and MSST Vocals from the project's
+`.cache/msst-vocals` tree. Use `--source <frozen-lyrics>` and
+`--vocals-root <msst-vocals-root>` only as explicit overrides. The model
+override is likewise optional. The only network permissions are
+`--allow-mms-network` and the independent `--allow-cover-network`.
 
 ## AV1 4:2:0 batch command
 
@@ -214,7 +284,7 @@ The dependency manifest is authoritative for the installed file set.
 | Timing and editable SUG | `karaoke_timing.py`, `karaoke_review_preview.py`, `sync_karaoke_editable_ruby.py`, `sug_ruby.py` |
 | Alignment evidence | `audit_karaoke_asr_recognition.py`, `audit_karaoke_mms_alignment.py`, `build_karaoke_mms_overrides.py`, `prepare_karaoke_msst_vocals.py` |
 | Artwork and rendering | `karaoke_cover_palette.py`, `karaoke_color_plan.py`, `build_karaoke_wide_artwork.py`, `render_vinyl_karaoke.py`, `karaoke_direct_album_planning.py`, `render_karaoke_direct_av1_420_album.py`, `render_karaoke_direct_hevc444_album.py` |
-| Japanese workflow | `karaoke_workflow.py`, `run_karaoke_japanese_workflow.py` |
+| Japanese workflow | `karaoke_workflow.py`, `run_karaoke_japanese_workflow.py`, `run_karaoke_japanese_mms_workflow.py` |
 | Media and release | `inspect_karaoke_media.py`, `transcode_karaoke_av1.py`, `finalize_karaoke_release.py`, `karaoke_release_snapshot.py`, `package_karaoke_numbered_archives.py` |
 | Pitch shifting | `pitch_shift_audio.py` |
 

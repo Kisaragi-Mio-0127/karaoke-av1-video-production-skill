@@ -166,6 +166,11 @@
       "path": "run_karaoke_japanese_workflow.py",
       "category": "transitive-runtime",
       "reason": "Japanese workflow entry point; routes rotating current-vinyl production with optional pronunciation validation."
+    },
+    {
+      "path": "run_karaoke_japanese_mms_workflow.py",
+      "category": "transitive-runtime",
+      "reason": "Separate Japanese-only MMS audit/build/visual-release entry; defaults offline, binds existing inputs by hash, and keeps character overrides as non-rendering evidence."
     }
   ],
   "support_tools": [

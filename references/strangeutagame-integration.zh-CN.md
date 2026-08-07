@@ -28,7 +28,7 @@ if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
 uv run --no-sync python --version
 ```
 
-另行安装`ffmpeg`和`ffprobe`，并确认libass与可用的AV1编码器。Rubber Band只在变调时需要；Whisper和MSST属于可选证据链。MMS仅通过显式独立的`audit_karaoke_mms_alignment.py`和`build_karaoke_mms_overrides.py`脚本使用；一键入口没有MMS参数，也不会生成、消费或校验MMS。CJK字体按制作配置选择。
+另行安装`ffmpeg`和`ffprobe`，并确认libass与可用的AV1编码器。Rubber Band只在变调时需要；Whisper和MSST属于可选证据链。默认一键和批量入口永远不会生成、消费或校验MMS。下面描述的显式MMS入口默认离线；独立的`audit_karaoke_mms_alignment.py`和`build_karaoke_mms_overrides.py`脚本仍可作为单独的证据工具。CJK字体按制作配置选择。
 
 当前兼容性测试基线为StrangeUtaGame 1.4.5和SUG存储格式0.3.0。应用版本从`src/strange_uta_game/__version__.py`读取，存储格式从`SugMigrator.CURRENT_VERSION`读取。
 
@@ -41,9 +41,13 @@ uv run --no-sync python --version
 ## 制作顺序
 
 ```text
-清单 -> 日语工作流 -> 可选MSST证据 -> 独立ASR复核
--> 可选显式MMS审计/覆盖
+默认：清单 -> 日语默认工作流（不运行MMS）
+-> 可选MSST证据 -> 独立ASR复核
 -> 源歌词 -> 候选注音写入规范SUG -> 上下文注音审核
+-> 时间与分句决定 -> 只读渲染器 -> ASS/报告/画面
+-> 构图 -> AV1渲染 -> 媒体检查 -> 最终化 -> 归档
+显式MMS：已有manifest/SUG/冻结歌词/MSST Vocals
+-> audit -> build -> render
 -> 时间与分句决定 -> 只读渲染器 -> ASS/报告/画面
 -> 构图 -> AV1渲染 -> 媒体检查 -> 最终化 -> 归档
 ```
@@ -101,9 +105,39 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 workflow先独立写入`karaoke-preflight.ass`，再在MP4渲染阶段写入最终
 `karaoke.ass`，并要求两者SHA-256身份一致。默认使用完整时长且只生成MP4；`--lossless-companion`和`--full-decode`是MKV与完整解码诊断的显式opt-in。日文注音验证默认为不阻塞的`optional`。一键workflow与底层renderer使用相同的歌手、叠加层、注音、容器和诊断门禁。一键入口之外的AV1 4:2:0批量路径遵循上面的风格契约，并为每个风格保持独立的输出与验证身份。
 
+## 显式MMS单曲工作流
+
+`scripts/run_karaoke_japanese_mms_workflow.py`是公共集成中已安装的显式MMS入口。
+
+运行前，所选项目配置必须已经能够解析manifest和源音频、已审核的规范SUG、冻结歌词，以及带有来源记录的项目本地MSST Vocals。每次运行都必须使用全新的、非deliverables输出根目录；不得直接写入deliverables目录，也不得复用之前的输出根目录。wrapper只在其中创建`audit/`、`build/`和`render/`三个子目录；`render/`是成片工作目录。
+
+阶段固定且不可跳过：
+
+```text
+audit -> build -> render
+```
+
+审计门禁在输入/证据缺失、过时、不匹配、未解决或被否决时fail closed。构建门禁只能消费通过的审计，在来源记录中绑定manifest、SUG、冻结歌词、MSST Vocals、MMS访问策略和审计身份，并写入`build/timing_overrides.json`。在MMS构建产物中，只有`visual_release_overrides_ms`字段会复制到渲染输入并允许影响ASS/视频；它是构建产物中的概念字段，不是目录名。`character_overrides_ms`只保留为证据和来源记录，不应用到SUG、ASS时间或编码视频。渲染门禁要求audit/build来源记录匹配，并记录audit/build/render身份。
+
+MMS模型访问默认离线。可选的`--mms-model-path <local-mms-model>`覆盖优先级最高；未提供时，wrapper先自动发现项目`.cache/torch/hub/checkpoints/model.pt`，再查找该目录中的其他本地`.pt`检查点。只有本地检查点不存在且未授予`--allow-mms-network`时，才会在推理前失败。封面获取保持独立离线，只有传入`--allow-cover-network`才允许联网；两项权限互不授权，wrapper不接受通用模型路径或通用网络权限别名。
+
+已安装wrapper的CLI为：
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
+  --manifest <existing-manifest> --song-id <song-id> `
+  --composition <composition.png> `
+  --output-dir <new-non-existent-mms-output-dir> `
+  --visual-style spectrum
+```
+
+manifest负责解析选定歌曲的规范SUG和源音频；默认从所选manifest deliverable的`sources/netease_lyrics.json`解析冻结歌词，并从项目`.cache/msst-vocals`树解析匹配的MSST Vocals。`--source <frozen-lyrics>`和`--vocals-root <msst-vocals-root>`只用于显式覆盖，模型路径覆盖同样可选。唯一的网络权限是`--allow-mms-network`和相互独立的`--allow-cover-network`。
+
 ## 安装文件
 
-公开工作流入口为`scripts/run_karaoke_japanese_workflow.py`，由`scripts/karaoke_workflow.py`协调。共享代码位于`karaoke_common/`，日语布局代码位于`karaoke_japanese/`。当前公共分发路径仅验证了日语（`ja`）实现；其他语言profile需要单独验证的适配器，且不属于此公共路径。
+公开默认工作流入口为`scripts/run_karaoke_japanese_workflow.py`，由`scripts/karaoke_workflow.py`协调。共享代码位于`karaoke_common/`，日语布局代码位于`karaoke_japanese/`。当前公共分发路径仅验证了日语（`ja`）实现；其他语言profile需要单独验证的适配器，且不属于此公共路径。
+
+并列的`run_karaoke_japanese_mms_workflow.py`已列入依赖清单，并随公共集成安装。
 
 兼容性检查器保留在Skill仓库中。使用目标工作树的项目本地Python运行兼容性检查和环境检查：
 

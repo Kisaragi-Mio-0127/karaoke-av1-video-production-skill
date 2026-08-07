@@ -4,7 +4,7 @@
 
 这是一个面向Codex的卡拉OK视频制作Skill，同时提供StrangeUtaGame集成，用于制作、审核、渲染、验证和打包带有可编辑时间轴来源与AV1 4:2:0发布检查的视频。
 
-内置公共工作流使用日语（`ja`），入口为`run_karaoke_japanese_workflow.py`。当前公共分发路径经验证仅支持日语（`ja`）；其他语言工作流需要各自经过验证的适配器，且不属于此分发。
+内置公共分发提供两个并列的日语（`ja`）单曲入口。`run_karaoke_japanese_workflow.py`是默认入口，永远不运行MMS。`run_karaoke_japanese_mms_workflow.py`是已安装的显式MMS入口；它从已有manifest、规范SUG、冻结歌词和项目本地MSST Vocals开始，执行`audit -> build -> render`。当前公共分发路径经验证仅支持日语（`ja`）；其他语言工作流需要各自经过验证的适配器，且不属于此分发。
 
 ## 功能
 
@@ -71,7 +71,7 @@ if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
 uv run --no-sync python --version
 ```
 
-另行安装`ffmpeg`和`ffprobe`。Rubber Band仅在变调时需要；Whisper和外部MSST属于可选证据链。MMS仅通过显式独立审计/覆盖脚本使用；一键入口没有MMS参数，也不会生成、消费或校验MMS。使用以下命令检查目标环境：
+另行安装`ffmpeg`和`ffprobe`。Rubber Band仅在变调时需要；Whisper和外部MSST属于可选证据链。默认一键和批量入口永远不会生成、消费或校验MMS。下面描述的显式MMS入口默认离线；独立审计/构建脚本仍可作为单独的证据准备工具。使用以下命令检查目标环境：
 
 ```powershell
 $skillRoot = (Resolve-Path .).Path
@@ -86,7 +86,7 @@ uv run --no-sync python "$skillRoot/scripts/check_karaoke_environment.py" --targ
 2. 探测源媒体并选择输出配置。
 3. 构建或更新规范SUG，然后审核语义分段和适用的注音范围。
 4. 运行确定性离线封面提取器，记录有序8色调色板以及封面和提取器身份，并构建共享颜色计划。
-5. 制作需要额外时间证据时，单独运行显式MMS审计/覆盖脚本，或使用独立ASR/MSST派生证据；MMS不属于一键或批量渲染。
+5. 显式选择时间证据路径：默认一键和批量入口永远不运行MMS；已安装的MMS入口要求已有manifest、SUG、冻结歌词和MSST Vocals，并执行`audit -> build -> render`；独立MMS审计/构建脚本、独立ASR和MSST派生证据仍是单独的证据工具。
 6. 构建当前宽屏构图；使用黑胶布局时重新生成当前旋转黑胶资源。
 7. 渲染隔离预览、检查代表帧，并编码所选MP4输出。
 8. 验证媒体结构和抽样输出，然后最终化、提升或打包已接受文件。
@@ -98,7 +98,9 @@ $env:KARAOKE_ALBUM_MANIFEST = (Resolve-Path .\config\album.json).Path
 uv run --no-sync python scripts/karaoke_timing.py --manifest $env:KARAOKE_ALBUM_MANIFEST --allow-partial-manifest
 ```
 
-## 共享单曲命令
+## 单曲工作流入口
+
+### 默认单曲命令
 
 内置一键入口为`scripts/run_karaoke_japanese_workflow.py`，默认使用
 `--visual-style vinyl`；两种视觉风格都必须使用不存在的全新输出目录：
@@ -116,7 +118,42 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 
 workflow先构建共享的`karaoke-color-plan/v1`，再独立写入`karaoke-preflight.ass`，并在渲染阶段写入最终`karaoke.ass`。ASS、视频和工作流输出记录相同的`color_plan_sha256`；构图颜色记录过时或不一致时必须 fail closed，源SUG保持不变。默认使用完整时长，并且只生成带AAC-LC音频的MP4。MKV和完整解码必须显式选择；默认运行不生成MKV，也不执行完整解码。注音验证默认是可选的；日文结构性注音检查仍然必须通过，`required`和`off`仍需显式选择。一键和批量入口使用同一renderer和门禁。仅在需要显式覆盖某个歌手颜色时，才在任一入口重复传入`--singer-color <singer-id>=#RRGGBB`；该设置优先于颜色槽和封面调色板。
 
-一键入口没有MMS参数，不会生成、消费或校验MMS。`audit_karaoke_mms_alignment.py`和`build_karaoke_mms_overrides.py`是显式独立脚本；只有需要MMS证据时才单独运行它们。
+默认入口没有MMS参数，永远不会生成、消费或校验MMS。`audit_karaoke_mms_alignment.py`和`build_karaoke_mms_overrides.py`仍是显式独立脚本；只有单独请求证据路径，或使用下面的显式入口时，才使用它们。
+
+### 显式MMS单曲工作流
+
+`scripts/run_karaoke_japanese_mms_workflow.py`是公共集成中已安装的显式MMS入口。
+
+运行前，所选项目配置必须已经能够解析以下输入：
+
+- manifest及其选定的源音频；
+- 已审核的规范SUG；
+- 审计使用的冻结歌词；
+- 带有自身来源记录的项目本地MSST Vocals。
+
+每次运行都必须写入全新的、非deliverables输出根目录。不得直接写入deliverables目录，也不得复用之前的输出根目录。wrapper只在其中创建`audit/`、`build/`和`render/`三个子目录；`render/`是成片工作目录。阶段顺序固定且不可跳过：
+
+```text
+audit -> build -> render
+```
+
+`audit`使用已有SUG、冻结歌词、源音频和MSST Vocals运行MMS。审计门禁在任何必需输入或身份缺失、过时、不匹配、未解决或被否决时fail closed。`build`只能从通过的审计开始，并生成`build/timing_overrides.json`。构建门禁必须继续携带manifest、SUG、冻结歌词、MSST Vocals、MMS访问策略和审计身份。
+
+在MMS构建产物中，只有`visual_release_overrides_ms`字段会复制到渲染输入并允许影响ASS/视频；它是构建产物中的概念字段，不是目录名。`character_overrides_ms`只保留为审计/构建证据和来源记录；本MMS工作流不会把它应用到SUG、ASS时间或编码视频。渲染门禁要求构建门禁通过且来源记录匹配，然后在输出报告中记录audit/build/render身份。默认入口不得跳过或静默替代其中任何阶段。
+
+MMS模型访问默认离线。可选的`--mms-model-path <local-mms-model>`覆盖优先级最高；未提供时，wrapper先自动发现项目`.cache/torch/hub/checkpoints/model.pt`，再查找该目录中的其他本地`.pt`检查点。只有本地检查点不存在且未授予`--allow-mms-network`时，才会在推理前失败。封面提取有独立策略：只有传入`--allow-cover-network`才允许联网；两项权限互不授权，wrapper不接受通用模型路径或通用网络权限别名。
+
+已安装wrapper的CLI为：
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
+  --manifest <existing-manifest> --song-id <song-id> `
+  --composition <composition.png> `
+  --output-dir <new-non-existent-mms-output-dir> `
+  --visual-style spectrum
+```
+
+manifest负责解析选定歌曲的规范SUG和源音频；默认从所选manifest deliverable的`sources/netease_lyrics.json`解析冻结歌词，并从项目`.cache/msst-vocals`树解析MSST Vocals。`--source <frozen-lyrics>`和`--vocals-root <msst-vocals-root>`只用于显式覆盖，模型路径覆盖同样可选。唯一的网络权限是`--allow-mms-network`和相互独立的`--allow-cover-network`。
 
 ## AV1 4:2:0 批量命令
 
@@ -172,7 +209,7 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
 | 时间轴与可编辑SUG | `karaoke_timing.py`、`karaoke_review_preview.py`、`sync_karaoke_editable_ruby.py`、`sug_ruby.py` |
 | 对齐证据 | `audit_karaoke_asr_recognition.py`、`audit_karaoke_mms_alignment.py`、`build_karaoke_mms_overrides.py`、`prepare_karaoke_msst_vocals.py` |
 | 构图与渲染 | `karaoke_cover_palette.py`、`karaoke_color_plan.py`、`build_karaoke_wide_artwork.py`、`render_vinyl_karaoke.py`、`karaoke_direct_album_planning.py`、`render_karaoke_direct_av1_420_album.py`、`render_karaoke_direct_hevc444_album.py` |
-| 日语工作流 | `karaoke_workflow.py`、`run_karaoke_japanese_workflow.py` |
+| 日语工作流 | `karaoke_workflow.py`、`run_karaoke_japanese_workflow.py`、`run_karaoke_japanese_mms_workflow.py` |
 | 媒体与发布 | `inspect_karaoke_media.py`、`transcode_karaoke_av1.py`、`finalize_karaoke_release.py`、`karaoke_release_snapshot.py`、`package_karaoke_numbered_archives.py` |
 | 完整混音变调 | `pitch_shift_audio.py` |
 

@@ -11,7 +11,10 @@
 
 ## 独立ASR规则
 
-- `stable-ts`和`MMS_FA`接收已知歌词或音素，属于强制对齐证据。`audit_karaoke_mms_alignment.py`是显式MMS审计；`build_karaoke_mms_overrides.py`单独把接受的visual-release覆盖冻结到`timing_overrides.json`。一键入口没有MMS参数，不会生成、消费或校验MMS；正式AV1 4:2:0批量渲染不会运行MMS，只会自动消费已有的`<album-root>/sources/timing_overrides.json`。
+- `stable-ts`和`MMS_FA`接收已知歌词或音素，属于强制对齐证据。`audit_karaoke_mms_alignment.py`是显式MMS审计；`build_karaoke_mms_overrides.py`单独把接受的visual-release覆盖冻结到`timing_overrides.json`。默认一键入口没有MMS参数，永远不会生成、消费或校验MMS；正式AV1 4:2:0批量渲染同样不会运行MMS，只会自动消费已有的`<album-root>/sources/timing_overrides.json`。
+- 已安装的`run_karaoke_japanese_mms_workflow.py`入口要求已有manifest、规范SUG、冻结歌词和项目本地MSST Vocals，并在全新的、非deliverables暂存输出中按`audit -> build -> render`运行。审计门禁必须先通过；构建和渲染必须为这些输入及MMS访问策略携带匹配的来源记录。
+- 在MMS构建产物中，只有`visual_release_overrides_ms`进入渲染输入并可以影响ASS/视频。`character_overrides_ms`只保留为证据和来源记录，不应用到SUG、ASS时间或编码视频。
+- MMS模型访问默认离线：提供`--mms-model-path <local-mms-model>`，或显式使用`--allow-mms-network`。封面访问独立控制，只有传入`--allow-cover-network`才允许联网。
 - 不能把确定性插值称为ASR后备方案。独立ASR无法运行时记录`unresolved`和工具/模型错误，不能伪造识别词、置信度或通过结论。
 - ASR只能支持、否决或保持未解决，不能改写冻结歌词，也不能直接决定最终时间戳。
 - profile 专用的归一化必须显式处理；Unicode归一化后保留源文本和读音。不通过未经验证的 adapter 推断其他语言支持。

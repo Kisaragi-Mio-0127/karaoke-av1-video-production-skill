@@ -12,26 +12,49 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from scripts.karaoke_album import (
-    DEFAULT_MANIFEST_PATH,
-    load_album_manifest,
-    sha256_file,
-)
-from scripts.karaoke_language import (
-    DEFAULT_LANGUAGE,
-    language_identity,
-    normalize_language,
-)
-from scripts.karaoke_timing import (
-    _MORA_JOINING_SMALL_KANA,
-    apply_lyric_corrections,
-    make_lyric_lines,
-    parse_lrc,
-)
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+try:
+    from scripts.karaoke_album import (
+        DEFAULT_MANIFEST_PATH,
+        load_album_manifest,
+        sha256_file,
+    )
+    from scripts.karaoke_language import (
+        DEFAULT_LANGUAGE,
+        language_identity,
+        normalize_language,
+    )
+    from scripts.karaoke_timing import (
+        _MORA_JOINING_SMALL_KANA,
+        apply_lyric_corrections,
+        make_lyric_lines,
+        parse_lrc,
+    )
+except ImportError:  # pragma: no cover - direct execution fallback
+    from karaoke_album import (  # type: ignore[no-redef]
+        DEFAULT_MANIFEST_PATH,
+        load_album_manifest,
+        sha256_file,
+    )
+    from karaoke_language import (  # type: ignore[no-redef]
+        DEFAULT_LANGUAGE,
+        language_identity,
+        normalize_language,
+    )
+    from karaoke_timing import (  # type: ignore[no-redef]
+        _MORA_JOINING_SMALL_KANA,
+        apply_lyric_corrections,
+        make_lyric_lines,
+        parse_lrc,
+    )
 
 MAX_DUAL_AUDIO_DELTA_MS = 180
 MIN_VOCAL_SCORE = 0.15
@@ -58,6 +81,7 @@ def _load(path: Path) -> dict[str, Any]:
 
 
 def _dump(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n",
@@ -205,7 +229,9 @@ def _aggregate_recognition_disposition(
 ) -> str:
     if any(value == "veto" for value in per_lane.values()):
         return "veto"
-    if all(per_lane.get(kind) == "support" for kind in REQUIRED_RECOGNITION_AUDIO_KINDS):
+    if all(
+        per_lane.get(kind) == "support" for kind in REQUIRED_RECOGNITION_AUDIO_KINDS
+    ):
         return "support"
     return "unresolved"
 
@@ -293,9 +319,7 @@ def _prepare_recognition_evidence(
         audio_records: list[dict[str, Any]] = []
         for song_id in target_song_ids:
             song = songs[song_id]
-            expected_keys = {
-                key for key in line_texts if key[0] == song_id
-            }
+            expected_keys = {key for key in line_texts if key[0] == song_id}
             audit_lines = {
                 (song_id, int(line["line_index"])): line
                 for line in song.get("lines", [])
@@ -322,10 +346,15 @@ def _prepare_recognition_evidence(
                         f"recognition audit {audio_kind} window is stale for "
                         f"song {song_id} line {key[1]}"
                     )
-                value = str(
-                    line.get("disposition", line.get("status", "unresolved"))
-                ).strip().lower()
-                if value not in RECOGNITION_DISPOSITIONS or line.get("gate_ok") is False:
+                value = (
+                    str(line.get("disposition", line.get("status", "unresolved")))
+                    .strip()
+                    .lower()
+                )
+                if (
+                    value not in RECOGNITION_DISPOSITIONS
+                    or line.get("gate_ok") is False
+                ):
                     value = "unresolved"
                 per_line[key][audio_kind] = value
             reported_lyrics_hash = raw_report.get("lyrics_sha256")
@@ -509,6 +538,8 @@ def build_overrides(
             raise ValueError(
                 f"song {song_id} audit lines do not match corrected lyric lines"
             )
+        if not audit_line_indices:
+            raise ValueError(f"song {song_id} audit contains no timing lines")
         for line in report_songs[song_id]["lines"]:
             line_index = int(line["line_index"])
             try:
@@ -627,9 +658,9 @@ def build_overrides(
                         )
                         unresolved_indices.add(character_index)
                         candidate_failure_reasons[str(character_index)] = (
-                            ["recognition-veto"] if recognition_veto else [
-                                "inherited-from-unresolved-candidate"
-                            ]
+                            ["recognition-veto"]
+                            if recognition_veto
+                            else ["inherited-from-unresolved-candidate"]
                         )
                 else:
                     try:
@@ -642,9 +673,7 @@ def build_overrides(
                         (song_id, line_index, character_index), "vocal"
                     )
                     candidate_ms = (
-                        int(item[f"{candidate_lane}_mms_ms"])
-                        if use_mms
-                        else current_ms
+                        int(item[f"{candidate_lane}_mms_ms"]) if use_mms else current_ms
                     )
                     if threshold_pass and not recognition_veto:
                         candidate_dispositions[str(character_index)] = (
@@ -727,11 +756,7 @@ def build_overrides(
                 )
             )
             review_gate_reasons = [
-                *(
-                    ["uncovered-dual-audio-unit"]
-                    if uncovered_indices
-                    else []
-                ),
+                *(["uncovered-dual-audio-unit"] if uncovered_indices else []),
                 *[
                     f"character-{index}:{reason}"
                     for index, reasons in sorted(candidate_failure_reasons.items())
@@ -781,6 +806,10 @@ def build_overrides(
                     "machine-review threshold; stable-ts remains the fallback."
                 ),
                 "character_overrides_ms": final_values,
+                "character_overrides_ms_semantics": {
+                    "role": "evidence",
+                    "applied_to_render": False,
+                },
                 "character_dispositions": character_dispositions,
                 "candidate_dispositions": candidate_dispositions,
                 "candidate_failure_reasons": candidate_failure_reasons,
@@ -865,15 +894,8 @@ def build_overrides(
             "lines": existing_lines,
         }
 
-    previous_targets = (
-        existing.get("mms_provenance", {}).get("target_song_ids", [])
-        if isinstance(existing.get("mms_provenance"), dict)
-        else []
-    )
-    all_target_song_ids = sorted(
-        {str(item) for item in previous_targets}
-        | set(target_song_ids)
-        | set(release_target_song_ids)
+    all_target_song_ids = list(
+        dict.fromkeys([*target_song_ids, *release_target_song_ids])
     )
     language_identities = {
         song_id: language_identity(
@@ -899,6 +921,21 @@ def build_overrides(
             "lyric_source_sha256": audit.get(
                 "lyric_source_sha256", audit.get("netease_lyrics_sha256")
             ),
+            "manifest_path": audit.get("manifest_path"),
+            "manifest_sha256": audit.get("manifest_sha256"),
+            "lyric_corrections_path": audit.get("lyric_corrections_path"),
+            "lyric_corrections_sha256": audit.get("lyric_corrections_sha256"),
+            "song_inputs": {
+                song_id: {
+                    "sug_path": all_report_songs[song_id].get("sug_path"),
+                    "sug_sha256": all_report_songs[song_id].get("sug_sha256"),
+                    "vocals_path": all_report_songs[song_id].get("vocals_path"),
+                    "vocals_sha256": all_report_songs[song_id].get("vocals_sha256"),
+                    "mix_path": all_report_songs[song_id].get("mix_path"),
+                    "mix_sha256": all_report_songs[song_id].get("mix_sha256"),
+                }
+                for song_id in all_target_song_ids
+            },
             "recognition_audit": (
                 recognition_provenance[0]["path"]
                 if len(recognition_provenance) == 1
@@ -941,14 +978,24 @@ def build_overrides(
                     for key, lane in sorted(EXPLICIT_CANDIDATE_LANES.items())
                 ],
                 "human_reviewed": False,
+                "character_overrides_ms": {
+                    "role": "evidence",
+                    "applied_to_render": False,
+                },
             },
         },
-        "gate_ok": all(
+        "gate_ok": bool(
+            gate_lines := [
+                line
+                for song in songs.values()
+                for line in (song.get("lines", {}) or {}).values()
+                if isinstance(line, Mapping)
+            ]
+        )
+        and all(
             line.get("review_status") == MACHINE_REVIEW_STATUS
             and bool(line.get("review_gate", {}).get("ok"))
-            for song in songs.values()
-            for line in (song.get("lines", {}) or {}).values()
-            if isinstance(line, Mapping)
+            for line in gate_lines
         ),
         "unresolved": [
             {
@@ -1061,7 +1108,7 @@ def validate_audit_source_hashes(
     song_ids: tuple[str, ...],
     source_path: Path | None = None,
 ) -> None:
-    """Reject an audit made from stale lyrics, corrections, manifest, or SUG."""
+    """Reject an audit whose complete MMS evidence chain is missing or stale."""
 
     source_dir = album.deliverable_dir / "sources"
     resolved_source = (
@@ -1083,8 +1130,25 @@ def validate_audit_source_hashes(
         ),
     )
     for label, path, expected_hash in checks:
-        if not isinstance(expected_hash, str) or sha256_file(path) != expected_hash:
+        if (
+            not path.is_file()
+            or not isinstance(expected_hash, str)
+            or sha256_file(path) != expected_hash
+        ):
             raise ValueError(f"MMS audit {label} hash is missing or stale")
+
+    model_path_value = audit.get("model_path")
+    model_path = Path(str(model_path_value or ""))
+    if not model_path.is_absolute():
+        model_path = album.project_root / model_path
+    model_path = model_path.resolve()
+    expected_model_hash = audit.get("model_sha256")
+    if (
+        not model_path.is_file()
+        or not isinstance(expected_model_hash, str)
+        or sha256_file(model_path) != expected_model_hash
+    ):
+        raise ValueError("MMS audit model hash is missing or stale")
 
     tracks = {str(track.song_id): track for track in album.tracks}
     audit_songs = {
@@ -1101,6 +1165,27 @@ def validate_audit_source_hashes(
         expected_hash = song.get("sug_sha256")
         if not isinstance(expected_hash, str) or sha256_file(sug_path) != expected_hash:
             raise ValueError(f"MMS audit SUG hash is stale for song {song_id}")
+        for label, path_key, hash_key in (
+            ("mix", "mix_path", "mix_sha256"),
+            ("Vocals", "vocals_path", "vocals_sha256"),
+        ):
+            evidence_path = Path(str(song.get(path_key) or ""))
+            if not evidence_path.is_absolute():
+                evidence_path = album.project_root / evidence_path
+            evidence_path = evidence_path.resolve()
+            evidence_hash = song.get(hash_key)
+            if (
+                not evidence_path.is_file()
+                or not isinstance(evidence_hash, str)
+                or sha256_file(evidence_path) != evidence_hash
+            ):
+                raise ValueError(
+                    f"MMS audit {label} hash is missing or stale for song {song_id}"
+                )
+        if sha256_file(track.audio_path) != song.get("mix_sha256"):
+            raise ValueError(
+                f"MMS audit mix is not the current manifest audio for song {song_id}"
+            )
 
 
 def validate_recognition_audio_sources(
@@ -1129,48 +1214,80 @@ def validate_recognition_audio_sources(
                     f"recognition audit {audio_kind} audio is missing or stale "
                     f"for song {song_id}"
                 )
-            if audio_kind == "mix" and sha256_file(tracks[song_id].audio_path) != expected_hash:
+            if (
+                audio_kind == "mix"
+                and sha256_file(tracks[song_id].audio_path) != expected_hash
+            ):
                 raise ValueError(
                     f"recognition audit mix audio is not the current manifest audio "
                     f"for song {song_id}"
                 )
 
 
-def main() -> int:
-    args = make_parser().parse_args()
+def run_build(
+    *,
+    manifest_path: Path = DEFAULT_MANIFEST_PATH,
+    source_path: Path | None = None,
+    audit_path: Path | None = None,
+    recognition_audit_paths: Sequence[Path] = (),
+    output_path: Path | None = None,
+    song_ids: Sequence[str] | None = None,
+    release_song_ids: Sequence[str] | None = None,
+    allow_partial_manifest: bool = False,
+    allow_single_recognition_lane_review_only: bool = False,
+) -> dict[str, Any]:
+    """Build and write one validated override artifact for programmatic callers.
+
+    Existing data is merged only from ``output_path`` itself.  In particular, a
+    new dedicated output never inherits the canonical timing-overrides file.
+    """
+
+    manifest_path = Path(manifest_path).expanduser().resolve()
     album = load_album_manifest(
-        args.manifest,
-        require_five_tracks=not args.allow_partial_manifest,
+        manifest_path,
+        require_five_tracks=not allow_partial_manifest,
     )
     source_dir = album.deliverable_dir / "sources"
-    source_path = (
-        args.source.expanduser().resolve()
-        if args.source is not None
+    resolved_source_path = (
+        Path(source_path).expanduser().resolve()
+        if source_path is not None
         else (source_dir / "netease_lyrics.json").resolve()
     )
-    audit_path = (args.audit or source_dir / "mms_alignment_audit.json").resolve()
-    recognition_paths = tuple(
-        path.resolve() for path in (args.recognition_audits or [])
+    resolved_audit_path = (
+        Path(audit_path).expanduser().resolve()
+        if audit_path is not None
+        else (source_dir / "mms_alignment_audit.json").resolve()
     )
-    output_path = (args.output or source_dir / "timing_overrides.json").resolve()
-    audit = _load(audit_path)
+    recognition_paths = tuple(
+        Path(path).expanduser().resolve() for path in recognition_audit_paths
+    )
+    resolved_output_path = (
+        Path(output_path).expanduser().resolve()
+        if output_path is not None
+        else (source_dir / "timing_overrides.json").resolve()
+    )
+    audit = _load(resolved_audit_path)
     recognition_audits = tuple(_load(path) for path in recognition_paths)
     audit_song_ids = tuple(str(song["song_id"]) for song in audit.get("songs", []))
-    target_song_ids = tuple(args.song_ids or audit_song_ids)
-    release_target_song_ids = tuple(args.release_song_ids or target_song_ids)
+    target_song_ids = tuple(str(item) for item in (song_ids or audit_song_ids))
+    release_target_song_ids = tuple(
+        str(item) for item in (release_song_ids or target_song_ids)
+    )
     manifest_song_ids = {str(track.song_id) for track in album.tracks}
     if not (set(target_song_ids) | set(release_target_song_ids)) <= manifest_song_ids:
         raise ValueError("requested song ID is not present in the album manifest")
     validate_audit_source_hashes(
         audit,
         album,
-        args.manifest,
+        manifest_path,
         tuple(dict.fromkeys([*target_song_ids, *release_target_song_ids])),
-        source_path,
+        resolved_source_path,
     )
     validate_recognition_audio_sources(recognition_audits, album, target_song_ids)
-    existing = _load(output_path) if output_path.is_file() else {"songs": {}}
-    source = _load(source_path)
+    existing = (
+        _load(resolved_output_path) if resolved_output_path.is_file() else {"songs": {}}
+    )
+    source = _load(resolved_source_path)
     corrections = _load(source_dir / "lyric_corrections.json")
     line_windows, line_texts = build_line_windows(
         album,
@@ -1178,7 +1295,7 @@ def main() -> int:
         corrections,
         target_song_ids,
     )
-    relative_audit = audit_path.relative_to(album.project_root).as_posix()
+    relative_audit = resolved_audit_path.relative_to(album.project_root).as_posix()
     result = build_overrides(
         audit,
         existing,
@@ -1187,26 +1304,53 @@ def main() -> int:
         line_texts=line_texts,
         target_song_ids=target_song_ids,
         release_target_song_ids=release_target_song_ids,
-        audit_sha256=sha256_file(audit_path),
+        audit_sha256=sha256_file(resolved_audit_path),
         recognition_audit=recognition_audits,
         recognition_audit_relative_path=tuple(
             path.relative_to(album.project_root).as_posix()
             for path in recognition_paths
         ),
-        recognition_audit_sha256=tuple(
-            sha256_file(path) for path in recognition_paths
+        recognition_audit_sha256=tuple(sha256_file(path) for path in recognition_paths),
+        allow_single_recognition_lane_review_only=(
+            allow_single_recognition_lane_review_only
         ),
+    )
+    _dump(resolved_output_path, result)
+    return result
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = make_parser().parse_args(argv)
+    result = run_build(
+        manifest_path=args.manifest,
+        source_path=args.source,
+        audit_path=args.audit,
+        recognition_audit_paths=tuple(args.recognition_audits or ()),
+        output_path=args.output,
+        song_ids=args.song_ids,
+        release_song_ids=args.release_song_ids,
+        allow_partial_manifest=args.allow_partial_manifest,
         allow_single_recognition_lane_review_only=(
             args.allow_single_recognition_lane_review_only
         ),
     )
-    _dump(output_path, result)
+    output_path = (
+        args.output.expanduser().resolve()
+        if args.output is not None
+        else load_album_manifest(
+            args.manifest,
+            require_five_tracks=not args.allow_partial_manifest,
+        ).deliverable_dir
+        / "sources"
+        / "timing_overrides.json"
+    )
     print(
         json.dumps(
             {
                 "status": "ok",
                 "output": str(output_path),
-                "target_song_ids": list(target_song_ids),
+                "target_song_ids": result["mms_provenance"]["target_song_ids"],
+                "gate_ok": bool(result.get("gate_ok")),
             },
             ensure_ascii=False,
         )

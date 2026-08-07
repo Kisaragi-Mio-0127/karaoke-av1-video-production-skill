@@ -97,6 +97,8 @@ class WorkflowConfig:
     lossless_companion: bool = False
     full_decode: bool = False
     canonical_deliverables: tuple[Path, ...] = ()
+    timing_overrides: Path | None = None
+    timing_override_song_id: str | None = None
 
 
 def sha256_file(path: Path) -> str:
@@ -132,14 +134,14 @@ def _has_test_root_marker(path: Path) -> bool:
 
 
 def validate_visual_contract(config: WorkflowConfig) -> None:
+    if (config.timing_overrides is None) != (config.timing_override_song_id is None):
+        raise KaraokeWorkflowError(
+            "timing_overrides and timing_override_song_id must be provided together"
+        )
     if config.visual_style not in VISUAL_STYLES:
-        raise KaraokeWorkflowError(
-            f"unsupported visual style: {config.visual_style!r}"
-        )
+        raise KaraokeWorkflowError(f"unsupported visual style: {config.visual_style!r}")
     if config.color_policy not in {"cover", "project"}:
-        raise KaraokeWorkflowError(
-            f"unsupported color policy: {config.color_policy!r}"
-        )
+        raise KaraokeWorkflowError(f"unsupported color policy: {config.color_policy!r}")
     if config.visual_style == "vinyl" and config.canonical_vinyl is None:
         raise KaraokeWorkflowError("--vinyl is required when --visual-style=vinyl")
     if config.visual_style == "vinyl" and (
@@ -187,7 +189,9 @@ def validate_output_dir(config: WorkflowConfig) -> Path:
 def _assert_output_path(path: Path, output_dir: Path) -> Path:
     resolved = path.resolve()
     if not _is_relative_to(resolved, output_dir.resolve()):
-        raise KaraokeWorkflowError(f"workflow output escapes output directory: {resolved}")
+        raise KaraokeWorkflowError(
+            f"workflow output escapes output directory: {resolved}"
+        )
     return resolved
 
 
@@ -287,9 +291,20 @@ def build_ass_command(
         "--color-policy",
         config.color_policy,
     ]
+    if config.timing_overrides is not None:
+        command.extend(
+            [
+                "--timing-overrides",
+                str(config.timing_overrides.expanduser().resolve()),
+                "--song-id",
+                str(config.timing_override_song_id),
+            ]
+        )
     if config.visual_style == "vinyl":
         if generated_vinyl is None:
-            raise KaraokeWorkflowError("vinyl workflow did not provide generated artwork")
+            raise KaraokeWorkflowError(
+                "vinyl workflow did not provide generated artwork"
+            )
         command.extend(
             ["--vinyl", str(generated_vinyl.resolve()), "--vinyl-motion", "rotate"]
         )
@@ -304,9 +319,9 @@ def build_ass_command(
             command.extend(["--progress-color", config.progress_color])
     command.extend(
         [
-        "--pronunciation-validation",
-        config.pronunciation_validation,
-        "--ass-only",
+            "--pronunciation-validation",
+            config.pronunciation_validation,
+            "--ass-only",
         ]
     )
     return command
@@ -366,7 +381,9 @@ def _probe_with_ffmpeg(
     command = build_probe_command(ffmpeg, path)
     completed = runner(command)
     diagnostic = completed.stdout + "\n" + completed.stderr
-    stream_lines = [line.strip() for line in diagnostic.splitlines() if "Stream #" in line]
+    stream_lines = [
+        line.strip() for line in diagnostic.splitlines() if "Stream #" in line
+    ]
     video_line = next((line for line in stream_lines if "Video:" in line), None)
     audio_line = next((line for line in stream_lines if "Audio:" in line), None)
     return {
@@ -394,7 +411,9 @@ def _duration_from_probe(probe: dict[str, Any]) -> float:
     try:
         duration = float(probe["duration_seconds"])
     except (KeyError, TypeError, ValueError) as error:
-        raise KaraokeWorkflowError("audio FFmpeg probe did not report a duration") from error
+        raise KaraokeWorkflowError(
+            "audio FFmpeg probe did not report a duration"
+        ) from error
     if duration <= 0:
         raise KaraokeWorkflowError("audio duration must be positive")
     return duration
@@ -405,7 +424,11 @@ def validate_lossless_source(audio_path: Path, probe: dict[str, Any]) -> str:
     codec = audio_stream.get("codec") if isinstance(audio_stream, dict) else None
     suffix = audio_path.suffix.casefold()
     is_flac = suffix == ".flac" and codec == "flac"
-    is_pcm_wav = suffix in {".wav", ".wave"} and isinstance(codec, str) and codec.startswith("pcm_")
+    is_pcm_wav = (
+        suffix in {".wav", ".wave"}
+        and isinstance(codec, str)
+        and codec.startswith("pcm_")
+    )
     if not (is_flac or is_pcm_wav):
         raise KaraokeWorkflowError(
             "--lossless-companion requires actual FLAC or PCM WAV audio; "
@@ -490,12 +513,19 @@ def validate_vinyl_provenance(
     if artwork.get("vinyl_sha256") != generated_vinyl_sha256:
         raise KaraokeWorkflowError("generated vinyl hash does not match artwork.json")
     if recorded_generator_sha256 != renderer_source_sha256:
-        raise KaraokeWorkflowError("artwork renderer identity does not match current source")
+        raise KaraokeWorkflowError(
+            "artwork renderer identity does not match current source"
+        )
     if not artwork.get("vinyl_style_version"):
         raise KaraokeWorkflowError("artwork.json is missing vinyl_style_version")
     motion_contract = artwork.get("vinyl_motion_contract")
-    if not isinstance(motion_contract, dict) or motion_contract.get("default") != "rotate":
-        raise KaraokeWorkflowError("current vinyl motion contract must default to rotate")
+    if (
+        not isinstance(motion_contract, dict)
+        or motion_contract.get("default") != "rotate"
+    ):
+        raise KaraokeWorkflowError(
+            "current vinyl motion contract must default to rotate"
+        )
     return {
         "vinyl_generator_sha256": renderer_source_sha256,
         "vinyl_sha256": generated_vinyl_sha256,
@@ -542,13 +572,9 @@ def validate_renderer_report(
         or config.color_policy == "cover"
         or bool(config.singer_colors)
     )
-    visual_colors = (
-        color_plan.get("visual") if isinstance(color_plan, dict) else None
-    )
+    visual_colors = color_plan.get("visual") if isinstance(color_plan, dict) else None
     color_plan_sha256 = (
-        color_plan.get("color_plan_sha256")
-        if isinstance(color_plan, dict)
-        else None
+        color_plan.get("color_plan_sha256") if isinstance(color_plan, dict) else None
     )
     if requires_color_plan:
         checks.update(
@@ -587,21 +613,15 @@ def validate_renderer_report(
                 "spectrum_geometry": video.get("spectrum_geometry")
                 == {"x": 800, "y": 290, "width": 1040, "height": 220},
                 "spectrum_bar_count": video.get("spectrum_bar_count") == 80,
-                "spectrum_clip_safe_geometry": video.get(
-                    "spectrum_clip_safe_geometry"
-                )
+                "spectrum_clip_safe_geometry": video.get("spectrum_clip_safe_geometry")
                 == {"x": 736, "y": 226, "width": 1168, "height": 348},
-                "spectrum_bar_top_clearance": video.get(
-                    "spectrum_bar_top_clearance_px"
-                )
+                "spectrum_bar_top_clearance": video.get("spectrum_bar_top_clearance_px")
                 == 8,
                 "spectrum_bar_bottom_clearance": video.get(
                     "spectrum_bar_bottom_clearance_px"
                 )
                 == 8,
-                "spectrum_glow_top_padding": video.get(
-                    "spectrum_glow_top_padding_px"
-                )
+                "spectrum_glow_top_padding": video.get("spectrum_glow_top_padding_px")
                 == 56,
                 "spectrum_glow_bottom_padding": video.get(
                     "spectrum_glow_bottom_padding_px"
@@ -611,10 +631,6 @@ def validate_renderer_report(
                 and video["peak_hold"].get("enabled") is True,
                 "progress_time_hidden": isinstance(video.get("progress_bar"), dict)
                 and video["progress_bar"].get("show_time") is False,
-            }
-        )
-        checks.update(
-            {
                 "spectrum_color_plan": not requires_color_plan
                 or (
                     isinstance(visual_colors, dict)
@@ -625,8 +641,7 @@ def validate_renderer_report(
                 or (
                     isinstance(visual_colors, dict)
                     and isinstance(progress_bar, dict)
-                    and progress_bar.get("color")
-                    == visual_colors.get("progress_color")
+                    and progress_bar.get("color") == visual_colors.get("progress_color")
                 ),
             }
         )
@@ -648,20 +663,35 @@ def _critical_ass_report_facts(report: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, list):
             return []
         keys = (
-            "line_index", "secondary_line_index", "source_line_index",
-            "phrase_index", "text", "voice_role", "singer_group",
-            "effective_singer_id", "effective_singer_ids",
-            "effective_singer_runs", "hot_primary_ass", "ruby",
+            "line_index",
+            "secondary_line_index",
+            "source_line_index",
+            "phrase_index",
+            "text",
+            "voice_role",
+            "singer_group",
+            "effective_singer_id",
+            "effective_singer_ids",
+            "effective_singer_runs",
+            "hot_primary_ass",
+            "ruby",
         )
         return [
             {key: item.get(key) for key in keys if key in item}
-            for item in value if isinstance(item, dict)
+            for item in value
+            if isinstance(item, dict)
         ]
 
     top_keys = (
-        "language_identity", "singer_color_mapping", "color_plan", "sug_hash",
-        "ruby_enabled", "ruby_spans", "ruby_review",
-        "ruby_consistency_gate", "pronunciation_validation",
+        "language_identity",
+        "singer_color_mapping",
+        "color_plan",
+        "sug_hash",
+        "ruby_enabled",
+        "ruby_spans",
+        "ruby_review",
+        "ruby_consistency_gate",
+        "pronunciation_validation",
     )
     return {
         **{key: ass.get(key) for key in top_keys if key in ass},
@@ -746,8 +776,17 @@ def run_workflow(
         for name, path in input_paths.items()
         if name != "fonts_dir"
     }
+    timing_override_identity: dict[str, Any] | None = None
+    if config.timing_overrides is not None:
+        timing_override_identity = {
+            **_input_identity(config.timing_overrides),
+            "song_id": config.timing_override_song_id,
+        }
+        identities["timing_overrides"] = timing_override_identity
     if not config.fonts_dir.is_dir():
-        raise KaraokeWorkflowError(f"fonts directory does not exist: {config.fonts_dir}")
+        raise KaraokeWorkflowError(
+            f"fonts directory does not exist: {config.fonts_dir}"
+        )
 
     ffmpeg = resolve_ffmpeg(config.ffmpeg)
     output_dir.mkdir(parents=True)
@@ -763,16 +802,14 @@ def run_workflow(
         "lossless_companion": {
             "requested": config.lossless_companion,
             "performed": False,
-            "reason": (
-                "requested"
-                if config.lossless_companion
-                else "not-requested"
-            ),
+            "reason": ("requested" if config.lossless_companion else "not-requested"),
         },
         "inputs": identities,
         "stages": [],
         "outputs": {},
     }
+    if timing_override_identity is not None:
+        report["timing_override"] = timing_override_identity
     try:
         composition_gate = validate_workflow_composition(config)
         report["stages"].append(
@@ -804,9 +841,7 @@ def run_workflow(
             raise KaraokeWorkflowError(
                 f"render duration must be in (0, {full_duration:.3f}] seconds"
             )
-        report["stages"].append(
-            {"name": "inventory", "status": "ok", "probes": probes}
-        )
+        report["stages"].append({"name": "inventory", "status": "ok", "probes": probes})
 
         generated_vinyl: Path | None = None
         if is_vinyl:
@@ -825,9 +860,7 @@ def run_workflow(
                 allow_network=config.allow_network,
                 album_title=config.album_title,
             )
-            generated_vinyl = _assert_output_path(
-                artwork_dir / "vinyl.png", output_dir
-            )
+            generated_vinyl = _assert_output_path(artwork_dir / "vinyl.png", output_dir)
             if not generated_vinyl.is_file():
                 raise KaraokeWorkflowError(
                     "current artwork builder did not create vinyl.png"
@@ -860,12 +893,12 @@ def run_workflow(
             output_dir / "karaoke-preflight.ass", output_dir
         )
         ass_path = _assert_output_path(output_dir / "karaoke.ass", output_dir)
-        ass_report_path = _assert_output_path(output_dir / "ass-report.json", output_dir)
+        ass_report_path = _assert_output_path(
+            output_dir / "ass-report.json", output_dir
+        )
         output_path = _assert_output_path(output_dir / "karaoke-av1.mp4", output_dir)
         lossless_output = (
-            _assert_output_path(
-                output_dir / "karaoke-av1-lossless.mkv", output_dir
-            )
+            _assert_output_path(output_dir / "karaoke-av1-lossless.mkv", output_dir)
             if config.lossless_companion
             else None
         )
@@ -882,9 +915,13 @@ def run_workflow(
         )
         ass_result = runner(ass_command)
         if ass_result.returncode != 0:
-            raise KaraokeWorkflowError(f"ASS production failed: {ass_result.stderr[-2000:]}")
+            raise KaraokeWorkflowError(
+                f"ASS production failed: {ass_result.stderr[-2000:]}"
+            )
         if not preflight_ass_path.is_file() or not ass_report_path.is_file():
-            raise KaraokeWorkflowError("ASS production did not create its declared outputs")
+            raise KaraokeWorkflowError(
+                "ASS production did not create its declared outputs"
+            )
         preflight_ass_gate = ass_validator(preflight_ass_path, "HarmonyOS Sans SC")
         if not preflight_ass_gate.get("ok"):
             raise KaraokeWorkflowError(
@@ -924,9 +961,7 @@ def run_workflow(
         ):
             raise KaraokeWorkflowError("AV1 render did not create its declared outputs")
         if lossless_output is not None and not lossless_output.is_file():
-            raise KaraokeWorkflowError(
-                "requested lossless companion was not created"
-            )
+            raise KaraokeWorkflowError("requested lossless companion was not created")
         final_contract = enforce_language_contract(config, ass_path)
         final_ass_gate = ass_validator(ass_path, "HarmonyOS Sans SC")
         if not final_ass_gate.get("ok"):
@@ -947,7 +982,8 @@ def run_workflow(
             render_report_path.read_text(encoding="utf-8")
         )
         report_parity = validate_ass_report_parity(
-            preflight_renderer_report, final_renderer_report
+            preflight_renderer_report,
+            final_renderer_report,
         )
         report["stages"].append(
             {
@@ -1004,17 +1040,13 @@ def run_workflow(
                     f"full null decode failed: {decoded.stderr[-2000:]}"
                 )
         if lossless_output is not None:
-            lossless_probe = _probe_with_ffmpeg(
-                ffmpeg, lossless_output, runner=runner
-            )
+            lossless_probe = _probe_with_ffmpeg(ffmpeg, lossless_output, runner=runner)
             lossless_video = lossless_probe.get("video_stream") or {}
             lossless_audio = lossless_probe.get("audio_stream") or {}
             lossless_duration_drift = abs(
                 float(lossless_probe.get("duration_seconds") or -1.0) - duration
             )
-            mp4_video_sha256 = _video_stream_sha256(
-                ffmpeg, output_path, runner=runner
-            )
+            mp4_video_sha256 = _video_stream_sha256(ffmpeg, output_path, runner=runner)
             mkv_video_sha256 = _video_stream_sha256(
                 ffmpeg, lossless_output, runner=runner
             )
@@ -1087,9 +1119,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--cover-source-audio",
         type=Path,
-        help=(
-            "audio used only to extract artwork cover data; defaults to --audio"
-        ),
+        help=("audio used only to extract artwork cover data; defaults to --audio"),
     )
     parser.add_argument("--composition", type=Path, required=True)
     parser.add_argument(

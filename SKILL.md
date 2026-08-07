@@ -14,10 +14,12 @@ map.
 Produce karaoke videos through an inspect, preview, encode, and verify workflow. Keep subtitle timing, AV1 4:2:0 output, audio integrity, and playback compatibility independently testable.
 
 The generic default remains Japanese (`ja`) for legacy manifests. Use
-`run_karaoke_japanese_workflow.py` for the bundled Japanese route. Other
-language policies require separately validated adapters, but colour planning
-is shared: every supported profile uses one `karaoke-color-plan/v1`, with no
-language-specific colour fork.
+`run_karaoke_japanese_workflow.py` for the default bundled Japanese route; it
+never runs MMS. The parallel `run_karaoke_japanese_mms_workflow.py` entry is
+installed and has a separate explicit `audit -> build -> render` contract
+documented below. Other language policies require separately
+validated adapters, but colour planning is shared: every supported profile
+uses one `karaoke-color-plan/v1`, with no language-specific colour fork.
 The public/shared route is validated only for Japanese (`ja`); non-Japanese
 output requires a separately validated language adapter and does not inherit
 Japanese validation.
@@ -103,12 +105,74 @@ optional by default; Japanese structural ruby gates still apply, and `required`
 or `off` remain explicit choices. The one-click and batch entry points are
 thin front ends over the same renderer and must apply the same singer, colour
 plan, overlay, ruby, container, and diagnostic gates.
-Neither entry invokes MMS by default or exposes an MMS interface. Any MMS audit
-or timing-override generation must be a separate, explicitly invoked run.
+The default one-click and batch renderers do not invoke MMS or expose an MMS
+interface. The installed MMS entry is the only documented workflow entry that
+may run MMS, and it must be explicitly invoked with its offline/network
+policy and all prerequisite evidence. Any standalone MMS audit or timing-
+override generation remains an explicitly invoked run.
 If the fixed-path `timing_overrides` artifact exists, batch rendering passes
 its existing visual-release overrides through and records the file identity;
 it never invokes MMS or creates timing overrides. The renderer does not prove
 MMS provenance, so validate that artifact before starting the batch.
+
+## Explicit MMS single-track workflow
+
+`scripts/run_karaoke_japanese_mms_workflow.py` is the installed explicit MMS
+entry in the public integration.
+
+Before invoking it, require an existing manifest that resolves the selected
+source audio and canonical reviewed SUG, plus frozen lyrics and project-local
+MSST Vocals with their own provenance. Allocate a new, non-deliverables output
+root for every run; never write directly to a deliverables directory or reuse
+a prior output root. The wrapper creates exactly `audit/`, `build/`, and
+`render/`; `render/` is the final-video working directory.
+
+The entry must execute these stages in order, with no silent fallback:
+
+```text
+audit -> build -> render
+```
+
+- `audit` runs MMS against the existing SUG, frozen lyrics, source audio, and
+  MSST Vocals. The audit gate fails closed for missing or stale inputs,
+  identity mismatches, unresolved evidence, vetoes, or missing provenance.
+- `build` may consume only a passing audit. Its build gate must bind the
+  manifest, SUG, frozen lyrics, MSST Vocals, MMS access policy, and audit
+  identity, then produce `build/timing_overrides.json`.
+- Of the MMS build outputs, only the `visual_release_overrides_ms` field is
+  copied into the render input and may affect the ASS/video. It is a conceptual
+  field in the build artifact, not a directory name. `character_overrides_ms`
+  is evidence and provenance only; this workflow does not apply it to the SUG,
+  ASS timing, or encoded video. The render gate requires matching audit/build
+  provenance and records the audit, build, and render identities.
+
+MMS model access is offline by default. The optional
+`--mms-model-path <local-mms-model>` override has highest priority. Without
+it, automatically discover `.cache/torch/hub/checkpoints/model.pt`, then
+another local `.pt` checkpoint in that project directory. Fail before
+inference only when no local checkpoint exists and `--allow-mms-network` was
+not granted. Cover retrieval is independently offline;
+`--allow-cover-network` is the separate opt-in and neither permission
+authorizes the other lane. No generic model-path or network-permission aliases
+are accepted.
+
+The installed wrapper CLI is:
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
+  --manifest <existing-manifest> --song-id <song-id> `
+  --composition <composition.png> `
+  --output-dir <new-non-existent-mms-output-dir> `
+  --visual-style spectrum
+```
+
+The manifest resolves the selected track's canonical SUG and source audio;
+by default the wrapper resolves frozen lyrics from the selected manifest
+deliverable's `sources/netease_lyrics.json` and the matching MSST stem from the
+project's `.cache/msst-vocals` tree. Use `--source <frozen-lyrics>` and
+`--vocals-root <msst-vocals-root>` only as explicit overrides. The model path
+override is also optional. The only network permissions are
+`--allow-mms-network` and the independent `--allow-cover-network`.
 
 The album/batch direct renderer (`render_karaoke_direct_av1_420_album.py`)
 is the AV1 4:2:0 batch entry and accepts `--visual-style vinyl|spectrum|both`,

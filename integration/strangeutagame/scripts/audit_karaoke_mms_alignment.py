@@ -37,6 +37,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 try:
+    from scripts import karaoke_timing
     from scripts.karaoke_album import (
         DEFAULT_MANIFEST_PATH,
         AlbumManifest,
@@ -51,8 +52,6 @@ try:
         mms_granularity,
         normalize_language,
     )
-
-    from scripts import karaoke_timing
 except ImportError:  # pragma: no cover - direct execution fallback
     import karaoke_timing  # type: ignore[no-redef]
     from karaoke_album import (  # type: ignore[no-redef]
@@ -291,7 +290,9 @@ def _filter_mms_unit(
     """Normalize one romanized mora to the MMS alphabet."""
 
     allowed = set(allowed_units or _DEFAULT_ALLOWED_UNITS)
-    unit = "".join(character for character in str(value).lower() if character in allowed)
+    unit = "".join(
+        character for character in str(value).lower() if character in allowed
+    )
     return unit or "x"
 
 
@@ -311,7 +312,7 @@ def line_units(
     that module is automatically reused by this production script.
     """
 
-    language = normalize_language(language)
+    normalize_language(language)
 
     overrides = (
         reading_overrides
@@ -643,7 +644,7 @@ def _validate_mms_model_access(
     *,
     allow_network: bool,
 ) -> Path | None:
-    """Require an existing checkpoint or explicit download authorization."""
+    """Require a local checkpoint unless network access is explicitly allowed."""
 
     if model_path is not None:
         resolved = Path(model_path).expanduser().resolve()
@@ -652,8 +653,8 @@ def _validate_mms_model_access(
         return resolved
     if not allow_network:
         raise RuntimeError(
-            "MMS model loading is offline by default; provide --model-path "
-            "or authorize downloads with --allow-network"
+            "MMS model loading is offline by default; provide model_path "
+            "or explicitly set allow_network=True"
         )
     return None
 
@@ -664,7 +665,7 @@ def load_mms_runtime(
     model_path: Path | None = None,
     allow_network: bool = False,
 ) -> MmsRuntime:
-    """Configure the project cache and load one explicitly authorized model."""
+    """Configure the project cache and load one explicitly authorized MMS model."""
 
     local_model_path = _validate_mms_model_access(
         model_path,
@@ -878,20 +879,14 @@ def audit_track(
                     vocals_audio,
                     crop_start_ms,
                     crop_end_ms,
-                    [
-                        {"unit": unit, "character_index": index}
-                        for unit, index in units
-                    ],
+                    [{"unit": unit, "character_index": index} for unit, index in units],
                     runtime,
                 )
                 mix_units = align_audio_units(
                     mix_audio,
                     crop_start_ms,
                     crop_end_ms,
-                    [
-                        {"unit": unit, "character_index": index}
-                        for unit, index in units
-                    ],
+                    [{"unit": unit, "character_index": index} for unit, index in units],
                     runtime,
                 )
                 comparisons = build_comparisons(
@@ -932,9 +927,7 @@ def audit_track(
                 else None
             )
             mix_last_unit_end_ms = (
-                max(int(item["end_ms"]) for item in mix_units)
-                if mix_units
-                else None
+                max(int(item["end_ms"]) for item in mix_units) if mix_units else None
             )
             line = {
                 "line_index": line_index,
@@ -966,7 +959,8 @@ def audit_track(
                 "comparisons": comparisons,
                 "mix_units": mix_units,
                 "dual_audio_comparisons": dual,
-                "actual_dual_audio": coverage_complete and not retained_character_indices,
+                "actual_dual_audio": coverage_complete
+                and not retained_character_indices,
                 "coverage_complete": coverage_complete,
                 "unresolved": bool(unresolved_reasons),
                 "unresolved_reasons": unresolved_reasons,
@@ -1013,7 +1007,11 @@ def audit_track(
         if line.get("unresolved")
     ]
     song["unresolved_count"] = len(song["unresolved"])
-    song["gate_ok"] = song["unresolved_count"] == 0
+    song["gate_ok"] = (
+        song["line_count"] > 0
+        and song["timed_character_count"] > 0
+        and song["unresolved_count"] == 0
+    )
     return song
 
 
@@ -1025,6 +1023,16 @@ def _write_json(path: Path, document: Mapping[str, Any]) -> None:
         encoding="utf-8",
     )
     temporary.replace(path)
+
+
+def _report_gate_ok(songs: Sequence[Mapping[str, Any]], unresolved_count: int) -> bool:
+    """Reject vacuous audits as well as any song-level failure."""
+
+    return (
+        bool(songs)
+        and all(bool(song.get("gate_ok")) for song in songs)
+        and unresolved_count == 0
+    )
 
 
 def run_audit(
@@ -1086,6 +1094,7 @@ def run_audit(
         "model": MODEL_NAME,
         "model_path": _report_path(runtime.model_path, project_root),
         "model_sha256": sha256_file(runtime.model_path),
+        "model_network_allowed": bool(allow_network),
         "language_codes": {track.song_id: track.language for track in tracks},
         "language_identities": {
             track.song_id: language_identity(track.language) for track in tracks
@@ -1118,7 +1127,10 @@ def run_audit(
     report["unresolved_count"] = sum(
         int(song.get("unresolved_count", 0)) for song in report["songs"]
     )
-    report["gate_ok"] = report["unresolved_count"] == 0
+    report["gate_ok"] = _report_gate_ok(
+        report["songs"],
+        report["unresolved_count"],
+    )
     _write_json(resolved_output, report)
     print(f"REPORT {resolved_output}")
     return report

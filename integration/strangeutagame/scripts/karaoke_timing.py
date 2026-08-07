@@ -98,6 +98,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from strange_uta_game.backend.application.auto_check_service import (  # noqa: E402
+    AutoCheckService,
+)
 from strange_uta_game.backend.domain import (  # noqa: E402
     Character,
     Project,
@@ -367,6 +370,19 @@ class ReadingHelper:
         if not any("ぁ" <= c <= "ゖ" or "ァ" <= c <= "ヺ" for c in reading):
             return None
         return Ruby(parts=[RubyPart(text=reading)])
+
+
+def create_project_ruby_service() -> AutoCheckService:
+    """Create the normal sentence analyzer with the project's reading dictionary."""
+
+    dictionary_path = ROOT / "dictionary.json"
+    user_dictionary: list[dict[str, Any]] = []
+    if dictionary_path.is_file():
+        loaded = json.loads(dictionary_path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, list):
+            raise ValueError(f"project dictionary must be a list: {dictionary_path}")
+        user_dictionary = loaded
+    return AutoCheckService(user_dictionary=user_dictionary)
 
 
 def split_moras(text: str) -> list[str]:
@@ -2621,7 +2637,9 @@ def export_song(
     relative_audio = os.path.relpath(audio_path, sug_path.parent)
     timing_before_ruby = timing_fingerprint(project)
     sug_hash_before_ruby = sug_hash(project)
-    ruby_fill_records = fill_missing_project_ruby(project, ReadingHelper())
+    ruby_fill_records = fill_missing_project_ruby(
+        project, create_project_ruby_service()
+    )
     if timing_fingerprint(project) != timing_before_ruby:
         raise ValueError("ruby fill changed canonical timing fields")
     sug_hash_after_ruby = sug_hash(project)

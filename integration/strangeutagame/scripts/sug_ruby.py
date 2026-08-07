@@ -12,6 +12,7 @@ import json
 import math
 import unicodedata
 from collections.abc import Mapping, MutableMapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -1084,6 +1085,87 @@ def fill_missing_project_ruby(project: Any, helper: Any) -> list[dict[str, Any]]
     before_timing = timing_fingerprint(project)
     records: list[dict[str, Any]] = []
     sentences = _value(project, "sentences", []) or []
+
+    if hasattr(helper, "apply_to_sentence"):
+        for sentence_index, sentence in enumerate(sentences):
+            original_chars = _characters(sentence)
+            analyzed_sentence = deepcopy(sentence)
+            helper.apply_to_sentence(
+                analyzed_sentence,
+                keep_existing_timetags=True,
+                only_noruby=True,
+                apply_user_dict=True,
+            )
+            analyzed_chars = _characters(analyzed_sentence)
+            if len(analyzed_chars) != len(original_chars):
+                raise RubyValidationError(
+                    "whole-sentence ruby analysis changed the character axis"
+                )
+
+            start = 0
+            while start < len(analyzed_chars):
+                end = start + 1
+                while end < len(analyzed_chars) and _linked_to_next(
+                    analyzed_chars[end - 1]
+                ):
+                    end += 1
+                source_chain = original_chars[start:end]
+                analyzed_chain = analyzed_chars[start:end]
+                surface = "".join(
+                    str(_value(character, "char", "") or "")
+                    for character in source_chain
+                )
+                if (
+                    any(_character_has_ruby(character) for character in source_chain)
+                    or is_pure_katakana(surface)
+                    or not any(
+                        _character_has_ruby(character)
+                        for character in analyzed_chain
+                    )
+                ):
+                    start = end
+                    continue
+
+                before_hash = span_hash(project, sentence_index, start, end)
+                for offset, (target, analyzed) in enumerate(
+                    zip(source_chain, analyzed_chain, strict=True)
+                ):
+                    reading = _character_reading(analyzed)
+                    if reading:
+                        _set_character_reading(target, reading)
+                    _set_value(
+                        target,
+                        "linked_to_next",
+                        offset < len(source_chain) - 1
+                        and _linked_to_next(analyzed),
+                    )
+                after_hash = span_hash(project, sentence_index, start, end)
+                records.append(
+                    {
+                        "sentence_id": sentence_id(
+                            sentence, f"sentence:{sentence_index}"
+                        ),
+                        "start": start,
+                        "end": end,
+                        "surface": surface,
+                        "source": "project-auto-check",
+                        "review_status": "machine-fill",
+                        "confidence": None,
+                        "evidence": [
+                            "whole-sentence-tokenizer",
+                            "project-dictionary",
+                        ],
+                        "model_prompt_version": None,
+                        "generation_id": str(uuid4()),
+                        "before_hash": before_hash,
+                        "after_hash": after_hash,
+                    }
+                )
+                start = end
+        if timing_fingerprint(project) != before_timing:
+            raise RubyValidationError("machine ruby fill changed canonical timing fields")
+        return records
+
     for sentence_index, sentence in enumerate(sentences):
         chars = _characters(sentence)
         for char_index, character in enumerate(chars):

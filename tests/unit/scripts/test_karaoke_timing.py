@@ -17,6 +17,7 @@ from scripts.karaoke_timing import (
     apply_lyric_corrections,
     build_project,
     collapse_english_sentence_to_word_tokens,
+    create_project_ruby_service,
     derive_line_timing,
     legalize_ass,
     legalize_srt,
@@ -26,6 +27,27 @@ from scripts.karaoke_timing import (
     project_signature,
     validate_project,
 )
+
+
+def test_project_ruby_service_loads_project_dictionary(tmp_path: Path, monkeypatch):
+    dictionary = [
+        {"enabled": True, "word": "今日", "reading": "きょう,〆"}
+    ]
+    (tmp_path / "dictionary.json").write_text(
+        __import__("json").dumps(dictionary, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    class Service:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(karaoke_timing, "ROOT", tmp_path)
+    monkeypatch.setattr(karaoke_timing, "AutoCheckService", Service)
+
+    assert isinstance(create_project_ruby_service(), Service)
+    assert captured["user_dictionary"] == dictionary
 
 
 def test_single_song_private_output_root_redirects_all_timing_artifacts(

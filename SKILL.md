@@ -40,6 +40,15 @@ initial timing. Manual or Agent adjustment of the companion SUG is optional.
 Use `--quality-policy strict` only when quality uncertainty should stop before
 render and hand the companion to review.
 
+## Japanese SUG and ruby policy
+
+When creating a new Japanese SUG, tokenize each lyric sentence as a whole
+sentence, then use the project dictionary to generate phrase groups and
+contextual ruby. Pure katakana receives no ruby. Ruby generation is fill-missing
+only and must never overwrite existing reviewed ruby. Manual or Agent review of
+the generated companion remains optional. MMS may adjust timing/alignment, but
+must not rewrite ruby or frozen display text.
+
 ## Existing SUG rerender
 
 Use the normal route when an existing or manually adjusted SUG should be

@@ -136,6 +136,56 @@ def test_pure_katakana_never_receives_generated_ruby():
     assert all(character.ruby is None for character in sentence.characters)
 
 
+def test_whole_sentence_fill_preserves_words_existing_ruby_and_timing():
+    existing = Ruby(parts=[RubyPart(text="あめ")])
+    sentence = Sentence(
+        id="sentence-1",
+        singer_id="singer-1",
+        characters=[
+            Character(char=char, check_count=1, timestamps=[1_000 + index * 100])
+            for index, char in enumerate("今日雨カナ")
+        ],
+    )
+    sentence.characters[2].ruby = existing
+    project = Project(
+        id="project-1",
+        sentences=[sentence],
+        metadata=ProjectMetadata(language="ja"),
+    )
+    before_timing = timing_fingerprint(project)
+
+    class SentenceService:
+        def apply_to_sentence(self, analyzed, **kwargs):
+            assert analyzed.text == "今日雨カナ"
+            assert kwargs == {
+                "keep_existing_timetags": True,
+                "only_noruby": True,
+                "apply_user_dict": True,
+            }
+            analyzed.characters[0].ruby = Ruby(parts=[RubyPart(text="きょう")])
+            analyzed.characters[0].linked_to_next = True
+            analyzed.characters[2].ruby = Ruby(parts=[RubyPart(text="う")])
+            analyzed.characters[3].ruby = Ruby(parts=[RubyPart(text="か")])
+            analyzed.characters[3].linked_to_next = True
+
+    records = fill_missing_project_ruby(project, SentenceService())
+
+    assert [(record["start"], record["end"]) for record in records] == [(0, 2)]
+    assert records[0]["source"] == "project-auto-check"
+    assert records[0]["evidence"] == [
+        "whole-sentence-tokenizer",
+        "project-dictionary",
+    ]
+    assert sentence.characters[0].ruby.text == "きょう"
+    assert sentence.characters[0].linked_to_next is True
+    assert sentence.characters[1].ruby is None
+    assert sentence.characters[1].linked_to_next is False
+    assert sentence.characters[2].ruby is existing
+    assert sentence.characters[2].ruby.text == "あめ"
+    assert all(character.ruby is None for character in sentence.characters[3:])
+    assert timing_fingerprint(project) == before_timing
+
+
 def test_existing_pure_katakana_ruby_is_ignored_without_mutating_source():
     document = _raw_document("カ・ナ", {0: "か", 2: "な"})
     before = sug_hash(document)

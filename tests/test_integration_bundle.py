@@ -134,12 +134,33 @@ class IntegrationBundleTests(unittest.TestCase):
             path for path in references.glob("*.md") if not path.name.endswith(".zh-CN.md")
         )
         self.assertGreaterEqual(len(english_references), 6)
+        document_pairs = [(ROOT / "README.md", ROOT / "README.zh-CN.md")]
         for english in english_references:
             chinese = english.with_name(f"{english.stem}.zh-CN.md")
             with self.subTest(reference=english.name):
                 self.assertTrue(chinese.is_file())
                 self.assertIn(chinese.name, english.read_text(encoding="utf-8"))
                 self.assertIn(english.name, chinese.read_text(encoding="utf-8"))
+            document_pairs.append((english, chinese))
+
+        for english, chinese in document_pairs:
+            english_text = english.read_text(encoding="utf-8")
+            chinese_text = chinese.read_text(encoding="utf-8")
+
+            def structure(text: str) -> tuple[list[int], int, int, int]:
+                lines = text.splitlines()
+                heading_levels = [
+                    len(match.group(1))
+                    for line in lines
+                    if (match := re.match(r"^(#{1,6})\s+", line))
+                ]
+                bullet_count = sum(line.startswith("- ") for line in lines)
+                numbered_count = sum(bool(re.match(r"^\d+\.\s+", line)) for line in lines)
+                fence_count = sum(line.startswith("```") for line in lines)
+                return heading_levels, bullet_count, numbered_count, fence_count
+
+            with self.subTest(document_pair=english.name):
+                self.assertEqual(structure(english_text), structure(chinese_text))
 
         chinese_documents = [
             ROOT / "README.zh-CN.md",
@@ -156,6 +177,39 @@ class IntegrationBundleTests(unittest.TestCase):
                     re.search(r"[一-龯] [一-龯]", text),
                     "Chinese prose must not insert spaces between CJK characters",
                 )
+                prose_lines: list[str] = []
+                in_fence = False
+                for line in text.splitlines():
+                    if line.lstrip().startswith("```"):
+                        in_fence = not in_fence
+                        continue
+                    if not in_fence:
+                        prose_lines.append(line)
+                prose = "\n".join(prose_lines)
+                self.assertIsNone(
+                    re.search(
+                        r"[一-龯][，。；：！？、）】》]?\n[ \t]*[一-龯]",
+                        prose,
+                    ),
+                    "Chinese prose must not create rendered spaces with soft line wraps",
+                )
+
+    def test_documentation_omits_internal_packaging_change_log(self) -> None:
+        markdown = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted(ROOT.rglob("*.md"))
+            if ".git" not in path.parts
+        )
+        for phrase in (
+            "Changes made for this repository through",
+            "source refresh and public cover retrieval require explicit opt-in",
+            "刷新歌词源和获取公开封面都必须显式授权",
+            "不要把真实清单",
+            "sanitized snapshot",
+            "公开快照",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertNotIn(phrase, markdown)
 
     def test_public_language_specific_implementations_are_absent(self) -> None:
         source = (SCRIPTS / "audit_karaoke_asr_recognition.py").read_text(

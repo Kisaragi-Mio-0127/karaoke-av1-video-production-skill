@@ -2,69 +2,34 @@
 
 [简体中文](batch-release-gates.zh-CN.md) | English
 
-Use these gates when encoding, promoting, or packaging multiple songs or delivery profiles.
+Use these gates when encoding, promoting, or packaging multiple songs or delivery profiles together.
 
-## Freeze The Generation
+## Freeze the generation
 
-Before full encoding, record a parameter fingerprint containing:
+Before full encoding, record a parameter fingerprint covering source files, timing overrides, renderer, report and test identities, encoder, pixel format, quality control, preset, audio, container, fonts, lyric and ruby sizes, spacing, render options, timing evidence, and delivery profile. Keep song counts, cue counts, quality values, font sizes, and filenames in project configuration rather than the generic skill.
 
-- Source, timing override, renderer, render-report, and test identities or hashes.
-- Encoder, pixel format, CQ/CRF, preset, profile, audio settings, container, font, main/ruby sizes, spacing, and renderer options.
-- Selected timing evidence lane and delivery profile.
+## Isolated staging
 
-Do not hardcode one project's song counts, cue counts, CQ values, sizes, or filenames into this skill.
-
-## Isolated Staging
-
-- Encode into a dedicated staging directory outside accepted deliverables.
-- Require renderer and encoder processes to finish before promotion.
-- Fail when partial files, stale outputs, unverified profiles, or mixed generation identities remain.
-- Compare per-song and total output sizes with the previous accepted release. Pause on unexplained order-of-magnitude or asymmetric drift; file size is a signal, not a quality proof.
-- Treat full-output null decoding as an optional diagnostic, never a mandatory batch or release gate. Missing full-decode evidence alone must not block promotion, lower verification status, or require every artifact to carry a decoder exit code. Run it only on user request or when probe, mux, transport, or corruption evidence warrants it. If any decode is executed, map the intended streams and record every real exit code; never synthesize success for an unperformed diagnostic.
+- Encode in a dedicated staging directory outside accepted deliverables.
+- Require successful renderer and encoder exits; reject partial files, stale outputs, unverified profiles, and mixed generation identities.
+- Compare per-track and total sizes with the previous accepted generation. Treat unusual changes as investigation signals rather than quality proof.
+- Treat complete null decoding as optional. When performed, map the intended streams and record actual exit codes.
 - Extract boundary frames for cues, longest phrases, ruby exceptions, and release-overlap conflicts.
 
-## Multi-File Promotion
+## Multi-file promotion
 
-Windows multi-file promotion is not one transaction.
+Windows multi-file promotion is not transactional. Record staging, destination, backup, before/after hashes, generation ID, and status for every file. Resolve and constrain all paths before moving files, promote one item at a time, and mark completion only after probing and hashing the final destination. On failure, stop and restore completed items in reverse order.
 
-- Write a promotion manifest with staged path, target path, backup path, pre/post hash, generation id, and promotion status for every file.
-- Resolve and constrain all paths before moving. Keep staged and target files on the same volume when atomic per-file replacement is required.
-- Promote one file at a time, recording completion only after final-path probe and hash verification.
-- On failure, stop and restore completed entries in reverse order. Re-probe and re-hash restored targets.
-- Do not report the batch as promoted when only some entries succeeded.
+Generate delivery names from one manifest rule covering track number, display title, platform-safe punctuation, and extension. Reuse the same naming rule in the renderer, finalizer, playlist, archive, and tests.
 
-### Delivery Names
+## Archives and compression
 
-- Derive one canonical delivery basename per track from the manifest: track number, display title, platform-safe punctuation, and extension. Reuse that function in the renderer, finalizer, playlist, archive builder, and tests; keep artifact slugs for internal source identities only.
-- When the published delivery folder is user-visible, require its media basenames to match the archive media basenames exactly. A staging or internal source name may differ, but its manifest identity and content hash must still match.
-- Configure the final basename before rendering so direct render reports record the delivered path. If an accepted file is renamed later, regenerate or migrate every path-bearing report before release.
-- Treat ASCII-to-platform-safe punctuation conversion as a deterministic manifest rule. Do not maintain separate handwritten title overrides in the renderer and packager.
+Package an explicit profile and allowlist instead of a broad directory wildcard. Read back every member, verify CRC or format integrity, and match media members to accepted output hashes and manifest identities. Record the archive hash, member list, sizes, media hashes, and generation ID.
 
-## Archive Gate
+Inspect the actual compression method. For already-compressed AV1, HEVC, AAC, or MP4 inputs, compare representative sizes and elapsed time before selecting a compression level. Prefer widely compatible ZIP DEFLATE for ordinary delivery and regenerate the root release manifest from the final archive.
 
-When producing ZIP or another archive:
+## Cleanup and evidence
 
-- Select the intended lane and profile explicitly; do not package by broad directory glob.
-- Build from a whitelist with deterministic path order and no partials, logs, private probes, sources, credentials, or stale media.
-- Read every archive member fully and verify CRC or format integrity.
-- Compare the hash of each packaged media file with the accepted promoted artifact.
-- Match packaged media by manifest identity such as lane, profile, track number, and content hash. Also enforce literal basename equality when the source is the published user-visible delivery folder; allow different names only for private staging or internal sources.
-- Record archive hash, member list, member sizes, media hashes, and generation id before release.
+Clean generation-owned partial files, preview frames, isolated caches, and confirmed redundant rollback data only after final media, archives, member hashes, and the root manifest pass. Retain the latest useful rollback until the release is accepted, then rescan for partial outputs and report retained items.
 
-### Compression Selection
-
-- Inspect the actual member compression method; a `.zip` extension may still contain only stored, uncompressed members.
-- For already-compressed AV1, HEVC, AAC, or MP4 inputs, benchmark a representative large member at a moderate and maximum compatible level before choosing. Prefer the moderate level when the maximum level saves only a negligible amount, and record the measured bytes, ratio, and elapsed time.
-- Prefer broadly compatible ZIP DEFLATE for ordinary delivery. Use stored members only when packaging speed or byte-for-byte media access is explicitly more important than archive size; use less compatible methods only when the recipient and extraction tools are known.
-- Record the archive algorithm, level, selection reason, total uncompressed member bytes, compressed payload bytes, final archive bytes, and ratio. Do not describe a numeric level as high or maximum without naming the algorithm.
-- Generate the archive sidecar checksum as part of the same packager transaction, then regenerate any root release manifest from the final archive generation. Recompute every listed hash; a valid archive with stale checksum files is not a complete release.
-
-## Cleanup Gate
-
-- After final-path media, archive, member hashes, and root manifests pass, remove only generation-owned partial files, preview frames, isolated test caches, and superseded rollbacks whose targets were resolved inside their intended roots.
-- Keep the newest useful rollback until the user accepts the release. Preserve unknown or older historical rollbacks unless their ownership and redundancy are established.
-- Re-scan for partial outputs after cleanup and report any intentionally retained rollback or diagnostic directory.
-
-## Evidence Report
-
-Report the parameter fingerprint, clean test result, staging inventory, whether optional decode diagnostics were performed, real exit codes for every executed full or sampled decode, sampled windows, key-frame review, size-drift decision, promotion manifest, rollback status, archive whitelist, CRC/readback result, internal hashes, and final artifact hash. Never synthesize a successful exit code for an unperformed diagnostic.
+The release report records the parameter fingerprint, test result, staging inventory, optional decode status, sampled windows, frame checks, size-drift decision, promotion manifest, rollback status, archive allowlist, read-back results, internal hashes, and final output hashes.

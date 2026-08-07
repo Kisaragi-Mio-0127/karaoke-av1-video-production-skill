@@ -15,7 +15,7 @@ components are installed or supplied separately:
 | requests / Python HTTP clients | Optional source retrieval | Installed from the application environment; review package licenses and every external service's terms |
 | MSST runner and models | optional separated-vocal evidence | User-supplied; no repository or model is bundled or selected by this project |
 | CJK fonts | subtitle rendering | User-supplied; redistribution is not implied by installation or use |
-| NetEase lyric endpoint and any font-download host | Optional network data sources | No service content is bundled; access is opt-in and users must review service terms, authorization, and content rights before use |
+| NetEase lyric endpoint and any font-download host | Optional network data sources | Review the service terms and content rights for the selected source |
 
 The dependency versions are recorded in
 `integration/strangeutagame/requirements/requirements-karaoke.lock.txt`. A lock
@@ -38,6 +38,6 @@ or distributing an application environment.
 | requests、Python HTTP客户端 | 可选来源获取 | 从应用环境安装；检查软件包许可证和各外部服务条款 |
 | MSST程序和模型 | 可选分离人声证据 | 由使用者提供；本仓库不捆绑也不指定具体仓库或模型 |
 | CJK字体 | 字幕渲染 | 由使用者提供；安装或使用不代表获得再分发权 |
-| 网易歌词接口及字体下载站点 | 可选网络数据来源 | 本仓库不捆绑服务内容；访问需显式启用，使用前须检查服务条款、授权和内容权利 |
+| 网易歌词接口及字体下载站点 | 可选网络数据来源 | 按所选来源检查服务条款和内容权利 |
 
 依赖版本记录在`integration/strangeutagame/requirements/requirements-karaoke.lock.txt`。版本锁定不等于授权；打包或分发应用环境时必须保留各组件要求的声明。

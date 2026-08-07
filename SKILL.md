@@ -44,7 +44,7 @@ For StrangeUtaGame editor review, use [open_editable_project_with_audio_probe.py
 
 Read [batch-release-gates.md](references/batch-release-gates.md) / [中文](references/batch-release-gates.zh-CN.md) when encoding, promoting, or packaging more than one song or delivery profile.
 
-Read [strangeutagame-integration.md](references/strangeutagame-integration.md) / [中文](references/strangeutagame-integration.zh-CN.md) before installing or running the bundled production scripts. Use [install_strangeutagame_integration.py](scripts/install_strangeutagame_integration.py) to copy the sanitized snapshot into a compatible StrangeUtaGame checkout; dry-run first and do not overwrite differing project scripts without a backup. Run [check_karaoke_environment.py](scripts/check_karaoke_environment.py) from the Skill repository after installation (the support tool is not copied into the target checkout). Keep real album manifests, lyrics, media hashes, fonts, models, and song-specific display/ruby overrides private.
+Read [strangeutagame-integration.md](references/strangeutagame-integration.md) / [中文](references/strangeutagame-integration.zh-CN.md) before installing or running the bundled production scripts. Use [install_strangeutagame_integration.py](scripts/install_strangeutagame_integration.py) to copy the integration into a compatible StrangeUtaGame checkout; dry-run first and do not overwrite differing project scripts without a backup. Run [check_karaoke_environment.py](scripts/check_karaoke_environment.py) from the Skill repository after installation (the support tool is not copied into the target checkout).
 
 ## First Pass
 

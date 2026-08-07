@@ -17,7 +17,11 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "integration" / "strangeutagame"
 SCRIPTS = BUNDLE / "scripts"
 DEPENDENCY_MANIFEST = BUNDLE / "dependency-manifest.json"
-INTERNAL_MODULES = {"sug_ruby.py"}
+INTERNAL_MODULES = {
+    "karaoke_color_plan.py",
+    "karaoke_cover_palette.py",
+    "sug_ruby.py",
+}
 
 
 def load_module(name: str, path: Path):
@@ -119,7 +123,7 @@ class IntegrationBundleTests(unittest.TestCase):
             for path in SCRIPTS.rglob("*.py")
             if "__pycache__" not in path.parts
         )
-        self.assertEqual(len(files), 29)
+        self.assertEqual(len(files), 31)
         for path in files:
             with self.subTest(path=path.relative_to(SCRIPTS).as_posix()):
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -356,12 +360,12 @@ class IntegrationBundleTests(unittest.TestCase):
         self.assertIn("allow_network: bool = False", vinyl)
         self.assertIn("MAX_NETWORK_COVER_BYTES = 25 * 1024 * 1024", vinyl)
 
-    def test_wide_layout_v6_has_no_vinyl_backplate(self) -> None:
+    def test_wide_layout_v7_has_no_vinyl_backplate(self) -> None:
         builder_source = (SCRIPTS / "build_karaoke_wide_artwork.py").read_text(
             encoding="utf-8"
         )
         self.assertIn(
-            'WIDE_LAYOUT_VERSION = "wide-layout-v6/top-secondary-clearance"',
+            'WIDE_LAYOUT_VERSION = "wide-layout-v7/cover-palette"',
             builder_source,
         )
         self.assertIn('"vinyl": (40, 30, 340, 402)', builder_source)

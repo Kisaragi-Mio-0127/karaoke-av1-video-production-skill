@@ -986,6 +986,7 @@ def build_preview_command(
     pronunciation_validation: str = "optional",
     vinyl_motion: str = "rotate",
     lossless_companion: bool = False,
+    singer_colors: Sequence[str] = (),
 ) -> list[str]:
     visual_style = _task_visual_style(task)
     command = [
@@ -1026,6 +1027,9 @@ def build_preview_command(
         if task.vinyl_path is None:
             raise DirectAV1420RenderError("vinyl task has no vinyl asset")
         command.extend(["--vinyl", str(task.vinyl_path), "--vinyl-motion", vinyl_motion])
+    command.extend(["--color-policy", "cover"])
+    for singer_color in singer_colors:
+        command.extend(["--singer-color", singer_color])
     lossless_policy = lossless_companion_policy(
         task.track.audio_path,
         requested=lossless_companion,
@@ -1164,6 +1168,37 @@ def validate_preview_report(
             raise DirectAV1420RenderError(
                 f"preview report mismatch: {key}={video.get(key)!r}, expected {value!r}"
             )
+    color_plan = ass.get("color_plan")
+    color_plan_sha256 = (
+        color_plan.get("color_plan_sha256")
+        if isinstance(color_plan, Mapping)
+        else None
+    )
+    color_checks = {
+        "schema": isinstance(color_plan, Mapping)
+        and color_plan.get("schema_version") == "karaoke-color-plan/v1",
+        "hash": isinstance(color_plan_sha256, str)
+        and bool(color_plan_sha256)
+        and video.get("color_plan_sha256") == color_plan_sha256,
+    }
+    if video.get("visual_style") == "spectrum":
+        visual_colors = color_plan.get("visual") if isinstance(color_plan, Mapping) else None
+        progress_bar = video.get("progress_bar")
+        color_checks.update(
+            {
+                "spectrum": isinstance(visual_colors, Mapping)
+                and video.get("spectrum_color")
+                == visual_colors.get("spectrum_color"),
+                "progress": isinstance(visual_colors, Mapping)
+                and isinstance(progress_bar, Mapping)
+                and progress_bar.get("color") == visual_colors.get("progress_color"),
+            }
+        )
+    failed = [name for name, ok in color_checks.items() if not ok]
+    if failed:
+        raise DirectAV1420RenderError(
+            "preview color-plan mismatch: " + ", ".join(failed)
+        )
     lossless = video.get("lossless")
     if not lossless_companion:
         # Older preview reports recorded an explicit omission object even when
@@ -2096,6 +2131,7 @@ def render_one(
     vinyl_motion: str = "rotate",
     lossless_companion: bool = False,
     full_decode: bool = False,
+    singer_colors: Sequence[str] = (),
 ) -> dict[str, Any]:
     lossless_policy = lossless_companion_policy(
         task.track.audio_path,
@@ -2120,6 +2156,7 @@ def render_one(
         pronunciation_validation=pronunciation_validation,
         vinyl_motion=vinyl_motion,
         lossless_companion=lossless_companion,
+        singer_colors=singer_colors,
     )
     validate_direct_source_command(command)
     started = time.perf_counter()
@@ -2896,6 +2933,16 @@ def make_parser() -> argparse.ArgumentParser:
         default="vinyl",
         help="render vinyl (default), spectrum, or both as isolated artifacts",
     )
+    parser.add_argument(
+        "--singer-color",
+        action="append",
+        default=[],
+        metavar="SINGER_ID=#RRGGBB",
+        help=(
+            "explicit singer colour override; repeat once per singer and pass to "
+            "every selected render task"
+        ),
+    )
     parser.add_argument("--timing-dir", type=Path, default=None)
     parser.add_argument("--artwork-dir", type=Path, default=None)
     parser.add_argument("--fonts-dir", type=Path, default=None)
@@ -3047,6 +3094,7 @@ def main(argv: list[str] | None = None) -> int:
                         vinyl_motion=args.vinyl_motion,
                         lossless_companion=args.lossless_companion,
                         full_decode=args.full_decode,
+                        singer_colors=args.singer_color,
                     )
                     for task in group
                 ]

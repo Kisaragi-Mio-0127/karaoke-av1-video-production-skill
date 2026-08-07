@@ -47,6 +47,12 @@ from scripts.karaoke_common.pronunciation import (  # noqa: E402
     PRONUNCIATION_VALIDATION_MODES,
     validate_pronunciation,
 )
+from scripts.karaoke_color_plan import (  # noqa: E402
+    KaraokeColorPlanError,
+    apply_color_plan,
+    parse_singer_color_overrides,
+    resolve_color_plan,
+)
 from scripts.karaoke_japanese.layout import (  # noqa: E402
     WIDE_LAYOUT,
     WIDE_SEMANTIC_GAP_EM,
@@ -3679,6 +3685,22 @@ def make_parser() -> argparse.ArgumentParser:
         "--progress-color",
         help="RGB hex secondary color for the spectrum progress track",
     )
+    parser.add_argument(
+        "--color-policy",
+        choices=("project", "cover"),
+        default="cover",
+        help=(
+            "project keeps SUG singer colors; cover assigns the embedded cover "
+            "palette to active singers in first-appearance order"
+        ),
+    )
+    parser.add_argument(
+        "--singer-color",
+        action="append",
+        default=[],
+        metavar="SINGER_ID=#RRGGBB",
+        help="render-only singer override; repeatable and higher priority than the palette",
+    )
     return parser
 
 
@@ -3727,6 +3749,20 @@ def main(argv: list[str] | None = None) -> int:
         )
     sug_path = args.sug.resolve()
     project = SugProjectParser.load(str(sug_path))
+    color_plan = None
+    if args.color_policy == "cover" or args.singer_color:
+        try:
+            color_plan = resolve_color_plan(
+                project,
+                composition_path=args.composition.resolve(),
+                policy=args.color_policy,
+                singer_overrides=parse_singer_color_overrides(args.singer_color),
+                spectrum_color=args.spectrum_color,
+                progress_color=args.progress_color,
+            )
+            apply_color_plan(project, color_plan)
+        except KaraokeColorPlanError as error:
+            raise RubyValidationError(str(error)) from error
     ruby_sidecar_path = sug_path.with_suffix(".ruby-review.json")
     ruby_sidecar = (
         load_review_sidecar(ruby_sidecar_path)
@@ -3756,6 +3792,8 @@ def main(argv: list[str] | None = None) -> int:
         ruby_sidecar=ruby_sidecar,
         pronunciation_validation=args.pronunciation_validation,
     )
+    if color_plan is not None:
+        ass_report["color_plan"] = color_plan
     if args.ass_only:
         payload = {"status": "ass-ready", "ass": ass_report}
         if args.report_output is not None:
@@ -3800,8 +3838,16 @@ def main(argv: list[str] | None = None) -> int:
         hevc_cq=args.hevc_cq,
         visual_style=args.visual_style,
         vinyl_motion=args.vinyl_motion,
-        spectrum_color=args.spectrum_color or _project_highlight_color(project),
-        progress_color=args.progress_color,
+        spectrum_color=(
+            str(color_plan["visual"]["spectrum_color"])
+            if color_plan is not None
+            else args.spectrum_color or _project_highlight_color(project)[0]
+        ),
+        progress_color=(
+            str(color_plan["visual"]["progress_color"])
+            if color_plan is not None
+            else args.progress_color
+        ),
         program_duration_seconds=(
             probe_audio_duration_seconds(args.audio.resolve())
             if args.visual_style == "spectrum"
@@ -3809,6 +3855,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
         **lossless_render_options,
     )
+    if color_plan is not None:
+        video_report["color_plan_sha256"] = color_plan["color_plan_sha256"]
     payload = {"status": "ok", "ass": ass_report, "video": video_report}
     if args.report_output is not None:
         args.report_output.resolve().parent.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,6 @@
 ---
 name: karaoke-av1-video-production
-description: Use when producing, re-encoding, debugging, packaging, or reviewing karaoke and lyric videos or opening editable karaoke timing projects with attached audio, including semantic phrase segmentation, explicit SUG singer_id colour routing, dedicated Japanese secondary-vocal overlays, cross-singer ruby rejection, source-line overrides, cue/lane behavior, Japanese ruby, editable-source/render parity, media restoration, MMS timing evidence, ASS highlight release, lyric visual fit, AV1 4:2:0 encoding, batch promotion, archives, and media-structure verification. Do not use for TTS, voice cloning, music generation, vocal separation, or lyric transcription.
+description: Use when producing, re-encoding, debugging, packaging, or reviewing karaoke and lyric videos or opening editable karaoke timing projects with attached audio, including semantic phrase segmentation, deterministic cover palettes and karaoke-color-plan/v1, explicit SUG singer_id colour routing, dedicated Japanese secondary-vocal overlays, cross-singer ruby rejection, source-line overrides, cue/lane behavior, Japanese ruby, editable-source/render parity, media restoration, MMS timing evidence, ASS highlight release, lyric visual fit, AV1 4:2:0 encoding, batch promotion, archives, and media-structure verification. Do not use for TTS, voice cloning, music generation, vocal separation, or lyric transcription.
 ---
 
 # Karaoke AV1 Video Production
@@ -14,9 +14,29 @@ map.
 Produce karaoke videos through an inspect, preview, encode, and verify workflow. Keep subtitle timing, AV1 4:2:0 output, audio integrity, and playback compatibility independently testable.
 
 The generic default remains Japanese (`ja`) for legacy manifests. Use
-`run_karaoke_japanese_workflow.py` for the bundled Japanese route. Any other
-language requires a separately validated adapter; never silently fall back to
-another language profile or workflow.
+`run_karaoke_japanese_workflow.py` for the bundled Japanese route. Other
+language policies require separately validated adapters, but colour planning
+is shared: every supported profile uses one `karaoke-color-plan/v1`, with no
+language-specific colour fork.
+
+Before rendering, the deterministic offline cover extractor emits an ordered
+palette of exactly eight colours plus the cover identity and current extractor
+hash. The renderer builds the single `karaoke-color-plan/v1` from that
+palette. Resolve the effective singer for each lyric character first, then
+assign primary, secondary, and tertiary slots by the first character
+appearance of active `singer_id` values; an absent singer never consumes a
+slot. Colour precedence is `explicit singer_id=#RRGGBB` > explicit main or
+secondary slot override > cover palette > project-policy SUG colour. Formal
+one-click and batch output uses `cover` by default; `project` is the
+rollback compatibility mode. The primary colour follows the first singer and
+spectrum; the secondary follows the second singer, or `palette[1]` for a
+single-singer track, and the progress track. ASS, video, and workflow reports
+carry the same `color_plan_sha256`; colour planning never changes the source
+SUG. Composition metadata must include `cover_sha256`, the current extractor
+hash, and the ordered `palette`; stale or inconsistent metadata fails closed.
+Both formal entries accept repeatable `--singer-color
+<singer-id>=#RRGGBB`; pass the same ordered overrides to preflight and final
+rendering, and let explicit singer overrides win over slot and palette colours.
 
 Use `tts-voice-workflow-ops` separately when generating or cloning voices, separating vocals, or converting a singer. This skill starts from authorized media, lyrics, subtitles, fonts, and audio stems.
 
@@ -24,7 +44,7 @@ Read [av1-420-commands.md](references/av1-420-commands.md) / [中文](references
 
 Read [wide-visual-templates.md](references/wide-visual-templates.md) / [中文](references/wide-visual-templates.zh-CN.md) before selecting or changing the wide-layout vinyl or real-time spectrum template. Keep the two effects mutually exclusive and drive both through the shared artwork and preview-render scripts.
 
-The current `wide-layout-v6/top-secondary-clearance` composition uses a vinyl card at
+The current `wide-layout-v7/cover-palette` composition uses a vinyl card at
 `(40,30,340,402)`, footer bottom padding `12`, and a lower subtitle panel that
 starts at `y=576`. Both the extra outer right-panel overlay and the compact
 dark backplate behind/below the rotating record are removed. The rotating
@@ -57,21 +77,23 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 ```
 
 For `spectrum`, replace the final style and vinyl arguments with
-`--visual-style spectrum`; `--spectrum-color RRGGBB` and
-`--progress-color RRGGBB` are optional. Vinyl requires `--vinyl` as the
-canonical identity input, then rebuilds and validates the current rotating
-vinyl inside the new output directory before rendering. Spectrum does not
-require, probe, generate, pass, or report any vinyl asset.
+`--visual-style spectrum`. Formal rendering uses the cover-derived colour plan
+by default; select the `project` colour source only for rollback-compatible
+reproduction. Vinyl requires `--vinyl` as the canonical identity input, then
+rebuilds and validates the current rotating vinyl inside the new output
+directory before rendering. Spectrum does not require, probe, generate, pass,
+or report any vinyl asset.
 
 The workflow first creates an independent `karaoke-preflight.ass` in ASS-only
 mode, then creates the final `karaoke.ass` during MP4 rendering. It compares
 their SHA-256 identities for the same SUG/configuration and fails if they
 differ. Full probed duration and MP4-only output with AAC-LC audio are the
 defaults. MKV and full decode require explicit opt-ins; a default run does not
-create MKV or run a full decode. Japanese pronunciation validation defaults to
-non-blocking `optional`; `required` and `off` remain explicit choices. The one-click route and the
-underlying renderer must apply the same singer, overlay, ruby, container, and
-diagnostic gates.
+create MKV or run a full decode. Pronunciation/ruby validation remains
+optional by default; Japanese structural ruby gates still apply, and `required`
+or `off` remain explicit choices. The one-click and batch entry points are
+thin front ends over the same renderer and must apply the same singer, colour
+plan, overlay, ruby, container, and diagnostic gates.
 
 The album/batch direct renderer (`render_karaoke_direct_av1_420_album.py`)
 is the AV1 4:2:0 batch entry and accepts `--visual-style vinyl|spectrum|both`,
@@ -85,8 +107,9 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
 
 `spectrum` does not require, probe, generate, pass, or report a vinyl asset.
 `both` produces two independent AV1 4:2:0 outputs with separate media and
-report identities. Both styles for one song/profile share a hash-identical
-profile ASS and publish serially; they are not combined in one file.
+report identities. Both styles for one song/profile use the same shared
+renderer, colour plan, and profile ASS, then publish serially; they are not
+combined in one file.
 `--single-track` means exactly one selected song and one profile, so
 `--single-track --visual-style both` can produce two variants for that pair.
 `--lossless-companion` and `--full-decode` remain explicit opt-ins and are
@@ -113,7 +136,7 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 
 1. Read project instructions and inventory source video or images, audio tracks, lyrics, existing ASS/SRT files, fonts, and target platforms.
 2. Build a rights manifest for the background media, recording, lyrics synchronization/display, subtitle source, and fonts. Record source, rightsholder or license, evidence, allowed use, commercial scope, territory, term, attribution, and redistribution limits. Stop public delivery when any required right is missing or uncertain.
-3. Probe every input for duration, frame rate, resolution, color metadata, codec, pixel format, sample rate, channel layout, and start-time offsets.
+3. Probe every input for duration, frame rate, resolution, color metadata, codec, pixel format, sample rate, channel layout, and start-time offsets. Run the deterministic offline cover extractor and retain its ordered eight-colour palette, cover identity, and current extractor hash for composition metadata.
 4. Define the intended output matrix before encoding: hard or soft subtitles, MP4 or MKV, 8-bit or 10-bit 4:2:0, audio codec, resolution, and compatibility fallback.
 5. Write to a temporary output and preserve source media until all mandatory gates pass. Full-output null decoding is an optional diagnostic, not a release gate.
 6. Keep probes, ASS sources, fonts, and encode logs private by default. Do not include them in delivery unless their redistribution is authorized.
@@ -142,15 +165,15 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 - Keep one traceable fact chain from canonical source through overrides, renderer output, ASS/report, encoded media, and promoted or packaged artifacts. Record a hash or equivalent generation identity at every reproducible layer.
 - Preserve source-line semantics when creating display phrases. Require exact override reachability, lossless phrase recomposition, and reuse of original character timing objects.
 - Treat source whitespace as breath evidence, not an authoritative display boundary. Resolve it against source-language syntax, measured acoustic pauses, minimum phrase length, and visual fit; document reviewed exceptions where a sung breath splits a grammatical dependency.
-- Resolve singer identity only from explicit SUG data, with character-level `singer_id` taking precedence over sentence-level `singer_id`, then the explicit project default. Apply the resolved singer colour consistently to active `Main`, `Glow`, cue, and top secondary subtitle layers; keep inactive or unhighlighted text white. Never infer singer identity from lyric text or role wording.
-- Route explicit `opera`, `harmony`, and `secondary` roles to a top-centred overlay independent of main lanes, cues, and ruby. Use the top safe band `y=0..96`, anchor `y=12`, default font size `60 px`, and a minimum `36 px` long-line size; the actual outline/glow reserve extends through `y=107`. Inspect coexistence with the `wide-layout-v6/top-secondary-clearance` title, whose label/title/artist positions are `y=120/155/220`, whose placement uses actual ink bounds, and whose title ink stays at least `16 px` below the reserve.
+- Resolve the effective singer only from explicit SUG data, with character-level `singer_id` taking precedence over sentence-level `singer_id`, then the explicit project default. Build the one `karaoke-color-plan/v1` by assigning active singer IDs in first-character appearance order to primary, secondary, and tertiary slots; an absent singer consumes no slot. Apply the precedence `explicit singer_id=#RRGGBB` > explicit main or secondary slot override > cover palette > project-policy SUG colour. Synchronize primary with the first singer and spectrum, and secondary with the second singer, or `palette[1]` for a single singer, and the progress track. Apply the resolved colour consistently to active `Main`, `Glow`, cue, and top secondary subtitle layers; keep inactive or unhighlighted text white. Never infer singer identity from lyric text or role wording, and never mutate the source SUG for colour planning.
+- Route explicit `opera`, `harmony`, and `secondary` roles to a top-centred overlay independent of main lanes, cues, and ruby. Use the top safe band `y=0..96`, anchor `y=12`, default font size `60 px`, and a minimum `36 px` long-line size; the actual outline/glow reserve extends through `y=107`. Inspect coexistence with the `wide-layout-v7/cover-palette` title, whose label/title/artist positions are `y=120/155/220`, whose placement uses actual ink bounds, and whose title ink stays at least `16 px` below the reserve.
 - Treat ruby word boundaries as a mandatory release gate, independently from reading correctness. The candidate generator fills missing ruby only; preserve existing human-reviewed or legacy ruby. The Agent audits every ruby span like semantic phrase segmentation, using the full lyric sentence, grammar, inflection, lexical word boundaries, and context, and may approve it or write a correction directly back to the canonical SUG. Human review is not mandatory for every span: escalate only ambiguity, proper nouns, artistic readings, evidence conflicts, low confidence, or `unresolved` results. If no correction is made, retain the default ruby. Do not force one ruby group per kanji: keep a multi-kanji lexical word or jukujikun such as `今年→ことし`, `来年→らいねん`, or `一番→いちばん` together. Do not merge adjacent lexical words merely because their readings are contiguous; for example, keep `一番|好|き` as `一番→いちばん`, `好→す`, and unannotated okurigana `き`, rather than `一番好→いちばんす`. For StrangeUtaGame, inspect every ruby-bearing line's canonical SUG `linked_to_next` chain, compare the same surface spans and readings in the ASS/report, and inspect a rendered frame to confirm each ruby is centered over the intended word. The renderer reads only the reviewed canonical SUG and must not infer or override ruby. Record per-span status, confidence, evidence, model/prompt version, and before/after SUG hashes; fail release when the SUG, ASS/report, or final frame disagrees, even if the concatenated reading text is correct, while preserving character timing unless timing is the explicit task.
 - Apply extra in-line semantic spacing only at approved breath or semantic boundaries. Record the boundary character indices and one configured pixel/em value, then verify coordinate deltas independently from perceived spacing caused by glyph shape, highlight state, or ruby.
 - Reject a ruby chain when its resolved surface characters contain more than one `singer_id`; never split or silently reassign a cross-singer span during rendering. Run this check in the one-click preflight, final render, and lower-level renderer gate.
 - Treat cue pairing, lane reset, countdown anchoring, ruby, target font sizes, display preload, per-character sweep onset/release, line release, event end, and outro visibility as separate explicit contracts rather than incidental renderer behavior. A report that a red sweep is early or short does not authorize moving the lyric display preload; change preload only when the user reports that lyric visibility itself is wrong.
 - When the established album layout preloads intro lyrics from program start and interlude lyrics from the preceding visible event end, preserve those starts independently of the later countdown-dot window and acoustic onset. Keep the approved outro marker visible from the final lyric event end through the media end unless the user explicitly requests a clean tail.
 - For a held syllable reported as too short, inspect the following character's sweep onset as well as the current character's release. If the following onset was assigned inside the held vowel, move the reviewed following onset (or a renderer-only visual onset) so the held glyph consumes the sustain; do not misuse a line-level preload or event boundary to create the effect. Distinguish sustained sound from a silent breath before accepting the change.
-- When the user requests a cover-derived highlight colour, record one approved RGB hex and its extraction or selection basis. Synchronize it across the editable singer colour, ASS `Main`/`Glow` primary colour, and active cue colour while retaining the approved unhighlighted, outline, alpha, and ruby colours; verify the RGB-to-ASS BGR conversion and inspect a partial-sweep frame.
+- Record the cover-derived palette and current extractor hash in composition metadata, together with `cover_sha256`. Bind the composition, ASS, video, and workflow report to the same `color_plan_sha256`; stale or inconsistent cover/extractor/palette metadata fails closed. Synchronize the plan's approved RGB values across the resolved singer colour projection, ASS `Main`/`Glow` primary colour, spectrum, progress, and active cue colours while retaining the approved unhighlighted, outline, alpha, and ruby colours. Verify the RGB-to-ASS BGR conversion and inspect a partial-sweep frame. The source SUG remains unchanged.
 - For wide-layout karaoke output, fix the default typography at `1.5x` the project's established `1x` baseline for main lyrics, ruby, and countdown cues. For the current 72/34/26 px baseline, require 108/51/39 px respectively. Use a 35 px ruby-to-main anchor gap and place countdown cues 16 px above the ruby anchor. Apply both spacing values consistently to upper, lower, outro, and cue layouts. Do not switch to `2x`, silently shrink, or change only one of these layers unless the user explicitly requests it or measured overflow is accepted as a recorded, rollback-safe exception.
 - Treat original-mix and separated-vocal MMS results as timing evidence, not delivery tracks. Resolve conflicts with recorded confidence and human A/B review.
 - Use the configured language profile for the documented ASR and alignment path; require a validated adapter for any non-default profile. Keep independent ASR separate from stable-ts and MMS forced alignment; it may support, veto, or remain unresolved, but is never a silent fallback that replaces failed alignment. If ASR is unavailable or errors, record `unresolved` and require other evidence or human review.
@@ -199,8 +222,8 @@ Read [strangeutagame-integration.md](references/strangeutagame-integration.md) /
 6. Confirm the output duration is expected, file size is plausible, and no stream disappeared during muxing. When an optional full or sampled decode is performed, map every intended stream and record its exact window and exit code.
 7. Keep the temporary output on the same volume as the destination. Promote it only after every mandatory gate passes; retain a rollback path to the previous accepted artifact, and probe the final destination again after promotion.
 8. Capture the actual decoder process exit code for every executed full or sampled decode. Do not treat media-info output, an unperformed decode, a missing serialized exit code, or a status flag from a different generation as decode success.
-9. Pair timing and overlap metrics with boundary-frame inspection. Do not accept release counts until source, override, ASS, report, and output identities belong to the same generation.
+9. Pair timing and overlap metrics with boundary-frame inspection. Do not accept release counts until source, override, ASS, report, output, and `color_plan_sha256` identities belong to the same generation. Fail closed when composition `cover_sha256`, extractor hash, or palette is stale or inconsistent.
 
 ## Reporting
 
-Report redacted input labels, subtitle and font sources, rights evidence status, fact-chain identities, phrase/cue/ruby/release decisions, FFmpeg version/build configuration, encoder and rate-control lane, dependency and redistribution assumptions, pixel format, color decision, audio/container choices, sanitized commands, previews, probe summary, output files, archive verification when applicable, compatibility fallback, remaining risks, and rollback point. Represent full decode with `performed`, `required`, `recommended`, and `reason`; list sampled windows and real exit codes only when actually executed. Do not expose absolute local paths or unapproved media tags.
+Report redacted input labels, subtitle and font sources, rights evidence status, fact-chain identities, cover/extractor/palette inputs, `color_plan_sha256`, phrase/cue/ruby/release decisions, FFmpeg version/build configuration, encoder and rate-control lane, dependency and redistribution assumptions, pixel format, color decision, audio/container choices, sanitized commands, previews, probe summary, output files, archive verification when applicable, compatibility fallback, remaining risks, and rollback point. Represent full decode with `performed`, `required`, `recommended`, and `reason`; list sampled windows and real exit codes only when actually executed. Do not expose absolute local paths or unapproved media tags.

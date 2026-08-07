@@ -53,10 +53,17 @@ def test_public_spectrum_command_omits_vinyl_and_isolates_artifacts(
         temporary_report=tmp_path / "output.json",
         preview_script=tmp_path / "preview.py",
         av1_cq=38,
+        singer_colors=("lead=#112233", "guest=#AABBCC"),
     )
 
     renderer.validate_direct_source_command(command)
     assert command[command.index("--visual-style") + 1] == "spectrum"
+    assert command[command.index("--color-policy") + 1] == "cover"
+    assert [
+        command[index + 1]
+        for index, value in enumerate(command)
+        if value == "--singer-color"
+    ] == ["lead=#112233", "guest=#AABBCC"]
     assert "--vinyl" not in command
     assert "--vinyl-motion" not in command
     assert task.video_output.parent == (

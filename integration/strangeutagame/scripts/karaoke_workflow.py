@@ -87,6 +87,8 @@ class WorkflowConfig:
     smoke_duration: float | None = None
     pronunciation_validation: str = "optional"
     visual_style: str = "vinyl"
+    color_policy: str = "cover"
+    singer_colors: tuple[str, ...] = ()
     spectrum_color: str | None = None
     progress_color: str | None = None
     cover_url: str = ""
@@ -133,6 +135,10 @@ def validate_visual_contract(config: WorkflowConfig) -> None:
     if config.visual_style not in VISUAL_STYLES:
         raise KaraokeWorkflowError(
             f"unsupported visual style: {config.visual_style!r}"
+        )
+    if config.color_policy not in {"cover", "project"}:
+        raise KaraokeWorkflowError(
+            f"unsupported color policy: {config.color_policy!r}"
         )
     if config.visual_style == "vinyl" and config.canonical_vinyl is None:
         raise KaraokeWorkflowError("--vinyl is required when --visual-style=vinyl")
@@ -278,6 +284,8 @@ def build_ass_command(
         config.layout,
         "--visual-style",
         config.visual_style,
+        "--color-policy",
+        config.color_policy,
     ]
     if config.visual_style == "vinyl":
         if generated_vinyl is None:
@@ -287,6 +295,8 @@ def build_ass_command(
         )
     elif generated_vinyl is not None:
         raise KaraokeWorkflowError("spectrum workflow must not receive vinyl artwork")
+    for singer_color in config.singer_colors:
+        command.extend(["--singer-color", singer_color])
     if config.visual_style == "spectrum":
         if config.spectrum_color is not None:
             command.extend(["--spectrum-color", config.spectrum_color])
@@ -520,11 +530,36 @@ def validate_renderer_report(
     except (OSError, ValueError) as error:
         raise KaraokeWorkflowError(f"invalid renderer report: {error}") from error
     video = payload.get("video") if isinstance(payload, dict) else None
+    ass = payload.get("ass") if isinstance(payload, dict) else None
     if not isinstance(video, dict):
         raise KaraokeWorkflowError("renderer report has no video object")
     checks: dict[str, bool] = {
         "visual_style": video.get("visual_style") == config.visual_style,
     }
+    color_plan = ass.get("color_plan") if isinstance(ass, dict) else None
+    requires_color_plan = (
+        (isinstance(ass, dict) and "color_plan" in ass)
+        or config.color_policy == "cover"
+        or bool(config.singer_colors)
+    )
+    visual_colors = (
+        color_plan.get("visual") if isinstance(color_plan, dict) else None
+    )
+    color_plan_sha256 = (
+        color_plan.get("color_plan_sha256")
+        if isinstance(color_plan, dict)
+        else None
+    )
+    if requires_color_plan:
+        checks.update(
+            {
+                "color_plan_schema": isinstance(color_plan, dict)
+                and color_plan.get("schema_version") == "karaoke-color-plan/v1",
+                "color_plan_hash": isinstance(color_plan_sha256, str)
+                and bool(color_plan_sha256)
+                and video.get("color_plan_sha256") == color_plan_sha256,
+            }
+        )
     if config.visual_style == "vinyl":
         vinyl_asset = video.get("vinyl_asset")
         checks.update(
@@ -544,6 +579,7 @@ def validate_renderer_report(
             }
         )
     else:
+        progress_bar = video.get("progress_bar")
         checks.update(
             {
                 "vinyl_motion_absent": video.get("vinyl_motion") is None,
@@ -577,6 +613,23 @@ def validate_renderer_report(
                 and video["progress_bar"].get("show_time") is False,
             }
         )
+        checks.update(
+            {
+                "spectrum_color_plan": not requires_color_plan
+                or (
+                    isinstance(visual_colors, dict)
+                    and video.get("spectrum_color")
+                    == visual_colors.get("spectrum_color")
+                ),
+                "progress_color_plan": not requires_color_plan
+                or (
+                    isinstance(visual_colors, dict)
+                    and isinstance(progress_bar, dict)
+                    and progress_bar.get("color")
+                    == visual_colors.get("progress_color")
+                ),
+            }
+        )
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
         raise KaraokeWorkflowError(
@@ -606,7 +659,7 @@ def _critical_ass_report_facts(report: dict[str, Any]) -> dict[str, Any]:
         ]
 
     top_keys = (
-        "language_identity", "singer_color_mapping", "sug_hash",
+        "language_identity", "singer_color_mapping", "color_plan", "sug_hash",
         "ruby_enabled", "ruby_spans", "ruby_review",
         "ruby_consistency_gate", "pronunciation_validation",
     )
@@ -1046,6 +1099,25 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
         help="choose exactly one right-side visual effect (default: vinyl)",
     )
     parser.add_argument(
+        "--color-policy",
+        choices=("cover", "project"),
+        default="cover",
+        help=(
+            "cover assigns the ordered cover palette to active singers; "
+            "project preserves SUG singer colors as a compatibility rollback"
+        ),
+    )
+    parser.add_argument(
+        "--singer-color",
+        action="append",
+        default=[],
+        metavar="SINGER_ID=#RRGGBB",
+        help=(
+            "explicit singer colour override; repeat once per singer and let the "
+            "renderer enforce syntax and precedence"
+        ),
+    )
+    parser.add_argument(
         "--vinyl",
         dest="canonical_vinyl",
         type=Path,
@@ -1120,6 +1192,8 @@ def config_from_args(
         smoke_duration=args.smoke_duration,
         pronunciation_validation=pronunciation_validation,
         visual_style=args.visual_style,
+        color_policy=args.color_policy,
+        singer_colors=tuple(args.singer_color),
         spectrum_color=args.spectrum_color,
         progress_color=args.progress_color,
         cover_url=args.cover_url,

@@ -97,6 +97,11 @@ def _build(tmp_path: Path):
 
 def test_wide_title_is_below_secondary_outline_and_glow_reserve(tmp_path: Path):
     artwork, output, report = _build(tmp_path)
+    assert artwork.WIDE_LAYOUT_VERSION == "wide-layout-v7/cover-palette"
+    assert report["cover"]["sha256"] == report["cover_palette"]["cover_sha256"]
+    assert report["cover_palette"]["schema_version"] == "karaoke-cover-palette/v1"
+    assert len(report["cover_palette"]["colors"]) == 8
+    assert len(report["cover_palette"]["generator_sha256"]) == 64
     assert artwork.TITLE_BLOCK_Y == {"label": 120, "title": 155, "artist": 220}
     assert report["secondary_overlay_contract"] == {
         "anchor_y": 12,

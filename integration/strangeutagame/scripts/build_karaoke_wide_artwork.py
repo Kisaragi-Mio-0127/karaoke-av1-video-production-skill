@@ -10,12 +10,17 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
+try:
+    from scripts.karaoke_cover_palette import extract_cover_palette
+except ImportError:  # pragma: no cover - direct script entry point
+    from karaoke_cover_palette import extract_cover_palette  # type: ignore[no-redef]
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
 SHARED_REGULAR_FONT = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Regular.ttf"
 SHARED_BOLD_FONT = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Bold.ttf"
 CANVAS_SIZE = (1920, 1080)
-WIDE_LAYOUT_VERSION = "wide-layout-v6/top-secondary-clearance"
+WIDE_LAYOUT_VERSION = "wide-layout-v7/cover-palette"
 SLEEVE_BOXES = {
     "vinyl": (40, 30, 340, 402),
     "spectrum": (40, 30, 460, 522),
@@ -119,6 +124,7 @@ def build_wide_composition(
     if canvas.size != CANVAS_SIZE:
         canvas = ImageOps.fit(canvas, CANVAS_SIZE, method=Image.Resampling.LANCZOS)
     cover = Image.open(cover_path).convert("RGB")
+    cover_palette = extract_cover_palette(cover_path, color_count=8)
 
     panels = Image.new("RGBA", CANVAS_SIZE, (0, 0, 0, 0))
     panel_draw = ImageDraw.Draw(panels)
@@ -256,6 +262,11 @@ def build_wide_composition(
         "layout_generator_sha256": _sha256_file(Path(__file__).resolve()),
         "output": str(output_path),
         "composition_sha256": _sha256_file(output_path),
+        "cover": {
+            "path": str(cover_path),
+            "sha256": _sha256_file(cover_path),
+        },
+        "cover_palette": cover_palette,
         "canvas": {"width": CANVAS_SIZE[0], "height": CANVAS_SIZE[1]},
         "sleeve": {
             "x": sleeve_x,

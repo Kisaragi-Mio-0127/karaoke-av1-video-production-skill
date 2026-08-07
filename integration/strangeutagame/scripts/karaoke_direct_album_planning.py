@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Language- and codec-neutral planning for direct album renderers."""
+"""Language- and codec-neutral planning for direct track and album renderers."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the five-track album directly to NVIDIA AV1 YUV 4:2:0.
+"""Render an explicit album manifest directly to AV1 YUV 4:2:0.
 
 This lane is intentionally separate from both ``video/hevc444`` and the old
 mixed ``video/av1`` experiments.  Every output is built from manifest audio,
@@ -30,7 +30,6 @@ from typing import Any
 try:
     from . import karaoke_direct_album_planning as render_core
     from .karaoke_album import (
-        DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         project_relative,
         sha256_file,
@@ -39,7 +38,6 @@ try:
 except ImportError:  # pragma: no cover - direct script execution
     import karaoke_direct_album_planning as render_core  # type: ignore[no-redef]
     from karaoke_album import (  # type: ignore[no-redef]
-        DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         project_relative,
         sha256_file,
@@ -1064,6 +1062,8 @@ def _flag_value(command: Sequence[str], flag: str) -> str:
 def validate_direct_source_command(command: Sequence[str]) -> None:
     if _flag_value(command, "--video-encoder") != "av1_nvenc":
         raise DirectAV1420RenderError("AV1 lane must use video_encoder=av1_nvenc")
+    # Compatibility for callers that constructed the historical vinyl command
+    # directly; all commands emitted by this module include the explicit style.
     visual_style = (
         _flag_value(command, "--visual-style")
         if "--visual-style" in command
@@ -2899,7 +2899,12 @@ def build_av1_420_report(
 
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        required=True,
+        help="explicit album manifest; no repository album is selected implicitly",
+    )
     parser.add_argument(
         "--allow-partial-manifest",
         action="store_true",
@@ -2917,7 +2922,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--single-track",
         action="store_true",
-        help="require exactly one selected song/profile pair",
+        help="require exactly one song and one profile task",
     )
     parser.add_argument(
         "--profile",

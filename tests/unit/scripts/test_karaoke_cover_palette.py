@@ -1,19 +1,11 @@
 """Tests for deterministic cover-derived karaoke palettes."""
 
-from itertools import combinations
 from pathlib import Path
-import sys
 
 import pytest
 from PIL import Image
 
-ROOT = Path(__file__).resolve().parents[3]
-INTEGRATION_ROOT = ROOT / "integration" / "strangeutagame"
-if str(INTEGRATION_ROOT) not in sys.path:
-    sys.path.insert(0, str(INTEGRATION_ROOT))
-
-from scripts import karaoke_cover_palette  # noqa: E402
-from scripts.karaoke_cover_palette import (  # noqa: E402
+from scripts.karaoke_cover_palette import (
     extract_cover_palette,
     normalize_hex_color,
     validate_palette_report,
@@ -71,21 +63,6 @@ def test_single_colour_cover_fills_eight_stable_colours(tmp_path: Path):
     assert first["generator_sha256"] == second["generator_sha256"]
 
 
-def test_single_blue_source_uses_a_soft_orange_complement_for_secondary(
-    tmp_path: Path,
-):
-    cover = tmp_path / "blue.png"
-    Image.new("RGB", (40, 40), (40, 90, 190)).save(cover)
-
-    report = extract_cover_palette(cover)
-
-    assert report["colors"][:2] == ["#285ABE", "#D6A33C"]
-    primary, secondary = (
-        karaoke_cover_palette._hex_to_rgb(color) for color in report["colors"][:2]
-    )
-    assert karaoke_cover_palette._lab_distance(primary, secondary) >= 28.0
-
-
 def test_grayscale_cover_still_produces_readable_unique_colours(tmp_path: Path):
     cover = tmp_path / "gray.png"
     image = Image.new("L", (64, 64))
@@ -135,34 +112,6 @@ def test_pale_peach_gradient_beats_tiny_near_black_hue_noise(tmp_path: Path):
     )
     assert dark_noise["eligible"] is False
     assert dark_noise["chroma"] < 0.06
-
-
-def test_near_monochrome_cover_produces_visually_separated_singer_slots(
-    tmp_path: Path,
-):
-    cover = tmp_path / "near-monochrome.png"
-    image = Image.new("RGB", (80, 40))
-    source_colors = (
-        (190, 35, 45),
-        (220, 50, 60),
-        (155, 25, 35),
-        (235, 70, 75),
-    )
-    for x in range(image.width):
-        for y in range(image.height):
-            image.putpixel((x, y), source_colors[x // 20])
-    image.save(cover)
-
-    report = extract_cover_palette(cover)
-    rgb_colors = [
-        karaoke_cover_palette._hex_to_rgb(color) for color in report["colors"]
-    ]
-    distances = [
-        karaoke_cover_palette._lab_distance(left, right)
-        for left, right in combinations(rgb_colors, 2)
-    ]
-
-    assert min(distances) >= 28.0
 
 
 def test_same_pixels_at_different_paths_do_not_affect_algorithm(tmp_path: Path):

@@ -1,17 +1,12 @@
 import hashlib
 import json
 from pathlib import Path
-import sys
 from types import SimpleNamespace
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]
-INTEGRATION_ROOT = ROOT / "integration" / "strangeutagame"
-if str(INTEGRATION_ROOT) not in sys.path:
-    sys.path.insert(0, str(INTEGRATION_ROOT))
-
-from scripts.karaoke_color_plan import (  # noqa: E402
+from scripts import karaoke_cover_palette
+from scripts.karaoke_color_plan import (
     KaraokeColorPlanError,
     apply_color_plan,
     load_composition_palette,
@@ -19,7 +14,6 @@ from scripts.karaoke_color_plan import (  # noqa: E402
     resolve_color_plan,
     singer_first_appearance_order,
 )
-from scripts import karaoke_cover_palette  # noqa: E402
 
 PALETTE_COLORS = [
     "#AA0000",
@@ -74,7 +68,7 @@ def _composition(tmp_path: Path, *, color_count: int = 8) -> Path:
                     "secondary": "#00AA00",
                     "fallback_used": False,
                     "adjustments": [],
-                }
+                },
             }
         ),
         encoding="utf-8",

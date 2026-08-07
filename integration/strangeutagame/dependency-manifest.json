@@ -27,6 +27,18 @@
       "category": "shared-internal-module",
       "upstream_dependency": "direct-upstream-import",
       "reason": "Shared canonical SUG ruby module; object writeback dynamically imports StrangeUtaGame Character and Sentence. It is not a standalone command."
+    },
+    {
+      "path": "karaoke_mms_editable.py",
+      "category": "shared-internal-module",
+      "upstream_dependency": "direct-upstream-import",
+      "reason": "Creates the derived MMS-editable companion SUG without overwriting the canonical project."
+    },
+    {
+      "path": "karaoke_model_paths.py",
+      "category": "shared-internal-module",
+      "upstream_dependency": "no-upstream-code-import",
+      "reason": "Resolves project-owned MMS model paths without treating runtime caches as model storage."
     }
   ],
   "package_files": [
@@ -46,6 +58,11 @@
       "reason": "Shared optional/required/off pronunciation validation policy used by preview and direct AV1 rendering."
     },
     {
+      "path": "karaoke_common/artwork.py",
+      "category": "package-file",
+      "reason": "Builds the current composition and style-owned visual assets inside each new workflow output."
+    },
+    {
       "path": "karaoke_japanese/__init__.py",
       "category": "package-file",
       "reason": "Japanese layout package initializer for the selectable wide-visual workflow."
@@ -54,6 +71,16 @@
       "path": "karaoke_japanese/layout.py",
       "category": "package-file",
       "reason": "Japanese wide-layout geometry imported by the preview renderer."
+    },
+    {
+      "path": "karaoke_zh_en/__init__.py",
+      "category": "package-file",
+      "reason": "Package initializer for shared non-Japanese layout definitions imported by the generic preview renderer."
+    },
+    {
+      "path": "karaoke_zh_en/layout.py",
+      "category": "package-file",
+      "reason": "Shared layout definitions required by the generic renderer; no Chinese or English workflow entry is bundled."
     }
   ],
   "scripts": [
@@ -143,11 +170,6 @@
       "reason": "Uses codec-neutral album planning and executes the StrangeUtaGame-backed preview renderer with AV1 4:2:0-only encoding, language/pronunciation policy, durable final-ASS reports, and explicit-only MKV/full-decode gates."
     },
     {
-      "path": "render_karaoke_direct_hevc444_album.py",
-      "category": "transitive-runtime",
-      "reason": "Formal HEVC 4:4:4 implementation using codec-neutral album planning and the SUG preview renderer with hevc_nvenc_444/yuv444p MP4 output."
-    },
-    {
       "path": "render_vinyl_karaoke.py",
       "category": "no-upstream-code-import",
       "reason": "Builds and rotates the language-neutral vinyl visual layer and retains the public HTTPS/SSRF/25 MiB cover-fetch boundary without importing StrangeUtaGame."
@@ -170,7 +192,21 @@
     {
       "path": "run_karaoke_japanese_mms_workflow.py",
       "category": "transitive-runtime",
-      "reason": "Separate Japanese-only MMS audit/build/visual-release entry; defaults offline, binds existing inputs by hash, and keeps character overrides as non-rendering evidence."
+      "reason": "Separate Japanese-only MMS audit/build/companion/render entry; defaults offline, supports automatic fallback, and preserves the canonical SUG."
+    }
+  ],
+  "requirements": [
+    {
+      "path": "requirements/requirements-karaoke.in",
+      "destination": "requirements-karaoke.skill.in",
+      "category": "dependency-file",
+      "reason": "Human-readable dependencies for the installed karaoke integration."
+    },
+    {
+      "path": "requirements/requirements-karaoke.lock.txt",
+      "destination": "requirements-karaoke.skill.lock.txt",
+      "category": "dependency-file",
+      "reason": "Locked dependencies for reproducible installation in the target checkout."
     }
   ],
   "support_tools": [

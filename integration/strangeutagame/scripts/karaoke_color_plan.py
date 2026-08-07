@@ -7,11 +7,11 @@ import hashlib
 import json
 import re
 import unicodedata
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from scripts import karaoke_cover_palette
-
 
 COLOR_PLAN_SCHEMA = "karaoke-color-plan/v1"
 PALETTE_SCHEMA = "karaoke-cover-palette/v1"
@@ -64,7 +64,9 @@ def load_composition_palette(composition_path: Path) -> dict[str, Any]:
             expected_color_count=8,
         )
     except (TypeError, ValueError) as error:
-        raise KaraokeColorPlanError(f"invalid embedded cover palette: {error}") from error
+        raise KaraokeColorPlanError(
+            f"invalid embedded cover palette: {error}"
+        ) from error
     current_generator_sha256 = hashlib.sha256(
         Path(karaoke_cover_palette.__file__).resolve().read_bytes()
     ).hexdigest()
@@ -88,9 +90,15 @@ def load_composition_palette(composition_path: Path) -> dict[str, Any]:
     ]
     if len(colors) != len(set(colors)):
         raise KaraokeColorPlanError("cover palette colors must be unique")
-    if normalize_hex_color(palette.get("primary"), field="palette primary") != colors[0]:
+    if (
+        normalize_hex_color(palette.get("primary"), field="palette primary")
+        != colors[0]
+    ):
         raise KaraokeColorPlanError("cover palette primary must equal colors[0]")
-    if normalize_hex_color(palette.get("secondary"), field="palette secondary") != colors[1]:
+    if (
+        normalize_hex_color(palette.get("secondary"), field="palette secondary")
+        != colors[1]
+    ):
         raise KaraokeColorPlanError("cover palette secondary must equal colors[1]")
     return {**palette, "colors": colors, "metadata_path": str(metadata_path.resolve())}
 
@@ -122,7 +130,9 @@ def _project_singers(project: object) -> tuple[list[object], dict[str, object]]:
     for singer in singers:
         singer_id = str(getattr(singer, "id", "") or "").strip()
         if not singer_id or singer_id in by_id:
-            raise KaraokeColorPlanError(f"invalid or duplicate singer_id: {singer_id!r}")
+            raise KaraokeColorPlanError(
+                f"invalid or duplicate singer_id: {singer_id!r}"
+            )
         by_id[singer_id] = singer
         defaults += int(bool(getattr(singer, "is_default", False)))
     if defaults != 1:
@@ -201,7 +211,9 @@ def resolve_color_plan(
     }
     unknown = sorted(set(overrides) - set(by_id))
     if unknown:
-        raise KaraokeColorPlanError(f"singer color overrides reference unknown IDs: {unknown}")
+        raise KaraokeColorPlanError(
+            f"singer color overrides reference unknown IDs: {unknown}"
+        )
     spectrum_override = (
         normalize_hex_color(spectrum_color, field="spectrum color")
         if spectrum_color is not None
@@ -242,9 +254,7 @@ def resolve_color_plan(
                 "role": (
                     "primary"
                     if index == 0
-                    else "secondary"
-                    if index == 1
-                    else f"accent-{index + 1}"
+                    else "secondary" if index == 1 else f"accent-{index + 1}"
                 ),
                 "project_color": project_color,
                 "resolved_color": resolved,
@@ -293,5 +303,5 @@ def apply_color_plan(project: object, plan: Mapping[str, Any]) -> None:
         if callable(change_color):
             change_color(color)
         else:
-            setattr(singer, "color", color)
-        setattr(singer, "_karaoke_color_source", str(assignment["source"]))
+            singer.color = color
+        singer._karaoke_color_source = str(assignment["source"])

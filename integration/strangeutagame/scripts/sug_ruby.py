@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import unicodedata
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,20 +25,7 @@ APPROVED_REVIEW_STATES = frozenset(
     {"ai-approved", "ai-reviewed", "human-reviewed", "human-locked"}
 )
 MACHINE_SOURCES = frozenset({"pykakasi", "dictionary", "machine-fill"})
-NUMERIC_RUBY_OVERRIDES = {"100": "ひゃく"}
-REVIEWED_RUBY_SPAN_SPLITS: dict[
-    tuple[str, str], tuple[tuple[str, str], ...]
-] = {
-    ("一番好", "いちばんす"): (("一番", "いちばん"), ("好", "す")),
-}
-READING_OVERRIDES = {
-    "愛し": "あいし",
-    "今年": "ことし",
-    "今日は": "きょうは",
-    "君": "きみ",
-    "日": "ひ",
-    "後に": "あとに",
-}
+_KATAKANA_MARKS = frozenset({"ー", "・", "･", "ｰ", "゛", "゜", "゙", "゚"})
 
 
 class RubyValidationError(ValueError):
@@ -110,6 +98,29 @@ def _kana_to_hiragana(text: str) -> str:
     )
 
 
+def is_pure_katakana(text: str) -> bool:
+    """Return whether a surface contains only katakana and katakana marks."""
+
+    surface = str(text)
+    if not surface:
+        return False
+    for char in surface:
+        codepoint = ord(char)
+        name = unicodedata.name(char, "")
+        is_letter = (
+            0x30A1 <= codepoint <= 0x30FA
+            or 0x31F0 <= codepoint <= 0x31FF
+            or 0xFF66 <= codepoint <= 0xFF9D
+            or "KATAKANA LETTER" in name
+        )
+        if is_letter:
+            continue
+        if char in _KATAKANA_MARKS:
+            continue
+        return False
+    return True
+
+
 def _kanji_ruby_spans(
     original: str,
     reading: str,
@@ -158,33 +169,14 @@ def _kanji_ruby_spans(
             return [RubyToken(original, reading, start, start + len(original))]
         ruby = reading[reading_cursor:reading_end]
         if ruby:
-            reviewed_split = REVIEWED_RUBY_SPAN_SPLITS.get((run_text, ruby))
-            if reviewed_split is None:
-                result.append(
-                    RubyToken(
-                        text=run_text,
-                        reading=ruby,
-                        start=start + local_start,
-                        end=start + local_end,
-                    )
+            result.append(
+                RubyToken(
+                    text=run_text,
+                    reading=ruby,
+                    start=start + local_start,
+                    end=start + local_end,
                 )
-            else:
-                split_cursor = start + local_start
-                for split_text, split_reading in reviewed_split:
-                    split_end = split_cursor + len(split_text)
-                    result.append(
-                        RubyToken(
-                            text=split_text,
-                            reading=split_reading,
-                            start=split_cursor,
-                            end=split_end,
-                        )
-                    )
-                    split_cursor = split_end
-                if split_cursor != start + local_end:
-                    raise ValueError(
-                        f"reviewed ruby split width mismatch for {run_text!r}"
-                    )
+            )
         reading_cursor = reading_end
     return result
 
@@ -210,21 +202,8 @@ def candidate_ruby_tokens(
         start = cursor
         end = start + len(original)
         reading = str(item.get("hira") or original)
-        if original == "降り":
-            reading = "おり" if text[end : end + 1] == "た" else "ふり"
-        else:
-            reading = READING_OVERRIDES.get(original, reading)
         cursor = end
-        if original in NUMERIC_RUBY_OVERRIDES:
-            result.append(
-                RubyToken(
-                    original,
-                    NUMERIC_RUBY_OVERRIDES[original],
-                    start,
-                    end,
-                )
-            )
-        elif _contains_kanji(original) and reading and reading != original:
+        if _contains_kanji(original) and reading and reading != original:
             result.extend(_kanji_ruby_spans(original, reading, start=start))
     return result
 
@@ -349,6 +328,12 @@ def _sentence_spans(sentence: Any, *, fallback_id: str = "") -> list[CanonicalRu
         )
         reading = "".join(readings)
         if reading:
+            surface = "".join(
+                str(_value(character, "char", "")) for character in chain
+            )
+            if is_pure_katakana(surface):
+                index = end
+                continue
             if any(_is_space(character) for character in chain):
                 raise RubyValidationError(
                     f"ruby link crosses whitespace in sentence {sid!r}: {start}:{end}"
@@ -358,7 +343,7 @@ def _sentence_spans(sentence: Any, *, fallback_id: str = "") -> list[CanonicalRu
                     sentence_id=sid,
                     start=start,
                     end=end,
-                    surface="".join(str(_value(character, "char", "")) for character in chain),
+                    surface=surface,
                     reading=reading,
                     part_readings=readings,
                     linked_to_next=tuple(_linked_to_next(character) for character in chain),
@@ -1104,7 +1089,10 @@ def fill_missing_project_ruby(project: Any, helper: Any) -> list[dict[str, Any]]
         for char_index, character in enumerate(chars):
             if _character_has_ruby(character):
                 continue
-            candidate = helper.ruby(str(_value(character, "char", "")), language="ja")
+            surface = str(_value(character, "char", ""))
+            if is_pure_katakana(surface):
+                continue
+            candidate = helper.ruby(surface, language="ja")
             if candidate is None:
                 continue
             before_hash = span_hash(project, sentence_index, char_index, char_index + 1)

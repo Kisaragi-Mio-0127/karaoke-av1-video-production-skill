@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.karaoke_timing import SONGS  # noqa: E402
+from scripts.karaoke_album import load_album_manifest  # noqa: E402
 from scripts.sug_ruby import (  # noqa: E402
     RubyValidationError,
     apply_review_patches,
@@ -177,17 +177,31 @@ def synchronize_document(
     return _change_objects(document, result), []
 
 
-def album_sug_paths() -> list[Path]:
-    if not SONGS:
-        raise RuntimeError(
-            "no public album manifest is bundled; pass canonical SUG paths explicitly"
-        )
+def album_sug_paths(
+    manifest_path: Path,
+    *,
+    song_ids: set[str] | None = None,
+) -> list[Path]:
+    """Resolve canonical timing projects from an explicit album manifest."""
+
     paths: list[Path] = []
-    for song in SONGS:
-        candidates = sorted((song.deliverable_dir / "timing").glob(f"{song.song_id}_*.sug"))
+    album = load_album_manifest(manifest_path)
+    selected = [
+        track
+        for track in album.tracks
+        if song_ids is None or track.song_id in song_ids
+    ]
+    if song_ids is not None:
+        missing = sorted(song_ids - {track.song_id for track in selected})
+        if missing:
+            raise RuntimeError(f"song IDs are absent from manifest: {missing}")
+    for track in selected:
+        candidates = sorted(
+            (track.deliverable_dir / "timing").glob(f"{track.song_id}_*.sug")
+        )
         if len(candidates) != 1:
             raise RuntimeError(
-                f"expected one SUG for {song.song_id}, found {len(candidates)}"
+                f"expected one SUG for {track.song_id}, found {len(candidates)}"
             )
         paths.append(candidates[0])
     return paths
@@ -234,10 +248,22 @@ def sync_file(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="*", type=Path)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--song-id", action="append", default=[])
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--patches", type=Path)
     args = parser.parse_args()
-    paths = [path.resolve() for path in args.paths] or album_sug_paths()
+    if args.paths and args.manifest is not None:
+        parser.error("pass explicit SUG paths or --manifest, not both")
+    if args.paths:
+        paths = [path.resolve() for path in args.paths]
+    elif args.manifest is not None:
+        paths = album_sug_paths(
+            args.manifest.resolve(),
+            song_ids=set(args.song_id) or None,
+        )
+    else:
+        parser.error("explicit SUG paths or --manifest is required")
     total_changes = 0
     unresolved_all: list[tuple[Path, dict[str, Any]]] = []
     for path in paths:

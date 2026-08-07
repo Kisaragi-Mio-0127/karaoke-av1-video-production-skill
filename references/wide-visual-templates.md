@@ -1,73 +1,92 @@
 # Wide Visual Templates
 
-[简体中文](wide-visual-templates.zh-CN.md) | English
+This is the single source of truth for the current wide-layout geometry. Both
+`karaoke-av1-video-production` and
+`chinese-english-karaoke-production` link here; do not copy these constants
+into either `SKILL.md`, another command reference, or a language adapter.
 
-Select exactly one right-side visual effect for each output. Use the same
-shared production scripts for either choice; do not fork a song-specific
-renderer. A batch request for `both` creates two outputs, each with one
-effect, rather than combining the effects in one render.
+Read this file before changing composition, subtitle placement, secondary
+overlays, vinyl artwork, or spectrum rendering. Re-check the implementation
+when the renderer or canvas changes.
 
-## Choose the template
+## Template selection
 
-- Use `vinyl` for the rotating-record layout. Pass `--visual-style vinyl` to both scripts and provide `--vinyl` to the preview renderer.
-- Use `spectrum` for the glowing real-time spectrum layout. Pass `--visual-style spectrum` to both scripts and omit `--vinyl`. Spectrum does not require, probe, generate, pass, or report a vinyl asset.
-- Never combine the rotating record and spectrum in one output. Preserve accepted variants under distinct filenames.
-- Render and inspect a short representative preview before a full encode whenever the template, artwork renderer, spectrum behavior, or layout constants change.
+- Select exactly one `--visual-style`: `vinyl` or `spectrum`.
+- `vinyl` keeps the record rotating and generates its record asset inside the
+  current run's output directory.
+- `spectrum` omits `--vinyl` and must not probe, generate, pass, or report a
+  vinyl asset.
+- Never combine both effects in one output. The AV1 batch entry's `both`
+  option creates two independent outputs, not a combined frame.
 
-## AV1 4:2:0 batch workflow
+## Current composition
 
-The AV1 4:2:0 batch entry accepts `--visual-style vinyl|spectrum|both` and
-defaults to `vinyl`:
+- Composition identifier: `wide-layout-v7/cover-palette`.
+- Canvas: `1920x1080`.
+- The album card, card footer, and lower subtitle panel stay visible. Vinyl
+  shows the rotating record; spectrum replaces that region with the spectrum
+  and progress display. The outer right panel and compact dark vinyl backplate
+  stay absent.
+- Required no-panel report fields:
+  `right_panel_visible=false`, `outer_right_panel_visible=false`,
+  `vinyl_backplate_present=false`, and
+  `vinyl_backplate_preserved=false`.
 
-```powershell
-uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
-  --manifest <album-manifest> `
-  --visual-style <vinyl|spectrum|both>
-```
+## Artwork geometry
 
-`spectrum` does not require, probe, generate, pass, or report a vinyl asset.
-`both` creates two independent AV1 4:2:0 products, one vinyl and one
-spectrum, with separate media and report identities. The pair shares one
-hash-identical profile ASS and publishes serially. `--single-track`
-means exactly one selected song and one profile; with `both`, that selection
-can produce two style variants. `--lossless-companion` and `--full-decode`
-remain explicit opt-ins and are not implied by `both`.
+- Lower subtitle panel: `(x1,y1,x2,y2)=(20,576,1900,1050)`.
+- Vinyl album card: `(x,y,width,height)=(40,30,340,402)`.
+- Spectrum album card: `(x,y,width,height)=(40,30,460,522)`.
+- Vinyl title visual left edge: `430`.
+- Spectrum title, spectrum, and progress visual left edge: `800`.
+- Vinyl footer bottom padding: `12`.
+- Title label/title/artist baselines: `y=120/155/220`, positioned by actual
+  ink bounds.
 
-## Shared single-track workflow
+## Subtitle and secondary geometry
 
-The shared one-click entry is `scripts/run_karaoke_japanese_workflow.py`.
-It defaults to `--visual-style vinyl`, and both styles require a new,
-non-existent `--output-dir`:
+- Wide upper lane: main `y=660`, ruby anchor `y=625`.
+- Wide lower lane: main `y=870`, ruby anchor `y=835`.
+- Main-lane separation: `210 px`; ruby-to-main anchor gap: `35 px`.
+- Japanese/Chinese wide main font target: `108 px`; shared ruby font target:
+  `51 px`; cue text target: `39 px`.
+- English wide main font target: `96 px`; exceptional minimum: `54 px`.
+- English word runs use `0 em` added intra-word tracking, `0.85` Pillow-to-
+  libass advance positioning, and a `0.18 em` total word-gap target.
+- Secondary roles (`opera`, `harmony`, `secondary`) use a centred top overlay:
+  content-safe band `y=0..96`, anchor `y=12`, default font `60 px`, minimum
+  long-line font `36 px`, and outline/glow reserve through `y=107`.
+- Keep at least `16 px` between title ink and the secondary reserve.
+- Keep secondary content independent from main lanes, cues, and ruby. Reject a
+  ruby span whose resolved characters contain more than one singer.
 
-```powershell
-uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
-  --sug <project.sug> --audio <post-mix-audio> `
-  --composition <composition-png> --output-dir <new-output-dir> `
-  --title <title> --artist <artist> `
-  --album-title <album-title> --album-artist <album-artist> `
-  --visual-style vinyl --vinyl <canonical-vinyl-png>
-```
+## Spectrum geometry
 
-For `spectrum`, replace the final style and vinyl arguments with
-`--visual-style spectrum`; `--spectrum-color RRGGBB` and
-`--progress-color RRGGBB` are optional. Vinyl requires `--vinyl` as the
-canonical identity input, rebuilds and validates the current rotating vinyl
-inside the new output directory, and passes that generated asset to the
-renderer. Spectrum omits all vinyl handling and reporting.
+- Spectrum drawing rectangle: `(x,y,width,height)=(800,290,1040,220)`.
+- Spectrum baseline: `y=516`.
+- Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
+- Horizontal glow padding: `64 px`.
+- Top and bottom glow padding: `56 px` each.
+- Top and bottom bar clearance: `8 px` each.
+- Bar count: `80`; corner radius: `3 px`; soft-edge sigma: `0.8`.
+- Peak hold: enabled; decay `0.975`; half-life `0.91 s`.
+- Progress track: `(x,y,width,height)=(800,548,1040,6)` with a circular
+  `20 px` indicator; `show_time=false`.
+- Verify bars, glow, title alignment, peak response, and the progress endpoint
+  in original-resolution frames, not only in JSON metadata.
 
-The workflow first writes an independent `karaoke-preflight.ass`, then
-writes the final `karaoke.ass` during MP4 rendering. It requires their
-SHA-256 identities to match. Full duration and MP4-only output are the
-defaults; `--lossless-companion` and `--full-decode` are explicit opt-ins for
-MKV and full-decode diagnostics. Japanese pronunciation validation defaults to
-non-blocking `optional`. The one-click route and the underlying renderer share the same
-singer, overlay, ruby, container, and diagnostic gates. The batch entry follows
-the separate AV1 4:2:0 style contract above; keep each style's artifacts and
-validation identities separate.
+## Automatic layout and low-level checks
 
-## Use the shared scripts
+The one-click wrappers generate the current composition inside the new output
+directory. They use the selected cover, derive a background when one is not
+explicitly supplied, and create a vinyl asset only for `vinyl`. An explicit
+`--composition` is an advanced override and must still pass the current layout
+identifier and geometry gates; it must not silently reintroduce an old style.
 
-From the StrangeUtaGame repository root, build the static background/composition layer with `scripts/build_karaoke_wide_artwork.py`. The vinyl itself keeps rotating and is a separate current derived asset; regenerate it with the current renderer on every formal or test run:
+Use the following low-level commands only when inspecting the artwork builder
+or renderer directly.
+
+Build the composition with the real project CLI:
 
 ```powershell
 uv run --no-sync python scripts/build_karaoke_wide_artwork.py `
@@ -78,7 +97,7 @@ uv run --no-sync python scripts/build_karaoke_wide_artwork.py `
   --visual-style <vinyl-or-spectrum> --output <composition-png>
 ```
 
-Render with `scripts/karaoke_review_preview.py` and the same `--visual-style`. Pass `--layout wide`; omitting it selects the standard subtitle lanes and standard vinyl placement. Pass the exact post-mix audio source intended for delivery. The same trimmed `--audio` input drives the spectrum and muxed audio, although the MP4 audio is re-encoded. Use a new output, ASS, and report path for every spectrum run because spectrum mode refuses to overwrite them. Vinyl mode can overwrite video, ASS, and report targets, and the artwork builder can overwrite its PNG and JSON; use new paths or rollback copies for accepted artifacts. These standalone-preview overwrite rules do not apply to the shared one-click workflow, which always uses a new `--output-dir` for either style.
+Render a representative preview with the matching style:
 
 ```powershell
 uv run --no-sync python scripts/karaoke_review_preview.py `
@@ -87,30 +106,19 @@ uv run --no-sync python scripts/karaoke_review_preview.py `
   --font-file <main-font> --output <new-output-mp4> `
   --ass-output <new-output-ass> --report-output <new-report-json> `
   --start <seconds> --duration <seconds> --layout wide `
-  --visual-style <vinyl-or-spectrum> <style-specific-arguments>
+  --visual-style <vinyl-or-spectrum>
 ```
 
-For `vinyl`, replace `<vinyl-arguments>` with `--vinyl <current-vinyl-png>` and record the exact `vinyl_sha256`; the renderer must receive that path explicitly and must not silently reuse a canonical/old `vinyl.png`. For `spectrum`, omit it and optionally add `--spectrum-color RRGGBB --progress-color RRGGBB`. If timing overrides are used, pass `--timing-overrides <json>` and `--song-id <id>` together. The default full-program AV1 4:2:0 direct-render profile is 1920x1080 at 30 fps, `yuv420p`, BT.709, AV1 NVENC CQ38, `preset p7`, `tune hq`, VBR, full-resolution multipass, lookahead 32, spatial and temporal AQ, AQ strength 8, and GOP 240 after a successful hardware probe. The default compatibility MP4 uses AAC-LC 320k and is the only output for ordinary tests/re-renders. MKV is opt-in only: pass `--lossless-output <new-lossless-output-mkv>` (or use a workflow's explicit `--lossless-companion`) only after probing a FLAC or PCM WAV source; reject MP3/AAC. Do not show elapsed time or playback-control buttons.
+For a low-level `vinyl` renderer check, add the vinyl produced by the same
+artwork run and record its identity. For `spectrum`, omit it. Use new output,
+ASS, and report paths for every review run; keep accepted artifacts and
+rollback copies separate.
 
-## Current composition contract
+## Acceptance evidence
 
-The current wide composition uses `wide-layout-v6/top-secondary-clearance`. It removes both the extra outer right-panel overlay and the compact dark backplate behind or below the rotating record. The record still rotates, and the album card, card footer, and lower subtitle panel remain visible. The spectrum variant does not reintroduce the removed vinyl-region background frame.
-
-## Preserve the visual contract
-
-- Treat the following values as the current 1920×1080 StrangeUtaGame wide-template constants, not universal karaoke coordinates. Re-read the scripts when the renderer or canvas changes.
-- Keep the common lower subtitle backdrop at corner coordinates `(x1,y1,x2,y2)=(20,576,1900,1050)`; its top edge is `y=576` and it remains in the composition. Subtitle anchors come from `--layout`, not from this rectangle.
-- For `vinyl`, use album-card geometry `(x,y,width,height)=(40,30,340,402)`, footer bottom padding `12`, and title block visual left edge `430`.
-- For Japanese wide subtitles, the upper and lower main-lyric anchors are `y=660` and `y=870` respectively.
-- For explicit `opera`, `harmony`, and `secondary` roles, use a dedicated top-centred overlay in the `y=0..96` safe band at anchor `y=12`, default `60 px` font size, and a `36 px` minimum for long-line fitting. The actual outline/glow reserve extends through `y=107`; keep the overlay independent of main lanes, cues, and ruby.
-- In `wide-layout-v6/top-secondary-clearance`, place the title label/title/artist at `y=120/155/220` using actual ink bounds, and keep at least `16 px` between title ink and the secondary reserve. Verify the reserve/title clearance in the composition report and a representative frame.
-- In the composition report, `right_panel: null`/`right_panel_visible: false` and `outer_right_panel: null`/`outer_right_panel_visible: false` confirm that no outer right-panel overlay is present. `vinyl_backplate: null`, `vinyl_backplate_present: false`, and compatibility `vinyl_backplate_preserved: false` confirm that the compact backplate is also absent.
-- For `spectrum`, use album-card geometry `(40,30,460,522)`, title/spectrum/progress visual left edge `800`, spectrum geometry `(x,y,width,height)=(800,290,1040,220)`, baseline `y=516`, and progress geometry `(800,548,1040,6)` with a 20 px circular indicator. Keep the clip-safe geometry `(x,y,width,height)=(736,226,1168,348)`, 64 px horizontal glow padding, 56 px top/bottom glow padding, and 8 px top/bottom bar clearance so upper peaks and lower glow are not clipped.
-- Align visible title ink, spectrum bars, and progress track by their reviewed visual boundary, not only by a text draw origin or glow-layer canvas.
-- Target 80 visually rounded bars with rounded tops and bottoms, horizontal glow padding, top/bottom clearance and glow padding, recent-peak hold, and a circular progress indicator. Confirm the rounding, upper/lower safe margins, and endpoint behavior in original-resolution frames rather than relying only on reported constants. Keep side, top, and bottom glow inside padded intermediate layers so it fades naturally instead of clipping at the spectrum rectangle.
-- Use the approved cover-derived primary colour for active bars and glow. Prefer a reviewed cover-derived secondary/accent for the progress track; if none exists, record the fallback.
-- Require `--report-output` and verify its `visual_style`, colour choices, spectrum geometry, bar count/radius, glow padding, peak-hold settings, progress geometry, and `show_time: false`. Separately compute and record SHA-256 identities for the composition, post-mix audio, optional vinyl, ASS, report, and output because the current scripts do not add all input identities automatically.
-
-## Verify before promotion
-
-Use the renderer only to create artifacts. Perform frame inspection, media probing, promotion, destination re-probing, and rollback retention as separate gates. Inspect the intro, an active low-energy passage, an active peak, a dense lyric frame, and the outro. For vinyl, also inspect at least four rotation phases and verify no seam or sweeping colour sector. For spectrum, verify real-time response, peak decay, rounded bar bottoms, unclipped side/bottom glow, title/spectrum alignment, and safe progress endpoint behavior.
+Require the composition/report layout identifier to match this contract.
+Inspect title, first lyric, longest line, dense timing, secondary overlay,
+active spectrum, progress, and ending frames. For vinyl inspect at least four
+rotation phases and reject seams or sweeping partial arcs. For spectrum verify
+real-time response, peak decay, rounded bars, unclipped glow, aligned title and
+progress boundaries, and safe endpoint behavior.

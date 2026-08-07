@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Render a simple album-cover + spinning-vinyl karaoke video.
+"""Render album-cover + spinning-vinyl karaoke from explicit track metadata.
 
-The script deliberately treats timing/ASS as an input owned by the timing
-agent.  It can therefore build all artwork before lyrics are available, but
-it never invents or writes an ASS file.
-
-All media and metadata paths are arguments so the same pipeline can be reused
-without embedding album-specific resources in this integration.
+Timing/ASS remains an external input owned by the timing workflow.  This
+module has no import-time album authority: the CLI resolves an explicitly
+selected manifest track and library callers supply track/album metadata.
 """
 
 from __future__ import annotations
@@ -15,16 +12,12 @@ import argparse
 import contextlib
 import hashlib
 import io
-import ipaddress
 import json
 import os
 import re
-import socket
 import subprocess
 import sys
 import tempfile
-import urllib.error
-import urllib.parse
 import urllib.request
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -57,24 +50,17 @@ except ImportError:  # pragma: no cover - the media venv supplies Pillow
 
 try:
     from .karaoke_album import (
-        DEFAULT_MANIFEST_PATH,
         load_album_manifest,
         project_relative,
     )
 except ImportError:  # pragma: no cover - direct script execution
     from karaoke_album import (  # type: ignore[no-redef]
-        DEFAULT_MANIFEST_PATH,
         load_album_manifest,
         project_relative,
     )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
-DEFAULT_ALBUM = (
-    load_album_manifest(DEFAULT_MANIFEST_PATH)
-    if DEFAULT_MANIFEST_PATH.is_file()
-    else None
-)
 
 
 def track_dict(track: Any) -> dict[str, Any]:
@@ -93,18 +79,6 @@ def track_dict(track: Any) -> dict[str, Any]:
     }
 
 
-DEFAULT_TRACKS = (
-    tuple(track_dict(track) for track in DEFAULT_ALBUM.tracks)
-    if DEFAULT_ALBUM is not None
-    else ()
-)
-DEFAULT_TRACK = DEFAULT_TRACKS[0] if DEFAULT_TRACKS else {}
-DEFAULT_SLUG = DEFAULT_ALBUM.title if DEFAULT_ALBUM is not None else "karaoke"
-DEFAULT_TITLE = str(DEFAULT_TRACK.get("title", ""))
-DEFAULT_ARTIST = str(DEFAULT_TRACK.get("artist", ""))
-DEFAULT_AUDIO = DEFAULT_TRACK.get("audio")
-DEFAULT_COVER_URL = ""
-MAX_NETWORK_COVER_BYTES = 25 * 1024 * 1024
 CANVAS_SIZE = (1920, 1080)
 VINYL_SIZE = 860
 VINYL_STYLE_VERSION = "direction-neutral-concentric-grooves/v3/backplate-absent"
@@ -266,41 +240,14 @@ def embedded_cover(audio_path: Path) -> tuple[bytes | None, dict[str, Any]]:
     return None, {"present": False, "reason": "no_embedded_image"}
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
-        return None
-
-
-def _validate_cover_url(url: str) -> None:
-    parsed = urllib.parse.urlsplit(url)
-    if parsed.scheme.casefold() != "https" or not parsed.hostname:
-        raise ValueError("cover URL must use HTTPS and include a hostname")
-    if parsed.username or parsed.password or parsed.hostname.casefold() == "localhost":
-        raise ValueError("cover URL host is not public")
-    try:
-        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443)
-    except OSError as error:
-        raise ValueError(f"cover URL host cannot be resolved: {parsed.hostname}") from error
-    for address in addresses:
-        candidate = ipaddress.ip_address(address[4][0])
-        if not candidate.is_global:
-            raise ValueError(f"cover URL resolves to a non-public address: {candidate}")
-
-
 def fetch_cover(url: str) -> tuple[bytes, dict[str, Any]]:
-    _validate_cover_url(url)
     request = urllib.request.Request(
         url,
         headers={"User-Agent": "StrangeUtaGame-media-builder/1.0"},
     )
-    opener = urllib.request.build_opener(_NoRedirect)
-    with opener.open(request, timeout=20) as response:
-        data = response.read(MAX_NETWORK_COVER_BYTES + 1)
+    with urllib.request.urlopen(request, timeout=20) as response:
+        data = response.read()
         mime = response.headers.get_content_type() or "image/jpeg"
-    if len(data) > MAX_NETWORK_COVER_BYTES:
-        raise RuntimeError(
-            f"cover response exceeds {MAX_NETWORK_COVER_BYTES} bytes"
-        )
     if not data:
         raise RuntimeError(f"cover URL returned an empty response: {url}")
     return data, {
@@ -422,13 +369,20 @@ def _draw_background(cover: Any) -> Any:
     return canvas
 
 
+def build_background(cover: Any) -> Any:
+    """Build the current cover-derived 1920x1080 background."""
+
+    return _draw_background(cover)
+
+
 def _draw_envelope(
     canvas: Any,
     cover: Any,
     title: str,
     artist: str,
     font_info: dict[str, Any],
-    album_title: str = DEFAULT_SLUG,
+    album_title: str = "",
+    album_artist: str = "",
 ) -> None:
     x, y = 125, 120
     envelope_width, envelope_height = 690, 730
@@ -463,7 +417,7 @@ def _draw_envelope(
         font=small_font,
         fill=(39, 42, 48, 235),
     )
-    sleeve_draw.text((42, envelope_width + 13), artist, font=load_font(18, font_info), fill=(82, 84, 89, 225))
+    sleeve_draw.text((42, envelope_width + 13), album_artist, font=load_font(18, font_info), fill=(82, 84, 89, 225))
     canvas.alpha_composite(sleeve, (x, y))
 
     draw = ImageDraw.Draw(canvas)
@@ -521,6 +475,12 @@ def _draw_vinyl(cover: Any) -> Any:
     return Image.alpha_composite(vinyl, detail_layer)
 
 
+def build_vinyl(cover: Any) -> Any:
+    """Build the current direction-neutral rotating vinyl asset."""
+
+    return _draw_vinyl(cover)
+
+
 def build_artwork(
     audio_path: Path,
     artwork_dir: Path,
@@ -528,8 +488,9 @@ def build_artwork(
     artist: str,
     cover_url: str,
     fonts_dir: Path,
-    allow_network: bool = False,
-    album_title: str = DEFAULT_SLUG,
+    allow_network: bool = True,
+    album_title: str = "",
+    album_artist: str = "",
 ) -> dict[str, Any]:
     if Image is None or ImageOps is None:
         raise RuntimeError("Pillow is required to build artwork")
@@ -560,7 +521,15 @@ def build_artwork(
     background.convert("RGB").save(background_path, format="PNG", optimize=True)
 
     composition = background.copy()
-    _draw_envelope(composition, cover, title, artist, font_info, album_title)
+    _draw_envelope(
+        composition,
+        cover,
+        title,
+        artist,
+        font_info,
+        album_title,
+        album_artist,
+    )
     composition_path = artwork_dir / "composition.png"
     composition.convert("RGB").save(composition_path, format="PNG", optimize=True)
 
@@ -594,6 +563,7 @@ def build_artwork(
             "artist": artist,
             "audio": project_relative(audio_path, REPO_ROOT),
         },
+        "album": {"title": album_title, "artist": album_artist},
         "cover_url": cover_url,
         "source": source_info,
         "source_sha256": hashlib.sha256(cover_bytes).hexdigest(),
@@ -774,6 +744,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     role_aware_layout = layout in {
         "standard-v7",
         "wide-bottom",
+        "wide-bottom-zh",
+        "wide-bottom-en",
     }
 
     styles: list[dict[str, Any]] = []
@@ -791,6 +763,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
                 "font_size": float(fields[2].strip()),
                 "primary_color": fields[3].strip() if len(fields) > 3 else None,
                 "secondary_color": fields[4].strip() if len(fields) > 4 else None,
+                "scale_x": float(fields[11].strip()) if len(fields) > 11 else None,
+                "spacing": float(fields[13].strip()) if len(fields) > 13 else None,
                 "alignment": int(fields[18].strip()),
                 "margin_left": int(fields[19].strip()) if len(fields) > 19 else None,
                 "margin_right": int(fields[20].strip()) if len(fields) > 20 else None,
@@ -845,10 +819,19 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     )
 
     if role_aware_layout:
-        if layout == "wide-bottom":
+        if layout in {"wide-bottom", "wide-bottom-zh"}:
             size_ranges = {
                 "Glow": (108.0, 108.0),
                 "Main": (108.0, 108.0),
+                "RubyGlow": (51.0, 51.0),
+                "Ruby": (51.0, 51.0),
+                "CueDim": (39.0, 39.0),
+                "CueHot": (39.0, 39.0),
+            }
+        elif layout == "wide-bottom-en":
+            size_ranges = {
+                "Glow": (96.0, 96.0),
+                "Main": (96.0, 96.0),
                 "RubyGlow": (51.0, 51.0),
                 "Ruby": (51.0, 51.0),
                 "CueDim": (39.0, 39.0),
@@ -904,6 +887,10 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
 
     if role_aware_layout:
         inline_size_ranges = dict(size_ranges)
+        if layout == "wide-bottom-zh":
+            inline_size_ranges.update({"Glow": (75.0, 108.0), "Main": (75.0, 108.0)})
+        elif layout == "wide-bottom-en":
+            inline_size_ranges.update({"Glow": (54.0, 96.0), "Main": (54.0, 96.0)})
         if secondary_declared:
             inline_size_ranges.update(
                 {"SecondaryGlow": (36.0, 60.0), "Secondary": (36.0, 60.0)}
@@ -917,8 +904,14 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
 
     number_pattern = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
     fs_pattern = re.compile(rf"\\fs(?![A-Za-z])({number_pattern})")
+    fsp_pattern = re.compile(rf"\\fsp({number_pattern})")
+    fscx_pattern = re.compile(rf"\\fscx({number_pattern})")
     inline_font_sizes: list[dict[str, Any]] = []
     bad_inline_sizes: list[dict[str, Any]] = []
+    missing_dynamic_sizes: list[dict[str, Any]] = []
+    letter_spacing: list[dict[str, Any]] = []
+    bad_letter_spacing: list[dict[str, Any]] = []
+    inline_scale_x: list[dict[str, Any]] = []
     for dialogue in dialogues:
         style_name = dialogue["style"]
         text_value = dialogue["text"]
@@ -933,8 +926,33 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             inline_font_sizes.append(record)
             if allowed_range is not None and not allowed_range[0] <= value <= allowed_range[1]:
                 bad_inline_sizes.append({**record, "allowed": allowed_range})
+        if (
+            layout in {"wide-bottom-zh", "wide-bottom-en"}
+            and style_name in {"Glow", "Main"}
+            and not fs_values
+        ):
+            missing_dynamic_sizes.append(
+                {"line": dialogue["line"], "style": style_name}
+            )
+        for match in fsp_pattern.finditer(text_value):
+            value = float(match.group(1))
+            record = {"line": dialogue["line"], "style": style_name, "value": value}
+            letter_spacing.append(record)
+            if value < 0:
+                bad_letter_spacing.append(record)
+        for match in fscx_pattern.finditer(text_value):
+            inline_scale_x.append(
+                {
+                    "line": dialogue["line"],
+                    "style": style_name,
+                    "value": float(match.group(1)),
+                }
+            )
+
     if bad_inline_sizes:
         errors.append(f"inline_font_size_outside_layout_role_range: {bad_inline_sizes}")
+    if missing_dynamic_sizes:
+        errors.append(f"missing_dynamic_main_font_size_override: {missing_dynamic_sizes}")
 
     def right_middle_or_lower(style: dict[str, Any]) -> bool:
         if style["name"] in secondary_style_names:
@@ -1155,6 +1173,9 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         "SecondaryGlow",
     }
     inline_primary_pattern = re.compile(
+        # Prefer the eight-digit AABBGGRR form before six-digit BBGGRR;
+        # otherwise regex alternation truncates an eight-digit colour after
+        # its first six digits.
         r"\\(?:1c|c)(&H(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6})&?)"
     )
     inline_secondary_pattern = re.compile(
@@ -1164,6 +1185,9 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     for dialogue in dialogues:
         if dialogue["style"] not in singer_event_style_names:
             continue
+        # Static outro/title events may reuse the lyric styles without a
+        # singer assignment.  CueHot is itself singer-routed even though its
+        # countdown dots intentionally carry no karaoke timing tag.
         if (
             dialogue["style"] != "CueHot"
             and re.search(r"\\k(?:f|o)?\d", dialogue["text"]) is None
@@ -1175,26 +1199,31 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         parsed_secondary = (
             _parse_ass_color(secondary_match.group(1)) if secondary_match else None
         )
-        singer_event_colors.append({
-            "line": dialogue["line"],
-            "style": dialogue["style"],
-            "ass": parsed["ass"] if parsed else None,
-            "rgb": parsed["rgb"] if parsed else None,
-            "bgr": parsed["bgr"] if parsed else None,
-            "secondary_bgr": parsed_secondary["bgr"] if parsed_secondary else None,
-            "inline": primary_match is not None,
-            "inline_secondary": secondary_match is not None,
-            "event_key": (
-                dialogue["start"],
-                dialogue["end"],
-                dialogue["name"],
-                re.sub(r"\{[^}]*\}", "", dialogue["text"]),
-            ),
-        })
+        singer_event_colors.append(
+            {
+                "line": dialogue["line"],
+                "style": dialogue["style"],
+                "ass": parsed["ass"] if parsed else None,
+                "rgb": parsed["rgb"] if parsed else None,
+                "bgr": parsed["bgr"] if parsed else None,
+                "secondary_bgr": (
+                    parsed_secondary["bgr"] if parsed_secondary else None
+                ),
+                "inline": primary_match is not None,
+                "inline_secondary": secondary_match is not None,
+                "event_key": (
+                    dialogue["start"],
+                    dialogue["end"],
+                    dialogue["name"],
+                    re.sub(r"\{[^}]*\}", "", dialogue["text"]),
+                ),
+            }
+        )
     inline_singer_color_mode = any(record["inline"] for record in singer_event_colors)
     invalid_inline_singer_colors = (
         [record for record in singer_event_colors if record["bgr"] is None]
-        if inline_singer_color_mode else []
+        if inline_singer_color_mode
+        else []
     )
     if invalid_inline_singer_colors:
         errors.append(
@@ -1304,12 +1333,14 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
                 parsed_secondary_highlight_colors[style_name] = parsed
 
     secondary_event_colors = [
-        record for record in singer_event_colors
+        record
+        for record in singer_event_colors
         if record["style"] in secondary_style_names
     ]
     secondary_highlight_is_white = secondary_highlight_required and (
         any(record["bgr"] == "FFFFFF" for record in secondary_event_colors)
-        if inline_singer_color_mode else any(
+        if inline_singer_color_mode
+        else any(
             parsed["bgr"] == "FFFFFF"
             for parsed in parsed_secondary_highlight_colors.values()
         )
@@ -1325,7 +1356,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         not secondary_highlight_is_white
         and (
             not invalid_inline_singer_colors
-            if inline_singer_color_mode else global_secondary_color_consistent
+            if inline_singer_color_mode
+            else global_secondary_color_consistent
         )
     )
     secondary_highlight_matches_project = (
@@ -1356,6 +1388,51 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             f"{ {name: parsed['bgr'] for name, parsed in parsed_secondary_highlight_colors.items()} }"
         )
 
+    natural_advance_violations: list[dict[str, Any]] = []
+    if layout == "wide-bottom-en":
+        for style_name in ("Main", "Glow"):
+            style = styles_by_name.get(style_name)
+            if style is None or style["scale_x"] != 100.0 or style["spacing"] != 0.0:
+                natural_advance_violations.append(
+                    {
+                        "style": style_name,
+                        "scale_x": style["scale_x"] if style else None,
+                        "spacing": style["spacing"] if style else None,
+                    }
+                )
+        natural_advance_violations.extend(
+            record for record in inline_scale_x if record["value"] != 100.0
+        )
+    natural_advance_ok = not natural_advance_violations
+    if natural_advance_violations:
+        errors.append(
+            "english_wide_requires_natural_advance: "
+            f"{natural_advance_violations}"
+        )
+
+    english_main_events = [
+        dialogue for dialogue in dialogues if dialogue["style"] in {"Main", "Glow"}
+    ]
+    english_bad_spacing_scope = [
+        record for record in letter_spacing if record["style"] not in {"Main", "Glow"}
+    ]
+    english_spacing_ok = True
+    if layout == "wide-bottom-en":
+        english_spacing_ok = bool(english_main_events) and not (
+            bad_letter_spacing or english_bad_spacing_scope
+        )
+        if bad_letter_spacing:
+            errors.append(f"english_wide_letter_spacing_negative: {bad_letter_spacing}")
+        if english_bad_spacing_scope:
+            errors.append(
+                "english_wide_letter_spacing_outside_main_glyphs: "
+                f"{english_bad_spacing_scope}"
+            )
+        if not english_main_events:
+            errors.append("english_wide_has_no_main_glyph_events")
+    elif bad_letter_spacing:
+        errors.append(f"letter_spacing_negative: {bad_letter_spacing}")
+
     highlight_color = None
     highlight_color_ass = None
     if "Main" in parsed_highlight_colors:
@@ -1365,7 +1442,8 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     for dialogue in dialogues:
         with contextlib.suppress(ValueError, IndexError):
             start_times.append(_ass_time_seconds(dialogue["start"]))
-    font_size_profile_ok = not bad_sizes and not bad_inline_sizes
+    font_size_profile_ok = not bad_sizes and not bad_inline_sizes and not missing_dynamic_sizes
+    letter_spacing_ok = english_spacing_ok and not bad_letter_spacing
     return {
         "ok": not errors,
         "path": str(ass_path),
@@ -1385,7 +1463,25 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
         "highlight_colors": {
             name: parsed["rgb"] for name, parsed in parsed_highlight_colors.items()
         },
-        "singer_event_colors": singer_event_colors,
+        "letter_spacing": {
+            "required": False,
+            "values": sorted({record["value"] for record in letter_spacing}),
+            "positive": bool(letter_spacing)
+            and all(record["value"] > 0 for record in letter_spacing),
+            "non_negative": letter_spacing_ok,
+            "scope": (
+                "english-word-internal-main-glyphs"
+                if layout == "wide-bottom-en" and letter_spacing
+                else "natural-font-advance"
+                if layout == "wide-bottom-en"
+                else "none"
+            ),
+        },
+        "natural_advance": {
+            "required": layout == "wide-bottom-en",
+            "ok": natural_advance_ok,
+            "violations": natural_advance_violations,
+        },
         "secondary": {
             "present": secondary_declared,
             "style_pair": secondary_style_pair_ok,
@@ -1423,13 +1519,15 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
             "no_forbidden_karaoke_tokens": not forbidden_tokens,
             "harmonyos_sans_sc": not wrong_fonts and not bad_inline_fonts,
             "font_size_profile": font_size_profile_ok,
-            "inline_font_size_profile": not bad_inline_sizes,
+            "inline_font_size_profile": not bad_inline_sizes and not missing_dynamic_sizes,
             "layout_geometry": not bad_alignment and not bad_positions,
             "secondary_styles": secondary_gate_ok,
             "highlight_color_consistency": highlight_color_consistent,
             "secondary_highlight_color_consistency": secondary_highlight_consistent,
             "inline_singer_event_colors": not invalid_inline_singer_colors
             and not singer_event_color_mismatches,
+            "letter_spacing": letter_spacing_ok,
+            "natural_advance": natural_advance_ok,
         },
     }
 
@@ -1628,12 +1726,13 @@ def burn_frame_probe(
     zoom_path = output_path.with_name(f"{output_path.stem}_zoom{output_path.suffix}")
     if result.returncode == 0 and output_path.exists() and Image is not None:
         with Image.open(output_path) as image:
-            image.crop((900, 360, 1920, 1080)).save(zoom_path, format="PNG")
+            image.crop((900, 0, 1920, 1080)).save(zoom_path, format="PNG")
     fontselect_lines = [line.strip() for line in (result.stdout + "\n" + result.stderr).splitlines() if "fontselect:" in line.lower()]
     return {
         "ok": result.returncode == 0 and output_path.exists(),
         "path": str(output_path),
         "zoom_path": str(zoom_path) if zoom_path.exists() else None,
+        "zoom_crop": {"left": 900, "top": 0, "right": 1920, "bottom": 1080},
         "probe_time_seconds": probe_time,
         "vinyl_motion": vinyl_motion,
         "rotation_period_seconds": (
@@ -1870,18 +1969,23 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=DEFAULT_MANIFEST_PATH,
-        help="album.json manifest that owns the track collection",
+        required=True,
+        help="explicit album.json manifest that owns the track collection",
     )
     parser.add_argument(
         "--allow-partial-manifest",
         action="store_true",
         help="allow an explicitly supplied manifest with fewer than five tracks",
     )
-    parser.add_argument("--audio", type=Path, default=DEFAULT_AUDIO, help="source MP3")
-    parser.add_argument("--title", default=DEFAULT_TITLE)
-    parser.add_argument("--artist", default=DEFAULT_ARTIST)
-    parser.add_argument("--slug", default=DEFAULT_SLUG, help="deliverable directory name")
+    parser.add_argument(
+        "--track",
+        dest="song_id",
+        help="manifest song_id required with --single-track",
+    )
+    parser.add_argument(
+        "--slug",
+        help="optional deliverable directory override; defaults to the manifest",
+    )
     parser.add_argument("--timing-dir", type=Path, help="ASS search directory; no files are written here")
     parser.add_argument("--ass", type=Path, help="explicit ASS input; no ASS is generated")
     parser.add_argument("--artwork-dir", type=Path, help="defaults to deliverables/<slug>/artwork; --all-tracks adds one subdirectory per track")
@@ -1892,12 +1996,12 @@ def make_parser() -> argparse.ArgumentParser:
         default=SHARED_FONT_DIR,
         help="HarmonyOS Sans directory used by Pillow and libass; defaults to assets/fonts/HarmonyOS-Sans",
     )
-    parser.add_argument("--cover-url", default=DEFAULT_COVER_URL)
     parser.add_argument(
-        "--allow-network",
-        action="store_true",
-        help="allow an explicit HTTPS cover URL when no embedded cover exists",
+        "--cover-url",
+        default="",
+        help="explicit network fallback URL; embedded cover remains preferred",
     )
+    parser.add_argument("--no-network", action="store_true", help="fail instead of fetching a missing cover")
     parser.add_argument("--ffmpeg", type=Path, help="override imageio-ffmpeg binary")
     parser.add_argument("--rotation-period", type=float, default=8.0, help="seconds per vinyl revolution")
     parser.add_argument(
@@ -1925,10 +2029,12 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: --ass is single-track only; let --all-tracks discover one ASS per track", file=sys.stderr)
         return 1
 
-    if args.slug == DEFAULT_SLUG:
-        deliverable_root = album.deliverable_dir
+    slug_override = args.slug
+    if slug_override:
+        deliverable_root = (REPO_ROOT / "deliverables" / slug_override).resolve()
     else:
-        deliverable_root = (REPO_ROOT / "deliverables" / args.slug).resolve()
+        deliverable_root = album.deliverable_dir
+    args.slug = slug_override or album.title
     artwork_root = (args.artwork_dir or deliverable_root / "artwork").resolve()
     fonts_dir = args.fonts_dir.resolve()
     video_root = (deliverable_root / "video").resolve()
@@ -1938,12 +2044,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.all_tracks:
         track_specs = [track_dict(track) for track in album.tracks]
     else:
-        track_specs = [{
-            "audio": args.audio,
-            "title": args.title,
-            "artist": args.artist,
-            "basename": args.title,
-        }]
+        matches = [track for track in album.tracks if track.song_id == args.song_id]
+        if len(matches) != 1:
+            print(
+                "ERROR: --single-track requires exactly one explicit --track song_id",
+                file=sys.stderr,
+            )
+            return 1
+        track_specs = [track_dict(matches[0])]
     if not args.all_tracks and len(track_specs) != 1:
         print("ERROR: --single-track must create exactly one track task", file=sys.stderr)
         return 1
@@ -1965,8 +2073,9 @@ def main(argv: list[str] | None = None) -> int:
                 track["artist"],
                 args.cover_url,
                 fonts_dir,
-                allow_network=args.allow_network,
+                allow_network=bool(args.cover_url) and not args.no_network,
                 album_title=album.title,
+                album_artist=album.artist,
             )
             built_tracks.append({
                 **track,

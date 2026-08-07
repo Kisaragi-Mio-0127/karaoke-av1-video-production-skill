@@ -9,7 +9,7 @@ import json
 import re
 import subprocess
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from statistics import median
@@ -23,6 +23,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.karaoke_color_plan import (  # noqa: E402
+    KaraokeColorPlanError,
+    apply_color_plan,
+    parse_singer_color_overrides,
+    resolve_color_plan,
+)
 from scripts.karaoke_common.layout import (  # noqa: E402
     CANVAS_WIDTH,
     MAIN_ADVANCE_SCALE,
@@ -47,12 +53,6 @@ from scripts.karaoke_common.pronunciation import (  # noqa: E402
     PRONUNCIATION_VALIDATION_MODES,
     validate_pronunciation,
 )
-from scripts.karaoke_color_plan import (  # noqa: E402
-    KaraokeColorPlanError,
-    apply_color_plan,
-    parse_singer_color_overrides,
-    resolve_color_plan,
-)
 from scripts.karaoke_japanese.layout import (  # noqa: E402
     WIDE_LAYOUT,
     WIDE_SEMANTIC_GAP_EM,
@@ -64,10 +64,21 @@ from scripts.karaoke_language import (  # noqa: E402
     uses_ruby,
 )
 from scripts.karaoke_timing import ms_to_ass_time, verify_font  # noqa: E402
+from scripts.karaoke_zh_en.layout import (  # noqa: E402
+    CHINESE_WIDE_LAYOUT,
+    ENGLISH_WIDE_LAYOUT,
+    ENGLISH_WIDE_LETTER_SPACING_EM,
+    ENGLISH_WIDE_MAIN_FONT_SIZE,
+    ENGLISH_WIDE_MIN_MAIN_FONT_SIZE,
+    ENGLISH_WIDE_MIN_SPLIT_WORDS,
+    ENGLISH_WIDE_RENDER_ADVANCE_SCALE,
+    ENGLISH_WIDE_WORD_GAP_EM,
+)
 from scripts.render_vinyl_karaoke import escape_filter_path  # noqa: E402
 from scripts.sug_ruby import (  # noqa: E402
     RubyToken,
     RubyValidationError,
+    is_pure_katakana,
     iter_sug_ruby_spans,
     load_review_sidecar,
     sug_hash,
@@ -83,6 +94,13 @@ from strange_uta_game.backend.infrastructure.persistence.sug_io import (  # noqa
 )
 
 __all__ = [
+    "CHINESE_WIDE_LAYOUT",
+    "ENGLISH_WIDE_LAYOUT",
+    "ENGLISH_WIDE_LETTER_SPACING_EM",
+    "ENGLISH_WIDE_MAIN_FONT_SIZE",
+    "ENGLISH_WIDE_MIN_MAIN_FONT_SIZE",
+    "ENGLISH_WIDE_RENDER_ADVANCE_SCALE",
+    "ENGLISH_WIDE_WORD_GAP_EM",
     "Lane",
     "STANDARD_LAYOUT",
     "STANDARD_RIGHT_AVAILABLE_WIDTH",
@@ -164,6 +182,8 @@ LOSSLESS_AUDIO_CODEC = "flac"
 SUBTITLE_LAYOUTS = {
     "standard": STANDARD_LAYOUT,
     "wide": WIDE_LAYOUT,
+    "wide-zh": CHINESE_WIDE_LAYOUT,
+    "wide-en": ENGLISH_WIDE_LAYOUT,
 }
 LANES = STANDARD_LAYOUT.lanes
 
@@ -449,14 +469,16 @@ def _text_width(font_file: Path, size: int, text: str) -> float:
     return float(font.getlength(text))
 
 
-def _letter_spacing_after_indices(text: str) -> frozenset[int]:
-    """Return adjacent visible glyph positions eligible for configured spacing."""
+_ENGLISH_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['\u2018\u2019][A-Za-z0-9]+)*")
 
-    return frozenset(
-        index
-        for index, (left, right) in enumerate(zip(text, text[1:], strict=False))
-        if not left.isspace() and not right.isspace()
-    )
+
+def _english_letter_spacing_after_indices(text: str) -> frozenset[int]:
+    """Return character positions that receive positive word-internal spacing."""
+
+    positions: set[int] = set()
+    for match in _ENGLISH_WORD_RE.finditer(text):
+        positions.update(range(match.start(), match.end() - 1))
+    return frozenset(positions)
 
 
 def _measured_text_span(
@@ -482,7 +504,7 @@ def _measured_text_span(
             for character in text
             if character.isspace()
         )
-    letter_spacing_count = len(_letter_spacing_after_indices(text))
+    letter_spacing_count = len(_english_letter_spacing_after_indices(text))
     return float(
         natural_width
         + word_gap_adjustment
@@ -577,7 +599,7 @@ def text_geometry(
     gap_px = font_size * semantic_gap_em
     letter_spacing_px = font_size * letter_spacing_em
     target_word_gap_px = font_size * word_gap_em if word_gap_em is not None else None
-    letter_spacing_after_indices = _letter_spacing_after_indices(text)
+    letter_spacing_after_indices = _english_letter_spacing_after_indices(text)
     gap_before = tuple(
         sum(1 for gap_index in semantic_gap_after_indices if gap_index < index)
         * gap_px
@@ -751,6 +773,93 @@ def _character_onsets(
     if any(right <= left for left, right in zip(result, result[1:], strict=False)):
         raise ValueError("visual onset overrides must preserve monotonic order")
     return result
+
+
+def expand_english_word_tokens_for_render(
+    sentence: Sentence,
+) -> tuple[Sentence, tuple[int, ...]]:
+    """Expand editable English word tokens only in renderer memory.
+
+    The SUG remains one checkpoint per word for human timing work.  This
+    renderer-only view distributes strictly ordered visual onsets across the
+    visible codepoints of each timed word and records the owning source-token
+    index for every expanded character.
+    """
+
+    if all(len(character.char) == 1 for character in sentence.characters):
+        return sentence, tuple(range(len(sentence.characters)))
+
+    expanded: list[Character] = []
+    source_token_indices: list[int] = []
+    for token_index, token in enumerate(sentence.characters):
+        token_text = token.char
+        if len(token_text) == 1:
+            expanded.append(token)
+            source_token_indices.append(token_index)
+            continue
+
+        onset = int(token.timestamps[0]) if token.timestamps else None
+        next_onset = next(
+            (
+                int(candidate.timestamps[0])
+                for candidate in sentence.characters[token_index + 1 :]
+                if candidate.timestamps
+            ),
+            None,
+        )
+        release = (
+            int(token.sentence_end_ts)
+            if token.is_sentence_end and token.sentence_end_ts is not None
+            else next_onset
+        )
+        if onset is not None:
+            release = max(
+                onset + 10 * len(token_text),
+                int(release) if release is not None else onset + 120 * len(token_text),
+            )
+
+        for character_index, visible_character in enumerate(token_text):
+            timed = onset is not None and not visible_character.isspace()
+            timestamp = (
+                onset
+                + round(
+                    (int(release) - onset)
+                    * character_index
+                    / max(1, len(token_text))
+                )
+                if timed
+                else None
+            )
+            is_last = character_index == len(token_text) - 1
+            character = Character(
+                char=visible_character,
+                check_count=1 if timed else 0,
+                timestamps=[] if timestamp is None else [timestamp],
+                sentence_end_ts=(
+                    token.sentence_end_ts
+                    if is_last and token.is_sentence_end
+                    else None
+                ),
+                linked_to_next=False,
+                is_line_end=is_last and token.is_line_end,
+                is_sentence_end=is_last and token.is_sentence_end,
+                is_rest=token.is_rest,
+                singer_id=token.singer_id,
+                needs_guide=token.needs_guide,
+                is_guide=token.is_guide,
+                force_singer_tag=token.force_singer_tag and character_index == 0,
+            )
+            expanded.append(character)
+            source_token_indices.append(token_index)
+
+    rendered = Sentence(
+        id=sentence.id,
+        singer_id=sentence.singer_id,
+        characters=expanded,
+    )
+    if rendered.text != sentence.text:
+        raise ValueError("English renderer expansion changed the source text")
+    return rendered, tuple(source_token_indices)
 
 
 def _character_releases(
@@ -934,6 +1043,95 @@ def main_glyph_events(
     return result
 
 
+def english_word_karaoke_events(
+    sentence: Sentence,
+    *,
+    event_start_ms: int,
+    event_end_ms: int,
+    release_ms: int,
+    lane: Lane,
+    font_size: int,
+    geometry: TextGeometry,
+    outline_px: int,
+    glow_blur: int,
+    offset_ms: int = 0,
+    onset_overrides: dict[int, int] | None = None,
+    release_overrides: dict[int, int] | None = None,
+    character_colors: list[str] | None = None,
+) -> list[str]:
+    """Render each English word as one naturally kerned karaoke text run.
+
+    Keeping all letters of a word in one ASS event lets the selected font own
+    its normal kerning.  Per-letter ``\\kf`` tags still drive the colour sweep,
+    while the fill, outline, and glow all share the exact same word geometry.
+    """
+
+    onsets = _character_onsets(
+        sentence,
+        offset_ms=offset_ms,
+        onset_overrides=onset_overrides,
+        release_ms=release_ms,
+    )
+    if not onsets:
+        return []
+    releases = _character_releases(
+        onsets,
+        release_ms=release_ms,
+        offset_ms=offset_ms,
+        release_overrides=release_overrides,
+    )
+    if character_colors is not None and len(character_colors) != len(
+        sentence.characters
+    ):
+        raise ValueError("character color count must match rendered characters")
+
+    result: list[str] = []
+    for match in re.finditer(r"\S+", sentence.text):
+        start, end = match.span()
+        if end <= start:
+            continue
+        x = (geometry.glyph_starts[start] + geometry.glyph_ends[end - 1]) / 2.0
+        common = (
+            f"{{\\an8\\pos({int(round(x))},{lane.main_y})"
+            f"\\fs{font_size}\\bord{outline_px}\\fad(80,120)"
+        )
+        lead_in_cs = max(0, onsets[start] - event_start_ms) // 10
+        timed_text = [f"\\k{lead_in_cs}}}"]
+        for index in range(start, end):
+            duration_cs = max(
+                1,
+                int(round((releases[index] - onsets[index]) / 10)),
+            )
+            color_override = (
+                f"\\1c{_ass_bgr(character_colors[index])}"
+                "\\2c&H00FFFFFF"
+                if character_colors is not None
+                else ""
+            )
+            timed_text.append(
+                (f"{{{color_override}}}" if color_override else "")
+                + f"{{\\kf{duration_cs}}}"
+                f"{_escape_ass_text(sentence.characters[index].char)}"
+            )
+        karaoke_run = "".join(timed_text)
+        glow_alpha = (
+            "\\1a&H50&\\2a&H70&" if character_colors is not None else ""
+        )
+        glow_override = common + f"{glow_alpha}\\blur{glow_blur}{karaoke_run}"
+        main_override = common + karaoke_run
+        result.append(
+            f"Dialogue: 1,"
+            f"{ms_to_ass_time(event_start_ms)},{ms_to_ass_time(event_end_ms)},"
+            f"Glow,WordKaraoke,0,0,0,,{glow_override}"
+        )
+        result.append(
+            f"Dialogue: 2,"
+            f"{ms_to_ass_time(event_start_ms)},{ms_to_ass_time(event_end_ms)},"
+            f"Main,WordKaraoke,0,0,0,,{main_override}"
+        )
+    return result
+
+
 def ruby_events(
     sentence: Sentence,
     *,
@@ -1077,6 +1275,13 @@ _PREFERRED_PHRASE_ENDINGS = (
     "も",
 )
 
+
+def _normalize_display_text(text: str) -> str:
+    """Return the source-line text used for display-phrase override lookup."""
+
+    return "".join(character for character in text if not character.isspace())
+
+
 def _semantic_gap_after_indices(
     source_sentence: Sentence,
     display_sentence: Sentence,
@@ -1114,8 +1319,132 @@ def _semantic_gap_after_indices(
             for character in source_sentence.characters[left_index + 1 : right_index]
         ):
             result.add(display_index)
-    normalize_language(language, default=DEFAULT_LANGUAGE)
+    if normalize_language(language, default=DEFAULT_LANGUAGE) == "en":
+        last_visible_index: int | None = None
+        for display_index, character in enumerate(display_sentence.characters):
+            if character.char.isspace():
+                if last_visible_index is not None:
+                    result.add(last_visible_index)
+            else:
+                last_visible_index = display_index
     return frozenset(result)
+
+
+_BAD_DISPLAY_BOUNDARY_START_CHARS = frozenset(
+    "・ーぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ"
+)
+_BAD_DISPLAY_BOUNDARY_END_CHARS = frozenset("・ーっッ")
+def _validate_display_phrase_overrides(
+    overrides: Mapping[str, Sequence[str]] | None,
+) -> dict[str, tuple[str, ...]]:
+    """Validate caller-supplied full-line display phrase data."""
+
+    if overrides is None:
+        return {}
+    validated: dict[str, tuple[str, ...]] = {}
+    for source_text, raw_phrases in overrides.items():
+        if not isinstance(source_text, str):
+            raise ValueError("display override keys must be strings")
+        if isinstance(raw_phrases, (str, bytes)):
+            raise ValueError(
+                "display override phrases must be a sequence of strings: "
+                f"{source_text!r}"
+            )
+        phrases = tuple(raw_phrases)
+        if any(not isinstance(phrase, str) for phrase in phrases):
+            raise ValueError(
+                "display override phrases must contain only strings: "
+                f"{source_text!r}"
+            )
+        normalized_source_text = _normalize_display_text(source_text)
+        if source_text != normalized_source_text:
+            raise ValueError(
+                "display override keys must be normalized source text: "
+                f"{source_text!r}"
+            )
+        if not phrases or "".join(phrases) != source_text:
+            raise ValueError(
+                "display override phrases must concatenate to their key: "
+                f"{source_text!r}"
+            )
+        for phrase in phrases:
+            if not MIN_DISPLAY_PHRASE_CHARS <= len(phrase) <= MAX_DISPLAY_PHRASE_CHARS:
+                raise ValueError(
+                    "display override phrase length is outside the supported range: "
+                    f"{phrase!r}"
+                )
+        for left, right in zip(phrases, phrases[1:]):
+            if (
+                left[-1] in _BAD_DISPLAY_BOUNDARY_END_CHARS
+                or right[0] in _BAD_DISPLAY_BOUNDARY_START_CHARS
+            ):
+                raise ValueError(
+                    "display override has a bad Japanese phrase boundary: "
+                    f"{left!r} | {right!r}"
+                )
+        validated[source_text] = phrases
+    return validated
+
+
+def _split_sentence_by_display_override(
+    sentence: Sentence,
+    *,
+    display_phrase_overrides: Mapping[str, Sequence[str]],
+    language: str = DEFAULT_LANGUAGE,
+) -> list[list] | None:
+    """Return original character slices for one explicit source-line override."""
+
+    normalized_source_text = _normalize_display_text(sentence.text)
+    override = display_phrase_overrides.get(normalized_source_text)
+    if override is None:
+        return None
+    if "".join(override) != normalized_source_text:
+        raise ValueError(
+            "display override phrases must concatenate to their source key: "
+            f"{normalized_source_text!r}"
+        )
+
+    visible_characters = [
+        character
+        for character in sentence.characters
+        if not character.char.isspace()
+    ]
+    visible_text = "".join(character.char for character in visible_characters)
+    if visible_text != normalized_source_text:
+        raise ValueError(
+            "display override source text does not match its character sequence: "
+            f"{normalized_source_text!r} != {visible_text!r}"
+        )
+
+    result: list[list] = []
+    cursor = 0
+    for phrase in override:
+        end = cursor + len(phrase)
+        result.append(visible_characters[cursor:end])
+        cursor = end
+    if cursor != len(visible_characters):
+        raise ValueError(
+            "display override slices do not cover the complete source line: "
+            f"{normalized_source_text!r}"
+        )
+    if normalize_language(language) == "en":
+        visible_positions = [
+            index
+            for index, character in enumerate(sentence.characters)
+            if not character.char.isspace()
+        ]
+        cursor = 0
+        for phrase in override[:-1]:
+            cursor += len(phrase)
+            left_index = visible_positions[cursor - 1]
+            right_index = visible_positions[cursor]
+            between = sentence.characters[left_index + 1 : right_index]
+            if not any(character.char.isspace() for character in between):
+                raise ValueError(
+                    "English display override splits inside a word: "
+                    f"{normalized_source_text!r} at {cursor}"
+                )
+    return result
 
 
 def _character_onset(character) -> int | None:
@@ -1144,9 +1473,16 @@ def _split_character_run(
     if maximum < minimum:
         maximum = min(max_chars, len(characters) - 1)
 
-    best_position = maximum
+    best_position: int | None = None
     best_score = float("-inf")
     for position in range(minimum, maximum + 1):
+        # A continuous katakana run is one visible lexical unit.  Splitting
+        # inside it produces misleading preloaded lines even when every glyph
+        # is technically still present.
+        if is_pure_katakana(characters[position - 1].char) and is_pure_katakana(
+            characters[position].char
+        ):
+            continue
         left_onset = _character_onset(characters[position - 1])
         right_onset = _character_onset(characters[position])
         acoustic_gap = (
@@ -1165,6 +1501,33 @@ def _split_character_run(
         if score > best_score:
             best_score = score
             best_position = position
+
+    if best_position is None:
+        # The preferred window may sit entirely inside one long lexical unit.
+        # Search the complete range that still leaves a viable phrase on each
+        # side before concluding that no legal boundary exists at all.
+        fallback_maximum = len(characters) - min_chars
+        fallback_positions = range(minimum, fallback_maximum + 1)
+        best_position = next(
+            (
+                position
+                for position in sorted(
+                    fallback_positions,
+                    key=lambda candidate: (abs(candidate - target), candidate),
+                )
+                if not (
+                    is_pure_katakana(characters[position - 1].char)
+                    and is_pure_katakana(characters[position].char)
+                )
+            ),
+            None,
+        )
+
+    if best_position is None:
+        # The run has no legal lexical boundary (for example, one continuous
+        # katakana token). Keep it intact and let the measured font-fit path
+        # handle the visual width instead of inventing a word break.
+        return [characters]
 
     return [
         characters[:best_position],
@@ -1255,6 +1618,131 @@ def _coalesce_display_runs_that_fit(
     return result
 
 
+def _english_word_spans(sentence: Sentence) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, character in enumerate(sentence.characters):
+        if character.char.isspace():
+            if start is not None:
+                spans.append((start, index))
+                start = None
+        elif start is None:
+            start = index
+    if start is not None:
+        spans.append((start, len(sentence.characters)))
+    return spans
+
+
+def _english_word_slice(
+    sentence: Sentence,
+    spans: list[tuple[int, int]],
+    start_word: int,
+    end_word: int,
+) -> Sentence:
+    start = spans[start_word][0]
+    end = spans[end_word - 1][1]
+    return Sentence(
+        singer_id=sentence.singer_id,
+        characters=list(sentence.characters[start:end]),
+    )
+
+
+def _english_phrase_width_at_target(
+    sentence: Sentence,
+    *,
+    font_file: Path,
+    layout: SubtitleLayout,
+) -> float:
+    semantic_gaps = _semantic_gap_after_indices(
+        sentence,
+        sentence,
+        language="en",
+    )
+    return _measured_text_span(
+        font_file,
+        sentence.text,
+        font_size=layout.main_font_size,
+        advance_scale=layout.fit_advance_scale,
+        semantic_gap_count=len(semantic_gaps),
+        semantic_gap_em=layout.semantic_gap_em,
+        letter_spacing_em=layout.letter_spacing_em,
+        word_gap_em=layout.word_gap_em,
+    ) + 2 * layout.fit_outline_px
+
+
+def _split_english_sentence_for_wide_fit(
+    sentence: Sentence,
+    *,
+    font_file: Path,
+    layout: SubtitleLayout,
+) -> list[Sentence]:
+    """Split an overflowing English line at balanced whole-word boundaries."""
+
+    if _english_phrase_width_at_target(
+        sentence,
+        font_file=font_file,
+        layout=layout,
+    ) <= layout.slot_width:
+        return [sentence]
+    spans = _english_word_spans(sentence)
+    if len(spans) < 2 * ENGLISH_WIDE_MIN_SPLIT_WORDS:
+        return [sentence]
+
+    candidates: list[tuple[float, int, Sentence, Sentence]] = []
+    fallback_candidates: list[tuple[float, int, Sentence, Sentence]] = []
+    for split_at in range(
+        ENGLISH_WIDE_MIN_SPLIT_WORDS,
+        len(spans) - ENGLISH_WIDE_MIN_SPLIT_WORDS + 1,
+    ):
+        left = _english_word_slice(sentence, spans, 0, split_at)
+        right = _english_word_slice(sentence, spans, split_at, len(spans))
+        left_width = _english_phrase_width_at_target(
+            left,
+            font_file=font_file,
+            layout=layout,
+        )
+        right_width = _english_phrase_width_at_target(
+            right,
+            font_file=font_file,
+            layout=layout,
+        )
+        punctuation_bonus = (
+            layout.slot_width * 0.08
+            if left.text.rstrip().endswith((",", ";", ":", ".", "!", "?"))
+            else 0.0
+        )
+        candidate = (
+            abs(left_width - right_width) - punctuation_bonus,
+            split_at,
+            left,
+            right,
+        )
+        fallback_candidates.append(candidate)
+        if left_width <= layout.slot_width and right_width <= layout.slot_width:
+            candidates.append(candidate)
+    if candidates:
+        _, _, left, right = min(candidates, key=lambda item: (item[0], item[1]))
+        return [left, right]
+    if fallback_candidates:
+        _, _, left, right = min(
+            fallback_candidates,
+            key=lambda item: (item[0], item[1]),
+        )
+        return [
+            *_split_english_sentence_for_wide_fit(
+                left,
+                font_file=font_file,
+                layout=layout,
+            ),
+            *_split_english_sentence_for_wide_fit(
+                right,
+                font_file=font_file,
+                layout=layout,
+            ),
+        ]
+    return [sentence]
+
+
 def split_sentence_for_display(
     sentence: Sentence,
     *,
@@ -1262,16 +1750,71 @@ def split_sentence_for_display(
     language: str = DEFAULT_LANGUAGE,
     font_file: Path | None = None,
     layout: SubtitleLayout | None = None,
+    display_phrase_overrides: Mapping[str, Sequence[str]] | None = None,
 ) -> list[Sentence]:
-    """Create short display-only phrases without changing the editable SUG."""
+    """Create display-only phrases without changing the editable SUG.
+
+    Full-line phrase overrides are optional render input.  They are validated
+    here and never stored in the shared renderer, so a caller can provide
+    release-specific layout data without coupling this module to its lyrics.
+    """
 
     language = normalize_language(language)
     if max_chars is not None and max_chars < MIN_DISPLAY_PHRASE_CHARS:
         raise ValueError(
             f"max_chars must be at least {MIN_DISPLAY_PHRASE_CHARS}, got {max_chars}"
         )
+    if max_chars is None and language == "ja":
+        return [sentence]
+    override_runs = _split_sentence_by_display_override(
+        sentence,
+        display_phrase_overrides=_validate_display_phrase_overrides(
+            display_phrase_overrides
+        ),
+        language=language,
+    )
+    if override_runs is not None:
+        return [
+            Sentence(
+                singer_id=sentence.singer_id,
+                characters=list(run),
+            )
+            for run in override_runs
+        ]
+    if language == "en":
+        if (
+            font_file is not None
+            and layout is not None
+            and layout.name == ENGLISH_WIDE_LAYOUT.name
+        ):
+            return _split_english_sentence_for_wide_fit(
+                sentence,
+                font_file=font_file,
+                layout=layout,
+            )
+        return [sentence]
+    if language == "zh":
+        return [sentence]
     if max_chars is None:
         return [sentence]
+    if font_file is not None and layout is not None:
+        semantic_gaps = _semantic_gap_after_indices(
+            sentence,
+            sentence,
+            language=language,
+        )
+        measured_width = _measured_text_span(
+            font_file,
+            sentence.text,
+            font_size=layout.main_font_size,
+            advance_scale=layout.fit_advance_scale,
+            semantic_gap_count=len(semantic_gaps),
+            semantic_gap_em=layout.semantic_gap_em,
+            letter_spacing_em=layout.letter_spacing_em,
+            word_gap_em=layout.word_gap_em,
+        ) + 2 * layout.fit_outline_px
+        if measured_width <= layout.slot_width:
+            return [sentence]
     runs: list[list] = []
     current: list = []
     for character in sentence.characters:
@@ -1299,9 +1842,15 @@ def layout_for_language(
     layout: SubtitleLayout,
     language: str,
 ) -> SubtitleLayout:
-    """Validate the language and retain the bundled generic/Japanese layout."""
+    """Select language-specific wide typography without changing Japanese."""
 
-    normalize_language(language)
+    language = normalize_language(language)
+    if not layout.name.startswith("wide"):
+        return layout
+    if language == "en":
+        return ENGLISH_WIDE_LAYOUT
+    if language == "zh":
+        return CHINESE_WIDE_LAYOUT
     return layout
 
 
@@ -1352,7 +1901,7 @@ def sentence_voice_metadata(
     if singer_role is not None:
         return singer_role, group or None
     if group:
-        return _normalise_voice_role(group) or "secondary", group
+        return _normalise_voice_role(group), group
     return None, None
 
 
@@ -1577,10 +2126,9 @@ def _cue_lyric_preload_starts(
         if not 0 <= target_index < len(prepared):
             continue
         # A cue fills the two display lanes, not necessarily two phrases from
-        # one editable source line. Some short intro lines produce only one
-        # display phrase, so the second
-        # lane must preload the following source line without merging either
-        # source or changing its timing data.
+        # one editable source line. Some short source lines produce only one
+        # display phrase, so the second lane must preload the following source
+        # line without merging either source or changing its timing data.
         target_phrase_indices = range(
             target_index,
             min(target_index + 2, len(prepared)),
@@ -1669,7 +2217,11 @@ def _singer_color(singer: object | None) -> tuple[str, str]:
         raise RubyValidationError("resolved singer is missing")
     value = str(getattr(singer, "color", "") or "").strip().upper()
     if re.fullmatch(r"#[0-9A-F]{6}", value):
-        return value, "singer.color"
+        source = str(
+            getattr(singer, "_karaoke_color_source", "singer.color")
+            or "singer.color"
+        )
+        return value, source
     if value:
         raise RubyValidationError(
             "invalid non-empty singer.color: "
@@ -1683,14 +2235,15 @@ def _effective_singer(
     sentence: Sentence,
     project: object,
 ) -> dict[str, object]:
-    """Resolve singer facts in character, sentence, project-default order."""
+    """Resolve singer facts in canonical character, sentence, default order."""
 
-    singer = None
-    resolution_source = ""
-    for source, singer_id in (
+    candidates = (
         ("character.singer_id", getattr(character, "singer_id", "")),
         ("sentence.singer_id", getattr(sentence, "singer_id", "")),
-    ):
+    )
+    singer = None
+    resolution_source = ""
+    for source, singer_id in candidates:
         normalized_id = str(singer_id or "").strip()
         if not normalized_id:
             continue
@@ -1707,7 +2260,9 @@ def _effective_singer(
         resolution_source = "project-default-singer"
     color, color_source = _singer_color(singer)
     return {
-        "singer_id": str(getattr(singer, "id", "") or "") or None,
+        "singer_id": (
+            str(getattr(singer, "id", "") or "") if singer is not None else None
+        ),
         "resolution_source": resolution_source,
         "default_source": default_source,
         "color": color,
@@ -1716,30 +2271,44 @@ def _effective_singer(
 
 
 def _sentence_singer_audit(sentence: Sentence, project: object) -> dict[str, object]:
-    characters: list[dict[str, object]] = []
+    characters = []
     runs: list[dict[str, object]] = []
     for index, character in enumerate(sentence.characters):
         facts = _effective_singer(character, sentence, project)
-        record = {"character_index": index, "character": character.char, **facts}
+        record = {
+            "character_index": index,
+            "character": character.char,
+            **facts,
+        }
         characters.append(record)
         run_key = (
-            facts["singer_id"], facts["resolution_source"],
-            facts["color"], facts["color_source"],
+            facts["singer_id"],
+            facts["resolution_source"],
+            facts["color"],
+            facts["color_source"],
         )
         if runs and runs[-1]["_key"] == run_key:
             runs[-1]["end"] = index + 1
             runs[-1]["text"] = str(runs[-1]["text"]) + character.char
         else:
-            runs.append({
-                "_key": run_key, "start": index, "end": index + 1,
-                "text": character.char, **facts,
-            })
+            runs.append(
+                {
+                    "_key": run_key,
+                    "start": index,
+                    "end": index + 1,
+                    "text": character.char,
+                    **facts,
+                }
+            )
     for run in runs:
         run.pop("_key")
-    singer_ids = list(dict.fromkeys(
-        record["singer_id"] for record in characters
-        if record["singer_id"] is not None
-    ))
+    singer_ids = list(
+        dict.fromkeys(
+            record["singer_id"]
+            for record in characters
+            if record["singer_id"] is not None
+        )
+    )
     return {
         "effective_singer_id": singer_ids[0] if len(singer_ids) == 1 else None,
         "effective_singer_ids": singer_ids,
@@ -1754,14 +2323,16 @@ def _singer_color_mapping(project: object) -> list[dict[str, object]]:
     mapping = []
     for singer in getattr(project, "singers", None) or []:
         color, color_source = _singer_color(singer)
-        mapping.append({
-            "singer_id": str(getattr(singer, "id", "") or "") or None,
-            "is_project_default": singer is default_singer,
-            "default_source": default_source if singer is default_singer else None,
-            "raw_color": getattr(singer, "color", None),
-            "effective_color": color,
-            "color_source": color_source,
-        })
+        mapping.append(
+            {
+                "singer_id": str(getattr(singer, "id", "") or "") or None,
+                "is_project_default": singer is default_singer,
+                "default_source": default_source if singer is default_singer else None,
+                "raw_color": getattr(singer, "color", None),
+                "effective_color": color,
+                "color_source": color_source,
+            }
+        )
     return mapping
 
 
@@ -1770,6 +2341,8 @@ def _validate_ruby_singer_boundaries(
     tokens: Iterable[RubyToken],
     project: object,
 ) -> None:
+    """Reject ruby spans that would conceal an effective singer transition."""
+
     audit = _sentence_singer_audit(sentence, project)
     character_singers = audit["character_singers"]
     for token in tokens:
@@ -1781,8 +2354,7 @@ def _validate_ruby_singer_boundaries(
             raise RubyValidationError(
                 "ruby span crosses effective singer boundary: "
                 f"sentence={getattr(sentence, 'id', '')} "
-                f"span={token.start}:{token.end} "
-                f"singers={sorted(str(value) for value in singer_ids)}"
+                f"span={token.start}:{token.end} singers={sorted(str(value) for value in singer_ids)}"
             )
 
 
@@ -1811,6 +2383,7 @@ def build_review_ass(
     font_file: Path,
     release_overrides: dict[int, int],
     visual_release_overrides: dict[tuple[int, int], int] | None = None,
+    display_phrase_overrides: Mapping[str, Sequence[str]] | None = None,
     layout: SubtitleLayout = STANDARD_LAYOUT,
     offset_ms: int = 0,
     ruby_sidecar: Mapping[str, Any] | None = None,
@@ -1826,13 +2399,17 @@ def build_review_ass(
         sidecar_validator=(
             validate_review_sidecar if callable(validate_review_sidecar) else None
         ),
-        rendered_ruby_count=len(canonical_spans),
+        rendered_ruby_count=len(canonical_spans) if language == "ja" else 0,
     )
     canonical_sug_hash = sug_hash(project)
     canonical_project_ruby_tokens = [
         token
         for source_sentence in project.sentences
-        for token in canonical_ruby_tokens(source_sentence, sidecar=ruby_sidecar)
+        for token in (
+            canonical_ruby_tokens(source_sentence, sidecar=ruby_sidecar)
+            if language == "ja"
+            else []
+        )
     ]
     layout = layout_for_language(layout, language)
     identity = language_identity(language)
@@ -1891,14 +2468,23 @@ def build_review_ass(
     latest_secondary_block_release_ms: int | None = None
     for source_line_index, source_sentence in enumerate(project.sentences):
         voice_role, singer_group = sentence_voice_metadata(source_sentence, project)
-        source_ruby_tokens = canonical_ruby_tokens(
-            source_sentence, sidecar=ruby_sidecar
+        source_ruby_tokens = (
+            canonical_ruby_tokens(source_sentence, sidecar=ruby_sidecar)
+            if language == "ja"
+            else []
         )
         _validate_ruby_singer_boundaries(
-            source_sentence, source_ruby_tokens, project
+            source_sentence,
+            source_ruby_tokens,
+            project,
         )
-        sentence = source_sentence
-        source_token_indices = tuple(range(len(sentence.characters)))
+        if language == "en":
+            sentence, source_token_indices = expand_english_word_tokens_for_render(
+                source_sentence
+            )
+        else:
+            sentence = source_sentence
+            source_token_indices = tuple(range(len(sentence.characters)))
         source_character_indices = {
             id(character): source_token_indices[index]
             for index, character in enumerate(sentence.characters)
@@ -1909,6 +2495,7 @@ def build_review_ass(
             language=language,
             font_file=font_file,
             layout=layout,
+            display_phrase_overrides=display_phrase_overrides,
         )
         source_sentence_to_display[source_line_index] = {
             "source_sentence": source_sentence.text,
@@ -1924,10 +2511,14 @@ def build_review_ass(
         if voice_role is not None:
             for phrase_index, phrase in enumerate(phrases):
                 singer_audit = _sentence_singer_audit(phrase, project)
-                phrase_ruby_tokens = _canonical_tokens_for_phrase(
-                    source_sentence,
-                    phrase,
-                    sidecar=ruby_sidecar,
+                phrase_ruby_tokens = (
+                    _canonical_tokens_for_phrase(
+                        source_sentence,
+                        phrase,
+                        sidecar=ruby_sidecar,
+                    )
+                    if language == "ja"
+                    else []
                 )
                 first_onset = _first_timestamp(phrase)
                 if first_onset is None:
@@ -1990,10 +2581,14 @@ def build_review_ass(
         source_to_first_display[source_line_index] = len(prepared)
         for phrase_index, phrase in enumerate(phrases):
             singer_audit = _sentence_singer_audit(phrase, project)
-            phrase_ruby_tokens = _canonical_tokens_for_phrase(
-                source_sentence,
-                phrase,
-                sidecar=ruby_sidecar,
+            phrase_ruby_tokens = (
+                _canonical_tokens_for_phrase(
+                    source_sentence,
+                    phrase,
+                    sidecar=ruby_sidecar,
+                )
+                if language == "ja"
+                else []
             )
             first_onset = _first_timestamp(phrase)
             if first_onset is None:
@@ -2223,29 +2818,48 @@ def build_review_ass(
             letter_spacing_em=layout.letter_spacing_em,
             word_gap_em=layout.word_gap_em,
         )
-        events.extend(
-            main_glyph_events(
-                sentence,
-                event_start_ms=event_start_ms,
-                event_end_ms=event_end_ms,
-                release_ms=release_ms,
-                lane=lane,
-                font_file=font_file,
-                font_size=font_size,
-                advance_scale=layout.advance_scale,
-                semantic_gap_after_indices=item["semantic_gap_after_indices"],
-                semantic_gap_em=layout.semantic_gap_em,
-                letter_spacing_em=layout.letter_spacing_em,
-                word_gap_em=layout.word_gap_em,
-                offset_ms=offset_ms,
-                onset_overrides=item["visual_onset_overrides"],
-                release_overrides=item["visual_release_overrides"],
-                outline_px=layout.main_outline_px,
-                glow_blur=layout.main_glow_blur,
-                geometry=geometry,
-                character_colors=item["singer_audit"]["character_colors"],
+        if language == "en":
+            events.extend(
+                english_word_karaoke_events(
+                    sentence,
+                    event_start_ms=event_start_ms,
+                    event_end_ms=event_end_ms,
+                    release_ms=release_ms,
+                    lane=lane,
+                    font_size=font_size,
+                    geometry=geometry,
+                    outline_px=layout.main_outline_px,
+                    glow_blur=layout.main_glow_blur,
+                    offset_ms=offset_ms,
+                    onset_overrides=item["visual_onset_overrides"],
+                    release_overrides=item["visual_release_overrides"],
+                    character_colors=item["singer_audit"]["character_colors"],
+                )
             )
-        )
+        else:
+            events.extend(
+                main_glyph_events(
+                    sentence,
+                    event_start_ms=event_start_ms,
+                    event_end_ms=event_end_ms,
+                    release_ms=release_ms,
+                    lane=lane,
+                    font_file=font_file,
+                    font_size=font_size,
+                    advance_scale=layout.advance_scale,
+                    semantic_gap_after_indices=item["semantic_gap_after_indices"],
+                    semantic_gap_em=layout.semantic_gap_em,
+                    letter_spacing_em=layout.letter_spacing_em,
+                    word_gap_em=layout.word_gap_em,
+                    offset_ms=offset_ms,
+                    onset_overrides=item["visual_onset_overrides"],
+                    release_overrides=item["visual_release_overrides"],
+                    outline_px=layout.main_outline_px,
+                    glow_blur=layout.main_glow_blur,
+                    geometry=geometry,
+                    character_colors=item["singer_audit"]["character_colors"],
+                )
+            )
         events.extend(
             ruby_events(
                 sentence,
@@ -2289,9 +2903,15 @@ def build_review_ass(
                 "display_phrase": sentence.text,
                 "voice_role": item["voice_role"],
                 "singer_group": item["singer_group"],
-                "effective_singer_id": item["singer_audit"]["effective_singer_id"],
-                "effective_singer_ids": item["singer_audit"]["effective_singer_ids"],
-                "effective_singer_runs": item["singer_audit"]["effective_singer_runs"],
+                "effective_singer_id": item["singer_audit"][
+                    "effective_singer_id"
+                ],
+                "effective_singer_ids": item["singer_audit"][
+                    "effective_singer_ids"
+                ],
+                "effective_singer_runs": item["singer_audit"][
+                    "effective_singer_runs"
+                ],
                 "character_singers": item["singer_audit"]["character_singers"],
                 "event_start_ms": event_start_ms,
                 "first_onset_ms": first_onset + offset_ms,
@@ -2346,7 +2966,15 @@ def build_review_ass(
                     item["semantic_gap_after_indices"]
                 ),
                 "semantic_gap_px": round(font_size * layout.semantic_gap_em, 2),
-                "word_gap_px": round(geometry.word_gap_px or 0.0, 2),
+                "word_gap_px": round(
+                    font_size * layout.word_gap_em
+                    if layout.word_gap_em is not None
+                    else ImageFont.truetype(str(font_file), font_size).getlength(" ")
+                    + font_size * layout.semantic_gap_em,
+                    2,
+                )
+                if language == "en"
+                else 0.0,
                 "geometry": {
                     "left": round(geometry.left, 3),
                     "right": round(geometry.right, 3),
@@ -2439,9 +3067,15 @@ def build_review_ass(
                 "display_phrase": sentence.text,
                 "voice_role": item["voice_role"],
                 "singer_group": item["singer_group"],
-                "effective_singer_id": item["singer_audit"]["effective_singer_id"],
-                "effective_singer_ids": item["singer_audit"]["effective_singer_ids"],
-                "effective_singer_runs": item["singer_audit"]["effective_singer_runs"],
+                "effective_singer_id": item["singer_audit"][
+                    "effective_singer_id"
+                ],
+                "effective_singer_ids": item["singer_audit"][
+                    "effective_singer_ids"
+                ],
+                "effective_singer_runs": item["singer_audit"][
+                    "effective_singer_runs"
+                ],
                 "character_singers": item["singer_audit"]["character_singers"],
                 "event_start_ms": event_start_ms,
                 "first_onset_ms": item["first_onset"] + offset_ms,
@@ -2458,14 +3092,24 @@ def build_review_ass(
                 "letter_spacing_em": 0.0,
                 "letter_spacing_px": 0.0,
                 "highlight_color": item["singer_audit"]["character_colors"][0],
-                "highlight_color_source": item["singer_audit"]["character_singers"][0]["color_source"],
-                "hot_primary_ass": _ass_bgr(item["singer_audit"]["character_colors"][0]),
+                "highlight_color_source": item["singer_audit"][
+                    "character_singers"
+                ][0]["color_source"],
+                "hot_primary_ass": _ass_bgr(
+                    item["singer_audit"]["character_colors"][0]
+                ),
                 "unhighlighted_secondary_ass": "&H00FFFFFF",
                 "colors": {
                     "highlight_color": item["singer_audit"]["character_colors"][0],
-                    "highlight_color_source": item["singer_audit"]["character_singers"][0]["color_source"],
-                    "hot_primary_ass": _ass_bgr(item["singer_audit"]["character_colors"][0]),
-                    "glow_hot_primary_ass": _ass_bgr(item["singer_audit"]["character_colors"][0]),
+                    "highlight_color_source": item["singer_audit"][
+                        "character_singers"
+                    ][0]["color_source"],
+                    "hot_primary_ass": _ass_bgr(
+                        item["singer_audit"]["character_colors"][0]
+                    ),
+                    "glow_hot_primary_ass": _ass_bgr(
+                        item["singer_audit"]["character_colors"][0]
+                    ),
                     "unhighlighted_ass": "&H00FFFFFF",
                     "glow_unhighlighted_ass": "&H70FFFFFF",
                 },
@@ -2497,7 +3141,11 @@ def build_review_ass(
     if prepared and project_duration_ms > int(prepared[-1]["event_end_ms"]):
         marker_start_ms = int(prepared[-1]["event_end_ms"])
         marker_end_ms = project_duration_ms
-        marker_text = "終わり"
+        marker_text = {
+            "ja": "終わり",
+            "zh": "结束",
+            "en": "The End",
+        }[language]
         marker_sentence = Sentence.from_text(marker_text, "outro")
         marker_fill_duration_ms = marker_end_ms - marker_start_ms
         marker_character_onsets_ms = [
@@ -2536,9 +3184,11 @@ def build_review_ass(
                 word_gap_em=layout.word_gap_em,
                 outline_px=layout.main_outline_px,
                 glow_blur=layout.main_glow_blur,
+                character_colors=[highlight_color]
+                * len(marker_sentence.characters),
             )
         )
-        marker_ruby = "お"
+        marker_ruby = "お" if language == "ja" else None
         if marker_ruby:
             events.extend(
                 ruby_events(
@@ -2625,7 +3275,11 @@ def build_review_ass(
                 layout.main_font_size * layout.letter_spacing_em,
                 3,
             ),
-            "scope": "adjacent-visible-glyphs" if layout.letter_spacing_em > 0 else "none",
+            "scope": (
+                "english-word-internal"
+                if layout.letter_spacing_em > 0
+                else "none"
+            ),
             "positive": layout.letter_spacing_em > 0,
         },
         "word_gap": {
@@ -2648,10 +3302,13 @@ def build_review_ass(
                 3,
             ),
             "natural_space_only": (
-                layout.semantic_gap_em == 0.0 and layout.word_gap_em is None
+                language == "en"
+                and layout.semantic_gap_em == 0.0
+                and layout.word_gap_em is None
             ),
             "narrowed_from_natural": (
-                layout.word_gap_em is not None
+                language == "en"
+                and layout.word_gap_em is not None
                 and layout.main_font_size * layout.word_gap_em
                 < ImageFont.truetype(
                     str(font_file),
@@ -2660,13 +3317,19 @@ def build_review_ass(
             ),
             "strategy": (
                 "fixed-em-renderer-geometry"
-                if layout.word_gap_em is not None
+                if language == "en" and layout.word_gap_em is not None
                 else "font-natural-plus-semantic-gap"
             ),
             "word_run_positioning_advance_scale": (
-                layout.advance_scale if layout.word_gap_em is not None else None
+                layout.advance_scale if language == "en" else None
             ),
             "word_internal_spacing_affected": False,
+            "native_frame_visible_white_gap_target_px": (
+                {"minimum": 18, "maximum": 32}
+                if language == "en"
+                else None
+            ),
+            "native_frame_measurement_required": language == "en",
             "greater_than_letter_spacing": (
                 (
                     layout.main_font_size * layout.word_gap_em
@@ -2699,15 +3362,18 @@ def build_review_ass(
             "ruby": False,
             "highlight_color": (
                 secondary_diagnostics[0]["highlight_color"]
-                if secondary_diagnostics else highlight_color
+                if secondary_diagnostics
+                else highlight_color
             ),
             "highlight_color_source": (
-                "secondary-singer" if secondary_diagnostics
+                "secondary-singer"
+                if secondary_diagnostics
                 else "project-default-singer-style-fallback"
             ),
             "hot_primary_ass": (
                 secondary_diagnostics[0]["hot_primary_ass"]
-                if secondary_diagnostics else secondary_hot
+                if secondary_diagnostics
+                else secondary_hot
             ),
             "unhighlighted_secondary_ass": "&H00FFFFFF",
             "glow_unhighlighted_secondary_ass": "&H70FFFFFF",
@@ -2716,7 +3382,8 @@ def build_review_ass(
         "highlight_color": highlight_color,
         "highlight_color_source": (
             "project-default-singer"
-            if highlight_color_source == "singer.color" else "fallback"
+            if highlight_color_source == "singer.color"
+            else "fallback"
         ),
         "highlight_color_value_source": highlight_color_source,
         "default_singer_source": default_singer_source,
@@ -2789,20 +3456,22 @@ def build_review_ass(
                 "cue_start_ms": placement.cue.cue_start_ms,
                 "vocal_onset_ms": placement.cue.vocal_onset_ms,
                 "dot_starts_ms": list(placement.cue.dot_starts_ms),
+                "effective_singer_id": cue_singer["singer_id"],
+                "singer_resolution_source": cue_singer["resolution_source"],
+                "highlight_color": cue_singer["color"],
+                "highlight_color_source": cue_singer["color_source"],
+                "hot_primary_ass": _ass_bgr(str(cue_singer["color"])),
                 "anchor": {
                     "x": placement.x,
                     "y": placement.y,
                     "relation": "above-next-lyric-start",
                     "lane": placement.lane.__dict__,
                 },
-                "singer_id": singer["singer_id"],
-                "singer_resolution_source": singer["resolution_source"],
-                "highlight_color": singer["color"],
-                "highlight_color_source": singer["color_source"],
-                "hot_primary_ass": _ass_bgr(str(singer["color"])),
             }
-            for placement, singer in zip(
-                cue_placements, cue_singer_audits, strict=True
+            for placement, cue_singer in zip(
+                cue_placements,
+                cue_singer_audits,
+                strict=True,
             )
         ],
     }

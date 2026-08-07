@@ -12,8 +12,8 @@ The script is intentionally self-contained so a future run can use the frozen
 
     uv run --no-sync python scripts\\karaoke_timing.py
 
-Use ``--refresh-source --allow-network`` to fetch NetEase again, or
-``--alignment deterministic`` to rebuild without the optional alignment process.
+Use ``--refresh-source`` to fetch NetEase again, or ``--alignment
+deterministic`` to rebuild without the optional alignment process.
 """
 
 from __future__ import annotations
@@ -41,7 +41,6 @@ from uuid import NAMESPACE_URL, uuid5
 
 try:
     from .karaoke_album import (
-        DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         AlbumTrack,
         load_album_manifest,
@@ -49,6 +48,7 @@ try:
     )
     from .karaoke_language import (
         DEFAULT_LANGUAGE,
+        english_word_spans,
         language_identity,
         mms_granularity,
         normalize_language,
@@ -56,9 +56,9 @@ try:
         timing_granularity,
         uses_ruby,
     )
+    from .karaoke_model_paths import WHISPER_MODEL_DIR
 except ImportError:  # pragma: no cover - direct script execution
     from karaoke_album import (  # type: ignore[no-redef]
-        DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         AlbumTrack,
         load_album_manifest,
@@ -66,6 +66,7 @@ except ImportError:  # pragma: no cover - direct script execution
     )
     from karaoke_language import (  # type: ignore[no-redef]
         DEFAULT_LANGUAGE,
+        english_word_spans,
         language_identity,
         mms_granularity,
         normalize_language,
@@ -73,10 +74,12 @@ except ImportError:  # pragma: no cover - direct script execution
         timing_granularity,
         uses_ruby,
     )
+    from karaoke_model_paths import WHISPER_MODEL_DIR  # type: ignore[no-redef]
 
 try:
     from .sug_ruby import (
         fill_missing_project_ruby,
+        is_pure_katakana,
         sug_hash,
         timing_fingerprint,
         write_review_sidecar,
@@ -84,6 +87,7 @@ try:
 except ImportError:  # pragma: no cover - direct script execution
     from sug_ruby import (  # type: ignore[no-redef]
         fill_missing_project_ruby,
+        is_pure_katakana,
         sug_hash,
         timing_fingerprint,
         write_review_sidecar,
@@ -112,29 +116,33 @@ from strange_uta_game.backend.infrastructure.persistence.sug_io import (  # noqa
     SugProjectParser,
 )
 
-DEFAULT_ALBUM_MANIFEST = load_album_manifest(DEFAULT_MANIFEST_PATH)
-SOURCE_PATH = DEFAULT_ALBUM_MANIFEST.deliverable_dir / "sources" / "netease_lyrics.json"
-REPORT_PATH = (
-    DEFAULT_ALBUM_MANIFEST.deliverable_dir / "validation" / "timing_report.json"
-)
-TIMING_DIR = DEFAULT_ALBUM_MANIFEST.deliverable_dir / "timing"
-DEFAULT_MODEL_CACHE = ROOT / ".cache" / "whisper"
+DEFAULT_MODEL_CACHE = WHISPER_MODEL_DIR
 DEFAULT_VOCAL_STEMS_DIR = ROOT / ".cache" / "msst-vocals"
-DEFAULT_TIMING_OVERRIDES_PATH = SOURCE_PATH.parent / "timing_overrides.json"
 SHARED_FONT_DIR = ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
 DEFAULT_FONT_FILE = SHARED_FONT_DIR / "HarmonyOS_Sans_SC_Regular.ttf"
 NETEASE_ENDPOINT = "https://music.163.com/api/song/lyric"
 SUG_VERSION = "0.3.0"
 DEFAULT_FONT_NAME = "HarmonyOS Sans SC"
 VOICE_ROLES = ("opera", "harmony", "secondary")
+# Role colours are persisted on the role Singer itself.  Keep deterministic
+# defaults so the timing builder never silently collapses every secondary
+# singer onto the project default colour, while still allowing reviewed
+# per-role colours to be supplied by the existing JSON override document.
 DEFAULT_ROLE_SINGER_COLORS = {
     "opera": "#4ECDC4",
     "harmony": "#45B7D1",
     "secondary": "#C9B1FF",
 }
 ROLE_SINGER_COLOR_PALETTE = (
-    "#4ECDC4", "#45B7D1", "#FFA07A", "#98D8C8", "#C9B1FF",
-    "#F7DC6F", "#82E0AA", "#F1948A", "#85C1E9",
+    "#4ECDC4",
+    "#45B7D1",
+    "#FFA07A",
+    "#98D8C8",
+    "#C9B1FF",
+    "#F7DC6F",
+    "#82E0AA",
+    "#F1948A",
+    "#85C1E9",
 )
 
 # These are evidence-contract labels, not claims that either forced aligner is
@@ -152,9 +160,13 @@ ALIGNMENT_EVIDENCE_CONTRACT = {
     "mms_fa": {
         "kind": "known-token-forced-alignment",
         "independent_recognition": False,
-        "units": {"ja": "mora"},
+        "units": {
+            "zh": "pinyin-character",
+            "en": "word",
+            "ja": "mora",
+        },
         "description": (
-            "MMS_FA aligns supplied mora tokens; it is not "
+            "MMS_FA aligns supplied pinyin-character/word/mora tokens; it is not "
             "independent phoneme recognition."
         ),
     },
@@ -196,17 +208,23 @@ def _normalize_hex_color(value: Any, *, field_name: str) -> str:
 def _normalize_role_colors(
     role_colors: Mapping[str, Any] | None,
 ) -> dict[str, str]:
+    """Normalize optional persisted colour choices for known voice roles."""
+
     if role_colors is None:
         return {}
     if not isinstance(role_colors, Mapping):
         raise ValueError("role_colors must be an object")
+
     normalized: dict[str, str] = {}
     for raw_role, raw_color in role_colors.items():
         role = _normalize_voice_role(raw_role)
         if role is None:
-            raise ValueError(f"role_colors contains unsupported role {raw_role!r}")
+            raise ValueError(
+                f"role_colors contains unsupported role {raw_role!r}"
+            )
         normalized[role] = _normalize_hex_color(
-            raw_color, field_name=f"role color for {role}"
+            raw_color,
+            field_name=f"role color for {role}",
         )
     return normalized
 HARMONYOS_FONT_URL = (
@@ -252,15 +270,12 @@ def song_spec_from_track(track: AlbumTrack, album: AlbumManifest) -> SongSpec:
 
 
 def song_specs_from_manifest(
-    path: Path | str = DEFAULT_MANIFEST_PATH,
+    path: Path | str,
 ) -> tuple[SongSpec, ...]:
     """Load the manifest and derive the complete timing song collection."""
 
     album = load_album_manifest(path)
     return tuple(song_spec_from_track(track, album) for track in album.tracks)
-
-
-SONGS: tuple[SongSpec, ...] = song_specs_from_manifest()
 
 
 _LRC_TAG_RE = re.compile(r"\[(\d+):(\d{1,2})(?:[.:](\d{1,4}))?\]")
@@ -273,16 +288,6 @@ _END_MARKER_RE = re.compile(r"【\s*(?:おわり|完)\s*】", re.IGNORECASE)
 _SMALL_KANA = set("ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ")
 _MORA_JOINING_SMALL_KANA = _SMALL_KANA - {"っ", "ッ"}
 _EXTRA_PUNCTUATION = set('。、，．！？!?・:;；：—…~～（）()[]【】「」『』♪、"')
-_CONTEXTUAL_READING_OVERRIDES = {
-    "100": "ひゃく",
-    "愛し": "あいし",
-    "今年": "ことし",
-    "今日は": "きょうは",
-    "君": "きみ",
-    "佇む": "たたずむ",
-    "日": "ひ",
-    "後に": "あとに",
-}
 _PHRASE_GAP_MIN_EXCESS_MS = 600
 _PHRASE_GAP_MIN_RATIO = 1.6
 _LOCAL_MORA_MIN_MS = 180
@@ -350,6 +355,8 @@ class ReadingHelper:
         if not uses_ruby(language):
             return None
         if not is_timed_character(char):
+            return None
+        if is_pure_katakana(char):
             return None
         reading = self.reading(char)
         if not reading or reading == char:
@@ -463,9 +470,7 @@ def _source_song_record(spec: SongSpec, payload: dict[str, Any]) -> dict[str, An
 def load_or_fetch_source(
     path: Path,
     refresh: bool,
-    specs: Sequence[SongSpec] = SONGS,
-    *,
-    allow_network: bool = False,
+    specs: Sequence[SongSpec],
 ) -> tuple[dict[str, Any], str]:
     if path.exists() and not refresh:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -475,12 +480,10 @@ def load_or_fetch_source(
             if spec.song_id not in data["songs"]:
                 raise ValueError(f"frozen lyric source misses song {spec.song_id}")
         return data, "frozen-cache"
-
-    if not allow_network:
-        action = "refresh" if refresh else "create"
+    if not refresh:
         raise FileNotFoundError(
-            f"cannot {action} lyric source without network opt-in: {path}; "
-            "supply a complete frozen source or pass --allow-network"
+            f"frozen lyric source is missing: {path}; "
+            "pass --refresh-source to authorize a network refresh"
         )
 
     song_records: dict[str, Any] = {}
@@ -703,17 +706,26 @@ def contextual_mora_weights(
 ) -> dict[int, float]:
     """Estimate per-character mora weights from whole-line readings.
 
-    Per-character pykakasi lookup misreads context-sensitive kanji such as
-    ``佇`` in ``佇む``.  Whole-line conversion lets phrase-gap repair reserve a
-    realistic amount of sung time for the first token after a visible space.
+    Per-character lookup can lose context-sensitive readings. Whole-line
+    conversion also lets phrase-gap repair reserve a realistic amount of sung
+    time for the first token after a visible space.
     """
 
-    normalize_language(language)
+    language = normalize_language(language)
     weights = {
         index: helper.weight(char)
         for index, char in enumerate(text)
         if is_timed_character(char)
     }
+    if language != "ja":
+        # Chinese is one checkpoint per displayed character.  English is
+        # grouped into words by the caller, so every character starts with a
+        # neutral unit weight and inherits its word onset later.
+        return {
+            index: 1.0
+            for index, char in enumerate(text)
+            if is_timed_character(char)
+        }
     converter = helper._converter
     if converter is None:
         return weights
@@ -738,15 +750,7 @@ def contextual_mora_weights(
         ]
         if not indices:
             continue
-        if original == "降り":
-            # Distinguish 駅で降りた (おりた) from weather uses such as
-            # 雨が降りそう (ふりそう) before assigning mora weights.
-            reading = "おり" if text[cursor : cursor + 1] == "た" else "ふり"
-        else:
-            reading = _CONTEXTUAL_READING_OVERRIDES.get(
-                original,
-                str(item.get("hira") or original),
-            )
+        reading = str(item.get("hira") or original)
         total_moras = max(1.0, float(len(split_moras(reading))))
         kana_indices = [index for index in indices if _is_kana(text[index])]
         fixed_kana = sum(max(0.0, weights.get(index, 1.0)) for index in kana_indices)
@@ -776,10 +780,25 @@ def _language_timing_groups(
     timed_indices: Sequence[int],
     language: str,
 ) -> list[list[int]]:
-    """Return one Japanese fallback timing group per timed character."""
+    """Return fallback timing groups for the requested language.
 
-    normalize_language(language)
-    return [[index] for index in timed_indices]
+    Japanese and Chinese keep one group per timed character.  English uses one
+    group per contiguous word so all letters share the same acoustic onset;
+    visual rendering may still spread equal onsets on the ASS axis.
+    """
+
+    if normalize_language(language) != "en":
+        return [[index] for index in timed_indices]
+    timed = set(timed_indices)
+    groups: list[list[int]] = []
+    for start, end, _word in english_word_spans(text):
+        group = [index for index in range(start, end) if index in timed]
+        if group:
+            groups.append(group)
+            timed.difference_update(group)
+    groups.extend([[index] for index in timed_indices if index in timed])
+    groups.sort(key=lambda group: group[0])
+    return groups
 
 
 def _fallback_language_onsets(
@@ -791,9 +810,22 @@ def _fallback_language_onsets(
     timed_indices = [
         index for index, char in enumerate(text) if is_timed_character(char)
     ]
-    _language_timing_groups(text, timed_indices, language)
-    weights = contextual_mora_weights(text, helper, language)
-    return weighted_onsets(line.start_ms, line.end_ms, timed_indices, weights)
+    groups = _language_timing_groups(text, timed_indices, language)
+    if normalize_language(language) != "en":
+        weights = contextual_mora_weights(text, helper, language)
+        return weighted_onsets(line.start_ms, line.end_ms, timed_indices, weights)
+    group_indices = [group[0] for group in groups]
+    group_onsets = weighted_onsets(
+        line.start_ms,
+        line.end_ms,
+        group_indices,
+        dict.fromkeys(group_indices, 1.0),
+    )
+    return {
+        index: group_onsets[group[0]]
+        for group in groups
+        for index in group
+    }
 
 
 def interpolate_from_anchors(
@@ -884,7 +916,11 @@ def derive_line_timing(
     language: str = DEFAULT_LANGUAGE,
 ) -> tuple[dict[int, int], dict[str, Any]]:
     language = normalize_language(language)
-    fallback_method = "deterministic-mora-interpolation"
+    fallback_method = (
+        "deterministic-mora-interpolation"
+        if language == "ja"
+        else f"deterministic-{timing_granularity(language)}-interpolation"
+    )
     text = line.text
     timed_indices = [
         index for index, char in enumerate(text) if is_timed_character(char)
@@ -911,7 +947,7 @@ def derive_line_timing(
         "language": language,
         "language_name": stable_ts_language(language),
         "timing_granularity": timing_granularity(language),
-        "word_granularity": False,
+        "word_granularity": language == "en",
     }
     if not aligned_words or not timed_indices:
         diagnostics.update(
@@ -924,7 +960,7 @@ def derive_line_timing(
         return fallback, diagnostics
 
     target, source_indices = _line_char_map(text)
-    search_target = target
+    search_target = target.casefold() if language == "en" else target
     cursor = 0
     anchors: dict[int, int] = {}
     probabilities: list[float] = []
@@ -938,7 +974,7 @@ def derive_line_timing(
         clean_word = _clean_alignment_text(raw_word)
         if not clean_word:
             continue
-        search_word = clean_word
+        search_word = clean_word.casefold() if language == "en" else clean_word
         position = search_target.find(search_word, cursor)
         if position < 0:
             # A tokenizer can normalize a full-width symbol.  Try a
@@ -1010,6 +1046,8 @@ def derive_line_timing(
         )
         duration_ms = word_end_ms - word_start_ms
         if (
+            language == "ja"
+            and
             record["phrase_start"]
             and duration_ms - expected_ms >= _PHRASE_GAP_MIN_EXCESS_MS
             and duration_ms >= expected_ms * _PHRASE_GAP_MIN_RATIO
@@ -1032,15 +1070,23 @@ def derive_line_timing(
         matched_word_ends.append(word_end_ms)
         total = sum(record["weights"])
         record_indices = record["indices"]
+        if language == "en":
+            # MMS/stable-ts returns one word interval.  Preserve that word
+            # interval for every displayed letter; the visual renderer will
+            # perform any strictly ordered ASS sweep independently.
+            for index in record_indices:
+                anchors[index] = word_start_ms
+            total = 0.0
         cumulative = 0.0
-        for index, weight in zip(record_indices, record["weights"]):
-            if index not in anchors:
-                anchors[index] = _clamp_ms(
-                    word_start_ms + (word_end_ms - word_start_ms) * cumulative / total,
-                    line.start_ms,
-                    line.end_ms,
-                )
-            cumulative += weight
+        if language != "en":
+            for index, weight in zip(record_indices, record["weights"]):
+                if index not in anchors:
+                    anchors[index] = _clamp_ms(
+                        word_start_ms + (word_end_ms - word_start_ms) * cumulative / total,
+                        line.start_ms,
+                        line.end_ms,
+                    )
+                cumulative += weight
         probability = record["probability"]
         if probability is not None:
             try:
@@ -1175,9 +1221,8 @@ def run_alignment_worker(
         import stable_whisper
 
         model = stable_whisper.load_model(
-            model_name,
+            str(model_cache_path(model_name, model_cache)),
             device="cpu",
-            download_root=str(model_cache),
         )
         audio = str(request["audio"])
         line_inputs = list(request["lines"])
@@ -1664,6 +1709,67 @@ def _voice_role_assignments(
     return line_role, normalized
 
 
+def collapse_english_sentence_to_word_tokens(sentence: Sentence) -> Sentence:
+    """Collapse an English editable sentence to one checkpoint per word.
+
+    StrangeUtaGame permits ``Character.char`` to contain more than one visible
+    codepoint.  English projects use that capability so the timing editor shows
+    one adjustable checkpoint for each non-space token.  Spaces remain explicit
+    untimed tokens, preserving the source text exactly.  Final renderers may
+    interpolate a visual sweep inside each word without persisting letter-level
+    checkpoints back into the editable project.
+    """
+
+    if not sentence.characters:
+        return sentence
+    if any(len(character.char) != 1 for character in sentence.characters):
+        return sentence
+
+    source_text = sentence.text
+    collapsed: list[Character] = []
+    for match in re.finditer(r"\s+|\S+", source_text):
+        members = sentence.characters[match.start() : match.end()]
+        if not members:
+            continue
+        singer_ids = {member.singer_id for member in members if member.singer_id}
+        if len(singer_ids) > 1:
+            raise ValueError(
+                "cannot collapse one English word across multiple singers: "
+                f"{match.group(0)!r}"
+            )
+        timestamps = [
+            int(timestamp)
+            for member in members
+            for timestamp in member.timestamps
+        ]
+        first_timestamp = min(timestamps) if timestamps else None
+        last = members[-1]
+        token = Character(
+            char=match.group(0),
+            check_count=1 if first_timestamp is not None else 0,
+            timestamps=[] if first_timestamp is None else [first_timestamp],
+            sentence_end_ts=(
+                last.sentence_end_ts if last.is_sentence_end else None
+            ),
+            linked_to_next=False,
+            is_line_end=last.is_line_end,
+            is_sentence_end=last.is_sentence_end,
+            is_rest=all(member.is_rest for member in members),
+            singer_id=next(iter(singer_ids), sentence.singer_id),
+            needs_guide=any(member.needs_guide for member in members),
+            is_guide=all(member.is_guide for member in members),
+            force_singer_tag=any(
+                member.force_singer_tag for member in members
+            ),
+        )
+        collapsed.append(token)
+
+    if "".join(token.char for token in collapsed) != source_text:
+        raise ValueError("English word-token collapse changed the source text")
+    sentence.characters = collapsed
+    return sentence
+
+
 def build_project(
     spec: SongSpec,
     duration_ms: int,
@@ -1678,7 +1784,8 @@ def build_project(
     helper = ReadingHelper()
     singer_id = stable_id("singer", spec.song_id)
     singer_color = _normalize_hex_color(
-        singer_color, field_name="singer highlight color"
+        singer_color,
+        field_name="singer highlight color",
     )
     normalized_role_colors = _normalize_role_colors(role_colors)
     allocated_role_colors = set(normalized_role_colors.values())
@@ -1697,16 +1804,27 @@ def build_project(
         existing = role_singers.get(role)
         if existing is not None:
             return existing
+
         role_color = normalized_role_colors.get(role)
         if role_color is None:
-            candidates = (DEFAULT_ROLE_SINGER_COLORS.get(role), *ROLE_SINGER_COLOR_PALETTE)
-            role_color = next((
-                candidate for candidate in candidates
-                if candidate and candidate != singer_color
-                and candidate not in allocated_role_colors
-            ), None)
+            candidates = (
+                DEFAULT_ROLE_SINGER_COLORS.get(role),
+                *ROLE_SINGER_COLOR_PALETTE,
+            )
+            role_color = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if candidate
+                    and candidate != singer_color
+                    and candidate not in allocated_role_colors
+                ),
+                None,
+            )
             if role_color is None:
-                raise ValueError(f"no independent colour available for voice role {role!r}")
+                raise ValueError(
+                    f"no independent colour available for voice role {role!r}"
+                )
         allocated_role_colors.add(role_color)
         role_singer = Singer(
             id=stable_id("singer", f"{spec.song_id}:{role}"),
@@ -1881,6 +1999,18 @@ def build_project(
                 release_ms - int(acoustic_end_ms)
                 if acoustic_end_ms is not None
                 else None
+            )
+        if language == "en":
+            letter_character_count = len(sentence.characters)
+            collapse_english_sentence_to_word_tokens(sentence)
+            diagnostics["editable_timing_unit"] = "word"
+            diagnostics["editable_token_count"] = len(sentence.characters)
+            diagnostics["editable_timing_point_count"] = sum(
+                character.check_count for character in sentence.characters
+            )
+            diagnostics["render_sweep_unit"] = "interpolated-visible-letter"
+            diagnostics["collapsed_letter_character_count"] = (
+                letter_character_count
             )
         sentences.append(sentence)
         line_reports.append(diagnostics)
@@ -2479,7 +2609,7 @@ def export_song(
     project: Project,
     font_name: str,
 ) -> dict[str, Any]:
-    timing_dir = (spec.deliverable_dir or TIMING_DIR.parent) / "timing"
+    timing_dir = (spec.deliverable_dir or ROOT / "deliverables") / "timing"
     timing_dir.mkdir(parents=True, exist_ok=True)
     base = timing_dir / f"{spec.song_id}_{spec.slug}"
     sug_path = base.with_suffix(".sug")
@@ -2633,7 +2763,11 @@ def build_song(
     role_colors: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     language = normalize_language(spec.language)
-    fallback_method = "deterministic-mora-interpolation"
+    fallback_method = (
+        "deterministic-mora-interpolation"
+        if language == "ja"
+        else f"deterministic-{timing_granularity(language)}-interpolation"
+    )
     audio_path = find_audio(spec)
     duration_seconds, duration_ms = read_mutagen_duration(audio_path)
     digest = sha256_file(audio_path)
@@ -3051,7 +3185,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=DEFAULT_MANIFEST_PATH,
+        required=True,
         help="album.json manifest that owns the complete track collection",
     )
     parser.add_argument(
@@ -3061,11 +3195,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--source", type=Path, default=None)
     parser.add_argument("--refresh-source", action="store_true")
-    parser.add_argument(
-        "--allow-network",
-        action="store_true",
-        help="allow an explicit NetEase request when creating or refreshing source data",
-    )
     parser.add_argument(
         "--alignment",
         choices=("auto", "forced", "deterministic"),
@@ -3136,12 +3265,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.font_file = args.font_file or (
         album.deliverable_dir / "artwork" / "fonts" / "HarmonyOS_Sans_SC_Regular.ttf"
     )
-    source, source_mode = load_or_fetch_source(
-        args.source,
-        args.refresh_source,
-        specs,
-        allow_network=args.allow_network,
-    )
+    source, source_mode = load_or_fetch_source(args.source, args.refresh_source, specs)
     overrides_document = (
         json.loads(args.timing_overrides.read_text(encoding="utf-8"))
         if args.timing_overrides.is_file()

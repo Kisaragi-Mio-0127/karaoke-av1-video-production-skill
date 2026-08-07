@@ -1,9 +1,9 @@
 """Shared album manifest loading for the karaoke build scripts.
 
-The karaoke pipeline has one source of track metadata: the album manifest under
-``karaoke_sources``.  This module owns the small amount of path and validation
-logic needed by the timing, media and release stages so those stages cannot
-silently drift back to a hand-maintained subset of tracks.
+The karaoke pipeline receives track metadata from an explicitly selected album
+manifest.  This module owns the small amount of path and validation logic
+needed by the timing, media and release stages so those stages cannot silently
+drift back to a hand-maintained subset of tracks.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ except ImportError:  # pragma: no cover - direct script execution
     )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "karaoke_sources" / "album.json"
 EXPECTED_TRACK_COUNT = 5
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _WINDOWS_DELIVERY_TRANSLATION = str.maketrans(
@@ -136,7 +135,7 @@ class AlbumTrack:
 
 @dataclass(frozen=True)
 class AlbumManifest:
-    """Validated album metadata and its exact five-track collection."""
+    """Validated album metadata and its track collection."""
 
     path: Path
     album: dict[str, Any]
@@ -294,11 +293,11 @@ require_five_track_collection = validate_exact_five_track_collection
 
 
 def load_album_manifest(
-    path: Path | str = DEFAULT_MANIFEST_PATH,
+    path: Path | str,
     *,
-    require_five_tracks: bool = True,
+    require_five_tracks: bool = False,
 ) -> AlbumManifest:
-    """Load and validate an album manifest from a project-relative path."""
+    """Load and validate an explicitly selected album manifest."""
 
     manifest_path = Path(path).expanduser().resolve()
     try:

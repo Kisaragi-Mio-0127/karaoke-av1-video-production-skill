@@ -1,308 +1,205 @@
 ---
 name: karaoke-av1-video-production
-description: Use when producing, re-encoding, debugging, packaging, or reviewing karaoke and lyric videos or opening editable karaoke timing projects with attached audio, including semantic phrase segmentation, deterministic cover palettes and karaoke-color-plan/v1, explicit SUG singer_id colour routing, dedicated Japanese secondary-vocal overlays, cross-singer ruby rejection, source-line overrides, cue/lane behavior, Japanese ruby, editable-source/render parity, media restoration, MMS timing evidence, ASS highlight release, lyric visual fit, AV1 4:2:0 encoding, batch promotion, archives, and media-structure verification. Do not use for TTS, voice cloning, music generation, vocal separation, or lyric transcription.
+description: Produce, review, re-encode, package, or debug Japanese, Chinese, and English karaoke videos and editable SUG timing projects with local audio, lyrics, MMS/ASR evidence, subtitle validation, AV1 4:2:0 release checks, and MP4-first delivery. Use for the normal route, the explicit Japanese MMS route, or the dedicated zh/en MMS route. Do not use for TTS, voice cloning, music generation, vocal separation, or standalone lyric transcription.
 ---
 
 # Karaoke AV1 Video Production
 
-Read the [repository README](README.md) or the [中文 README](README.zh-CN.md)
-for installation, the public script inventory, and the bilingual reference
-map.
+Use this Skill to take an authorized local karaoke source through inspection,
+timing evidence, preview, render, media verification, and rollback-safe
+promotion. Keep the canonical editable project, derived timing evidence,
+subtitle sources, and delivery media separate.
 
-## Overview
+Read these references when needed:
 
-Produce karaoke videos through an inspect, preview, encode, and verify workflow. Keep subtitle timing, AV1 4:2:0 output, audio integrity, and playback compatibility independently testable.
+- [MMS, model/cache, SUG, and route contract](references/mms-workflows.md)
+- [single-source wide-layout contract](references/wide-visual-templates.md)
+- [AV1/ffprobe command guidance](references/av1-420-commands.md)
+- [subtitle, ruby, and editable-project gates](references/subtitle-timing-quality.md)
+- [ASR, SUG compatibility, and pitch handling](references/asr-sug-pitch.md)
+- [batch release gates](references/batch-release-gates.md)
 
-The generic default remains Japanese (`ja`) for legacy manifests. Use
-`run_karaoke_japanese_workflow.py` for the default bundled Japanese route; it
-never runs MMS. The parallel `run_karaoke_japanese_mms_workflow.py` entry is
-installed and has a separate explicit `audit -> build -> render` contract
-documented below. Other language policies require separately
-validated adapters, but colour planning is shared: every supported profile
-uses one `karaoke-color-plan/v1`, with no language-specific colour fork.
-The public/shared route is validated only for Japanese (`ja`); non-Japanese
-output requires a separately validated language adapter and does not inherit
-Japanese validation.
+## Route the request
 
-Before rendering, the deterministic offline cover extractor emits an ordered
-palette of exactly eight colours plus the cover identity and current extractor
-hash. The renderer builds the single `karaoke-color-plan/v1` from that
-palette. Resolve the effective singer for each lyric character first, then
-assign primary, secondary, and tertiary slots by the first character
-appearance of active `singer_id` values; an absent singer never consumes a
-slot. Colour precedence is `explicit singer_id=#RRGGBB` > explicit main or
-secondary slot override > cover palette > project-policy SUG colour. Formal
-one-click and batch output uses `cover` by default; `project` is the
-rollback compatibility mode. The primary colour follows the first singer and
-spectrum; the secondary follows the second singer, or `palette[1]` for a
-single-singer track, and the progress track. ASS, video, and workflow reports
-carry the same `color_plan_sha256`; colour planning never changes the source
-SUG. Composition metadata must include `cover_sha256`, the current extractor
-hash, and the ordered `palette`; stale or inconsistent metadata fails closed.
-Both formal entries accept repeatable `--singer-color
-<singer-id>=#RRGGBB`; pass the same ordered overrides to preflight and final
-rendering, and let explicit singer overrides win over slot and palette colours.
-The shared palette contract excludes near-black absolute-chroma noise before
-Lab-neighbourhood area aggregation, emits exactly eight colours
-deterministically, and never hard-codes song-specific colours. Recheck the
-selected colours in representative rendered frames, including active sweep,
-progress, and cue frames, against the plan; frame evidence is required
-alongside metadata and hash checks.
+Select one route before processing inputs. Do not add MMS flags to a different
+entry point.
 
-Use `tts-voice-workflow-ops` separately when generating or cloning voices, separating vocals, or converting a singer. This skill starts from authorized media, lyrics, subtitles, fonts, and audio stems.
+- **Normal Japanese:** run `scripts/run_karaoke_japanese_workflow.py`. It uses
+  the Japanese profile and never runs MMS.
+- **Normal Chinese/English:** run
+  `scripts/run_karaoke_zh_en_workflow.py --language zh|en`. It enforces the
+  no-ruby language profile and never runs MMS.
+- **Japanese MMS:** run the dedicated
+  `scripts/run_karaoke_japanese_mms_workflow.py`. It is Japanese-only and
+  executes an MMS audit, build, companion-SUG step, and render gate. Use
+  `--quality-policy strict|auto-fallback`; `strict` is the default. With
+  `auto-fallback`, apply high-confidence MMS timing, retain canonical timing
+  for low-confidence units, and do not require manual review to complete the
+  automated run. Keep quality-gate and `unresolved` evidence unchanged; do
+  not relax structural, subtitle, or media hard gates. A successful fallback
+  reports `status: rendered-with-fallback` and exits 0, meaning only that the
+  automated workflow completed.
+- **Chinese/English MMS:** run the dedicated
+  `scripts/run_karaoke_zh_en_mms_workflow.py --language zh|en`. It supports
+  `--audit-only` and full mode; it must not be used for Japanese.
+- **AV1 batch:** run `scripts/render_karaoke_direct_av1_420_album.py`. It
+  never invokes MMS and consumes only an already reviewed timing sidecar.
 
-Read [av1-420-commands.md](references/av1-420-commands.md) / [中文](references/av1-420-commands.zh-CN.md) when constructing FFmpeg or ffprobe commands.
-
-Read [wide-visual-templates.md](references/wide-visual-templates.md) / [中文](references/wide-visual-templates.zh-CN.md) before selecting or changing the wide-layout vinyl or real-time spectrum template. Keep the two effects mutually exclusive and drive both through the shared artwork and preview-render scripts.
-
-The current `wide-layout-v7/cover-palette` composition uses a vinyl card at
-`(40,30,340,402)`, footer bottom padding `12`, and a lower subtitle panel that
-starts at `y=576`. Both the extra outer right-panel overlay and the compact
-dark backplate behind/below the rotating record are removed. The rotating
-record, album card, card footer, and bottom subtitle panel remain. Reports use
-`right_panel_visible=false`, `outer_right_panel_visible=false`,
-`vinyl_backplate_present=false`, and the compatibility field
-`vinyl_backplate_preserved=false` for this no-panel composition. The spectrum
-variant must also use the clip-safe geometry documented in
-[wide-visual-templates.md](references/wide-visual-templates.md), leaving top
-and bottom glow clearance so peaks are not clipped. The top secondary contract
-uses anchor `y=12`, default font size `60 px`, minimum long-line size `36 px`,
-content safe band `y=0..96`, and an actual outline/glow reserve through `y=107`.
-The title block uses actual ink bounds at label/title/artist `y=120/155/220`
-and keeps at least `16 px` between title ink and the secondary reserve.
-
-## Shared single-track workflow
-
-For the bundled single-song one-click route, run
-`scripts/run_karaoke_japanese_workflow.py` from the StrangeUtaGame checkout.
-It accepts `--visual-style vinyl|spectrum` and defaults to `vinyl`. Both
-styles require a new, non-existent `--output-dir` for every run:
+Normal Japanese entry:
 
 ```powershell
 uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
   --sug <project.sug> --audio <post-mix-audio> `
-  --composition <composition-png> --output-dir <new-output-dir> `
+  --output-dir <new-output-dir> `
   --title <title> --artist <artist> `
   --album-title <album-title> --album-artist <album-artist> `
-  --visual-style vinyl --vinyl <canonical-vinyl-png>
-```
-
-For `spectrum`, replace the final style and vinyl arguments with
-`--visual-style spectrum`. Formal rendering uses the cover-derived colour plan
-by default; select the `project` colour source only for rollback-compatible
-reproduction. Vinyl requires `--vinyl` as the canonical identity input, then
-rebuilds and validates the current rotating vinyl inside the new output
-directory before rendering. Spectrum does not require, probe, generate, pass,
-or report any vinyl asset.
-
-The workflow first creates an independent `karaoke-preflight.ass` in ASS-only
-mode, then creates the final `karaoke.ass` during MP4 rendering. It compares
-their SHA-256 identities for the same SUG/configuration and fails if they
-differ. Full probed duration and MP4-only output with AAC-LC audio are the
-defaults. MKV and full decode require explicit opt-ins; a default run does not
-create MKV or run a full decode. Pronunciation/ruby validation remains
-optional by default; Japanese structural ruby gates still apply, and `required`
-or `off` remain explicit choices. The one-click and batch entry points are
-thin front ends over the same renderer and must apply the same singer, colour
-plan, overlay, ruby, container, and diagnostic gates.
-The default one-click and batch renderers do not invoke MMS or expose an MMS
-interface. The installed MMS entry is the only documented workflow entry that
-may run MMS, and it must be explicitly invoked with its offline/network
-policy and all prerequisite evidence. Any standalone MMS audit or timing-
-override generation remains an explicitly invoked run.
-If the fixed-path `timing_overrides` artifact exists, batch rendering passes
-its existing visual-release overrides through and records the file identity;
-it never invokes MMS or creates timing overrides. The renderer does not prove
-MMS provenance, so validate that artifact before starting the batch.
-
-## Explicit MMS single-track workflow
-
-`scripts/run_karaoke_japanese_mms_workflow.py` is the installed explicit MMS
-entry in the public integration.
-
-Before invoking it, require an existing manifest that resolves the selected
-source audio and canonical reviewed SUG, plus frozen lyrics and project-local
-MSST Vocals with their own provenance. Allocate a new, non-deliverables output
-root for every run; never write directly to a deliverables directory or reuse
-a prior output root. The wrapper creates exactly `audit/`, `build/`, and
-`render/`; `render/` is the final-video working directory.
-
-The entry must execute these stages in order, with no silent fallback:
-
-```text
-audit -> build -> render
-```
-
-- `audit` runs MMS against the existing SUG, frozen lyrics, source audio, and
-  MSST Vocals. The audit gate fails closed for missing or stale inputs,
-  identity mismatches, unresolved evidence, vetoes, or missing provenance.
-- `build` may consume only a passing audit. Its build gate must bind the
-  manifest, SUG, frozen lyrics, MSST Vocals, MMS access policy, and audit
-  identity, then produce `build/timing_overrides.json`.
-- Of the MMS build outputs, only the `visual_release_overrides_ms` field is
-  copied into the render input and may affect the ASS/video. It is a conceptual
-  field in the build artifact, not a directory name. `character_overrides_ms`
-  is evidence and provenance only; this workflow does not apply it to the SUG,
-  ASS timing, or encoded video. The render gate requires matching audit/build
-  provenance and records the audit, build, and render identities.
-
-MMS model access is offline by default. The optional
-`--mms-model-path <local-mms-model>` override has highest priority. Without
-it, automatically discover `.cache/torch/hub/checkpoints/model.pt`, then
-another local `.pt` checkpoint in that project directory. Fail before
-inference only when no local checkpoint exists and `--allow-mms-network` was
-not granted. Cover retrieval is independently offline;
-`--allow-cover-network` is the separate opt-in and neither permission
-authorizes the other lane. No generic model-path or network-permission aliases
-are accepted.
-
-The installed wrapper CLI is:
-
-```powershell
-uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
-  --manifest <existing-manifest> --song-id <song-id> `
-  --composition <composition.png> `
-  --output-dir <new-non-existent-mms-output-dir> `
   --visual-style spectrum
 ```
 
-The manifest resolves the selected track's canonical SUG and source audio;
-by default the wrapper resolves frozen lyrics from the selected manifest
-deliverable's `sources/netease_lyrics.json` and the matching MSST stem from the
-project's `.cache/msst-vocals` tree. Use `--source <frozen-lyrics>` and
-`--vocals-root <msst-vocals-root>` only as explicit overrides. The model path
-override is also optional. The only network permissions are
-`--allow-mms-network` and the independent `--allow-cover-network`.
-
-The album/batch direct renderer (`render_karaoke_direct_av1_420_album.py`)
-is the AV1 4:2:0 batch entry and accepts `--visual-style vinyl|spectrum|both`,
-defaulting to `vinyl`:
+Normal Chinese/English entry:
 
 ```powershell
-uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
-  --manifest <album-manifest> `
-  --visual-style <vinyl|spectrum|both>
+uv run --no-sync python scripts/run_karaoke_zh_en_workflow.py `
+  --language <zh-or-en> --sug <project.sug> --audio <post-mix-audio> `
+  --output-dir <new-output-dir> `
+  --title <title> --artist <artist> `
+  --album-title <album-title> --album-artist <album-artist> `
+  --visual-style spectrum
 ```
 
-`spectrum` does not require, probe, generate, pass, or report a vinyl asset.
-`both` produces two independent AV1 4:2:0 outputs with separate media and
-report identities. Both styles for one song/profile use the same shared
-renderer, colour plan, and profile ASS, then publish serially; they are not
-combined in one file.
-`--single-track` means exactly one selected song and one profile, so
-`--single-track --visual-style both` can produce two variants for that pair.
-`--lossless-companion` and `--full-decode` remain explicit opt-ins and are
-not implied by `both`. Apply the per-output batch release gates before
-promotion.
-Use `render_karaoke_direct_hevc444_album.py` for the explicit HEVC 4:4:4 lane.
-These are the only codec-specific direct album entries; shared manifest
-selection and task planning belong to `karaoke_direct_album_planning.py`, not
-either codec-specific entry point.
+Use a new, non-existent output directory for every one-click run. The wrapper
+builds the current composition inside that directory. Pass `--cover` only when
+the selected audio has no usable embedded cover, and `--background` only for
+an explicit background choice. `vinyl` generates a fresh record asset in the
+same run; `spectrum` creates and reports no vinyl. `--composition` and
+`--vinyl` are advanced compatibility overrides, not normal inputs.
 
-Read [subtitle-timing-quality.md](references/subtitle-timing-quality.md) / [中文](references/subtitle-timing-quality.zh-CN.md) when changing phrase segmentation, cue behavior, ruby, MMS-derived timing, highlight release, visual-fit rules, or opening an editable timing project for review.
+## MMS modes and artifacts
 
-Read [singer-overlays.md](references/singer-overlays.md) / [中文](references/singer-overlays.zh-CN.md) when a project has multiple singers, explicit `singer_id` fields, opera/harmony/secondary roles, singer-colour routing, top overlays, or ruby spans that may cross singers.
+Use a new private output root inside the project and outside deliverables.
+Keep the stage order explicit:
 
-Read [asr-sug-pitch.md](references/asr-sug-pitch.md) / [中文](references/asr-sug-pitch.zh-CN.md) before using independent ASR evidence, validating a newer StrangeUtaGame/SUG version, or pitch-shifting delivery audio. Use the bundled `scripts/check_sug_compatibility.py` and `scripts/pitch_shift_audio.py` instead of one-off commands.
+```text
+audit -> recognition gate when required -> build -> companion SUG -> render
+```
 
-For StrangeUtaGame editor review, use [open_editable_project_with_audio_probe.py](scripts/open_editable_project_with_audio_probe.py) to open the exact SUG through the real command-line loader and record playback-engine audio evidence without saving the project.
+`audit-only` is a zh/en wrapper mode. It may omit ASR, writes local audit
+evidence and a workflow report, and stops before build and render. It creates
+no companion SUG and cannot authorize a release. The Japanese wrapper has no
+`--audit-only` flag; use `scripts/audit_karaoke_mms_alignment.py` for a
+Japanese evidence-only audit.
 
-Read [batch-release-gates.md](references/batch-release-gates.md) / [中文](references/batch-release-gates.zh-CN.md) when encoding, promoting, or packaging more than one song or delivery profile.
+Full MMS build creates the companion before release decisions. In strict mode
+(and on the zh/en route), unresolved evidence, a quality gate, or an ASR veto
+retains it for manual timing review, skips render, and exits non-zero; Japanese
+`auto-fallback` may render a structurally valid companion without manual review
+while preserving those evidence results and all hard gates. Missing
+`visual_release_overrides_ms` is not a separate failure: render still uses the
+companion without a timing sidecar and its preserved canonical
+`sentence_end_ts` release. The companion remains available for optional later
+manual timing adjustment and never overwrites the canonical SUG.
 
-Read [strangeutagame-integration.md](references/strangeutagame-integration.md) / [中文](references/strangeutagame-integration.zh-CN.md) before installing or running the bundled production scripts. Use [install_strangeutagame_integration.py](scripts/install_strangeutagame_integration.py) to copy the integration into a compatible StrangeUtaGame checkout; dry-run first and do not overwrite differing project scripts without a backup. Run [check_karaoke_environment.py](scripts/check_karaoke_environment.py) from the Skill repository after installation (the support tool is not copied into the target checkout).
+Use the complete commands and stage-specific rules in
+[mms-workflows.md](references/mms-workflows.md).
 
-## First Pass
+## Model and cache boundary
 
-1. Read project instructions and inventory source video or images, audio tracks, lyrics, existing ASS/SRT files, fonts, and target platforms.
-2. Build a rights manifest for the background media, recording, lyrics synchronization/display, subtitle source, and fonts. Record source, rightsholder or license, evidence, allowed use, commercial scope, territory, term, attribution, and redistribution limits. Stop public delivery when any required right is missing or uncertain.
-3. Probe every input for duration, frame rate, resolution, color metadata, codec, pixel format, sample rate, channel layout, and start-time offsets. Run the deterministic offline cover extractor and retain its ordered eight-colour palette, cover identity, and current extractor hash for composition metadata.
-4. Define the intended output matrix before encoding: hard or soft subtitles, MP4 or MKV, 8-bit or 10-bit 4:2:0, audio codec, resolution, and compatibility fallback.
-5. Write to a temporary output and preserve source media until all mandatory gates pass. Full-output null decoding is an optional diagnostic, not a release gate.
-6. Keep probes, ASS sources, fonts, and encode logs private by default. Do not include them in delivery unless their redistribution is authorized.
-7. Before full encoding, run project-specific renderer and packager tests with a writable project-local temporary directory. Treat setup errors, skips, interrupted runs, and partial results as inconclusive.
-8. Prefer `uv run --no-sync ...` for every command; it reuses the existing complete project-local `.venv` without creating or syncing an environment. Do not create a new environment per task or set a new `UV_CACHE_DIR` for ordinary runs. Run `uv sync` only when `.venv` is missing or dependency files actually changed. Use task-owned project-local temporary directories/caches and remove them after reports and artifacts are retained.
+Use the project-owned model roots:
 
-## Editable Project Gate
+- `models/mms/model.pt` for MMS forced alignment.
+- `models/whisper/<model>.pt`, or `models/whisper` through
+  `--model-cache`, for independent ASR.
 
-- Skip manual timing review by default when automatic timing evidence and release checks agree. Enter manual timing only when the user requests it, a reported subtitle defect needs listening, or automatic evidence conflicts. When manual timing is required, first prove that the exact editable project opens and its stored media reaches the playback engine.
-- Treat the editable timing project (`.sug`, `.kra`, or equivalent) as a fact-chain layer, not as an incidental export. The candidate ruby generator fills missing ruby only and writes it to the canonical SUG; preserve existing human-reviewed or legacy ruby. The Agent then audits every ruby span in full-lyric context and writes approved corrections back to that SUG before rendering.
-- Make the renderer read-only for ruby: it reads the reviewed canonical SUG and must not infer, contextualize, or overwrite ruby during rendering. Bind the review sidecar to the current canonical SUG hash and require one approved, span-exact record for every stored ruby span; a missing or stale sidecar, `machine-fill`, low-confidence, conflict, or unresolved record blocks rendering. If the Agent makes no change, retain the candidate generator's default ruby but still record its approval. Before opening an editor, identify the canonical project by content and generation identity, compare its reviewed ruby/timing with the ASS and render report, and keep intentional corrections in the editable project.
-- Resolve a relative media path against the editable project file's parent directory. Exercise the actual startup path used by the requested launch mode; command-line, file-menu, drag-and-drop, and recovery flows may use different loader implementations.
-- Inspect autosave and crash-recovery copies before launch. Preserve genuine user edits, but do not allow a stale recovery copy to silently replace a newer reviewed project.
-- Verify that audio entered the playback engine using an engine-observable result such as populated audio metadata, waveform data, a newly generated source cache, or a controlled playback check. A visible window, project title, existing file, or stored path is not proof of audio loading.
-- Prefer a project-local launch/probe script over UI file dialogs when the editable project already stores `media_path`. For StrangeUtaGame, run the bundled audio-probe script with `uv run --no-sync`; use `uv sync` only to create or refresh a missing/stale environment. Require it to isolate settings/cache/recovery state, install auto-save and canonical-save guards before opening, and report exact opened-project identity, project/audio hashes, resolved and callback media paths, engine metadata, non-empty finite waveform evidence, dirty transition, and project hashes.
-- Allow a review helper to bypass an unrelated startup update check only in process and only to unblock the requested project/media restoration path. Do not change updater settings, start an update, or treat the bypass as application validation; record it in the probe report.
-- Never auto-save an editor review session. If audio loading alone changes the in-memory duration by a rounding-sized amount such as 1 ms, changes dirty from false to true, and leaves all other serialized project fields unchanged, leave it unsaved and record `do-not-save-duration-normalization`. Treat any other dirty state as requiring review before save. A callback pass is provisional while the editor remains open; require graceful exit plus a final unchanged canonical hash for the completed gate. A forced exit or missing final check is inconclusive.
-- Keep guarded loading review separate from editable work. The probe writes only a private JSON evidence report and blocks project saves. If the user actually adjusts timing, reopen the verified canonical project in the application's normal editable mode and save those edits to the canonical editable source (`.sug` for StrangeUtaGame); then regenerate the ASS and final video from that saved source. Do not mistake the probe JSON, ASS, or encoded video for the editable timing source.
-- Report separately: project opened, reviewed project identity matched, media path resolved, audio engine load verified, and any recovery copy handled.
-- Require StrangeUtaGame 1.4.5 and SUG storage format 0.3.0. Keep the application version synchronized in `src/strange_uta_game/__version__.py` and `pyproject.toml`, and read the storage format from `SugMigrator.CURRENT_VERSION`. Run the compatibility checker against representative canonical projects after an application update; loading must leave every project hash unchanged.
+Use `--mms-model-path` or `--model-path` for an explicit local checkpoint. Do
+not treat `.cache` as a model authority and do not enable download fallback.
+Use `.cache/msst-vocals`, `.cache/asr-recognition`, and other task-owned
+`.cache` locations only for derived runtime data and evidence. Legacy
+`.cache/torch` or `.cache/whisper` weights do not satisfy the canonical model
+contract.
 
-## Subtitle And Timeline Gate
+Record resolved model identity and cache provenance in reports while redacting
+unnecessary absolute paths. Do not copy private model weights or MMS evidence
+into deliverables.
 
-- Keep subtitle sources in UTF-8 and preserve editable ASS or timing files beside the rendered output.
-- Use ASS karaoke timing tags only when syllable timing is intentional; do not invent timing from untimed lyrics without review.
-- Keep one traceable fact chain from canonical source through overrides, renderer output, ASS/report, encoded media, and promoted or packaged artifacts. Record a hash or equivalent generation identity at every reproducible layer.
-- Preserve source-line semantics when creating display phrases. Require exact override reachability, lossless phrase recomposition, and reuse of original character timing objects.
-- Treat source whitespace as breath evidence, not an authoritative display boundary. Resolve it against source-language syntax, measured acoustic pauses, minimum phrase length, and visual fit; document reviewed exceptions where a sung breath splits a grammatical dependency.
-- Resolve the effective singer only from explicit SUG data, with character-level `singer_id` taking precedence over sentence-level `singer_id`, then the explicit project default. Build the one `karaoke-color-plan/v1` by assigning active singer IDs in first-character appearance order to primary, secondary, and tertiary slots; an absent singer consumes no slot. Apply the precedence `explicit singer_id=#RRGGBB` > explicit main or secondary slot override > cover palette > project-policy SUG colour. Synchronize primary with the first singer and spectrum, and secondary with the second singer, or `palette[1]` for a single singer, and the progress track. Apply the resolved colour consistently to active `Main`, `Glow`, cue, and top secondary subtitle layers; keep inactive or unhighlighted text white. Never infer singer identity from lyric text or role wording, and never mutate the source SUG for colour planning.
-- Route explicit `opera`, `harmony`, and `secondary` roles to a top-centred overlay independent of main lanes, cues, and ruby. Use the top safe band `y=0..96`, anchor `y=12`, default font size `60 px`, and a minimum `36 px` long-line size; the actual outline/glow reserve extends through `y=107`. Inspect coexistence with the `wide-layout-v7/cover-palette` title, whose label/title/artist positions are `y=120/155/220`, whose placement uses actual ink bounds, and whose title ink stays at least `16 px` below the reserve.
-- Treat ruby word boundaries as a mandatory release gate, independently from reading correctness. The candidate generator fills missing ruby only; preserve existing human-reviewed or legacy ruby. The Agent audits every ruby span like semantic phrase segmentation, using the full lyric sentence, grammar, inflection, lexical word boundaries, and context, and may approve it or write a correction directly back to the canonical SUG. Human review is not mandatory for every span: escalate only ambiguity, proper nouns, artistic readings, evidence conflicts, low confidence, or `unresolved` results. If no correction is made, retain the default ruby. Do not force one ruby group per kanji: keep a multi-kanji lexical word or jukujikun such as `今年→ことし`, `来年→らいねん`, or `一番→いちばん` together. Do not merge adjacent lexical words merely because their readings are contiguous; for example, keep `一番|好|き` as `一番→いちばん`, `好→す`, and unannotated okurigana `き`, rather than `一番好→いちばんす`. For StrangeUtaGame, inspect every ruby-bearing line's canonical SUG `linked_to_next` chain, compare the same surface spans and readings in the ASS/report, and inspect a rendered frame to confirm each ruby is centered over the intended word. The renderer reads only the reviewed canonical SUG and must not infer or override ruby. Record per-span status, confidence, evidence, model/prompt version, and before/after SUG hashes; fail release when the SUG, ASS/report, or final frame disagrees, even if the concatenated reading text is correct, while preserving character timing unless timing is the explicit task.
-- Apply extra in-line semantic spacing only at approved breath or semantic boundaries. Record the boundary character indices and one configured pixel/em value, then verify coordinate deltas independently from perceived spacing caused by glyph shape, highlight state, or ruby.
-- Reject a ruby chain when its resolved surface characters contain more than one `singer_id`; never split or silently reassign a cross-singer span during rendering. Run this check in the one-click preflight, final render, and lower-level renderer gate.
-- Treat cue pairing, lane reset, countdown anchoring, ruby, target font sizes, display preload, per-character sweep onset/release, line release, event end, and outro visibility as separate explicit contracts rather than incidental renderer behavior. A report that a red sweep is early or short does not authorize moving the lyric display preload; change preload only when the user reports that lyric visibility itself is wrong.
-- When the established album layout preloads intro lyrics from program start and interlude lyrics from the preceding visible event end, preserve those starts independently of the later countdown-dot window and acoustic onset. Keep the approved outro marker visible from the final lyric event end through the media end unless the user explicitly requests a clean tail.
-- For a held syllable reported as too short, inspect the following character's sweep onset as well as the current character's release. If the following onset was assigned inside the held vowel, move the reviewed following onset (or a renderer-only visual onset) so the held glyph consumes the sustain; do not misuse a line-level preload or event boundary to create the effect. Distinguish sustained sound from a silent breath before accepting the change.
-- Record the cover-derived palette and current extractor hash in composition metadata, together with `cover_sha256`. Bind the composition, ASS, video, and workflow report to the same `color_plan_sha256`; stale or inconsistent cover/extractor/palette metadata fails closed. Synchronize the plan's approved RGB values across the resolved singer colour projection, ASS `Main`/`Glow` primary colour, spectrum, progress, and active cue colours while retaining the approved unhighlighted, outline, alpha, and ruby colours. Verify the RGB-to-ASS BGR conversion and inspect a partial-sweep frame. The source SUG remains unchanged.
-- For wide-layout karaoke output, fix the default typography at `1.5x` the project's established `1x` baseline for main lyrics, ruby, and countdown cues. For the current 72/34/26 px baseline, require 108/51/39 px respectively. Use a 35 px ruby-to-main anchor gap and place countdown cues 16 px above the ruby anchor. Apply both spacing values consistently to upper, lower, outro, and cue layouts. Do not switch to `2x`, silently shrink, or change only one of these layers unless the user explicitly requests it or measured overflow is accepted as a recorded, rollback-safe exception.
-- Treat externally produced original-mix and separated-vocal MMS audit results as timing evidence, not delivery tracks. MMS is not run by the one-click or batch renderer. Resolve conflicts with recorded confidence and human A/B review.
-- Use the configured language profile for the documented ASR and alignment path; require a validated adapter for any non-default profile. Keep independent ASR separate from stable-ts and any explicitly run MMS forced alignment; it may support, veto, or remain unresolved, but is never a silent fallback that replaces failed alignment. If ASR is unavailable or errors, record `unresolved` and require other evidence or human review.
-- In StrangeUtaGame, pronunciation validation is an explicit `optional`, `required`, or `off` mode and defaults to non-blocking `optional`. `optional` keeps structural ruby checks and SUG/ASS/frame agreement mandatory, but a missing semantic sidecar is recorded as not performed and does not block release. Use `required` only when explicitly requested; use `off` to disable semantic-sidecar review.
-- Resolve CJK fonts explicitly and inspect missing-glyph or fallback-font warnings.
-- Correct odd dimensions by an explicit pad or scale decision before subtitle rendering; prefer padding when cropping would discard content.
-- Render a short preview covering the title, first lyric, longest line, representative lyric changes, dense timing, and ending before the full encode.
-- When a rotating disc or other periodic artwork is generated, require rotationally continuous source art: no unintended transparent wedge, partial shadow/highlight arc, colour sector, or seam that sweeps around as the asset rotates. For an opaque disc on a transparent square canvas, verify that every pixel safely inside the disc is fully opaque and the surrounding canvas remains transparent; semi-transparent details must be alpha-composited over the opaque surface instead of replacing its alpha. Inspect the source PNG with alpha visible and compare frames at four quarter-period phases. Bind the render report to the exact artwork path and SHA-256; reusing the same filename is allowed only after regenerating the image and refreshing its identity, never as proof that the pixels are unchanged or correct.
-- Keep vinyl rotating (`vinyl_motion: rotate`); `static` describes only a background/composition layer, not the Japanese delivery default. Every formal and test run must rebuild the current vinyl with style `direction-neutral-concentric-grooves/v3/backplate-absent`, record the generator and `vinyl_sha256`, and pass that exact generated path via `--vinyl`. The canonical/old `vinyl.png` is identity-only and must never be silently reused. Do not reintroduce either removed right-side backing panel. If cover extraction uses another audio file, record it as `cover-source-audio` separately from delivery audio.
-- Check safe margins, line wrapping, outline/shadow, contrast, and whether lyrics cover faces or essential content.
-- Preserve source timing unless a deliberate constant-frame-rate conversion or offset correction is documented.
+## MMS identity and gate boundary
 
-## AV1 4:2:0 Gate
+The dedicated Japanese and zh/en MMS entries do not check hashes. Any
+`*_sha256` field is report-only metadata and must not affect checks, gates,
+exception handling, or exit status; use the resolved absolute-path, schema,
+song/language, token/index, timeline, and (for zh/en) dual-ASR semantics in
+the shared MMS reference. Existing normal non-MMS ASS/encoding checks remain
+unchanged and are outside this rule.
 
-- Prefer `yuv420p10le` for 10-bit software encoding and `p010le` as the 10-bit NVENC input format. Use `yuv420p` for an 8-bit compatibility variant.
-- Never assume the encoder retained 4:2:0; verify the final `pix_fmt` with ffprobe.
-- Use AV1 NVENC for fast previews or delivery when a real probe encode succeeds. Use `libaom-av1` as the CPU fallback and reproducible quality lane.
-- Do not infer hardware support from the encoder list alone. Run a short synthetic or source preview encode first.
-- Use the default release video profile for 1920x1080 30 fps SDR delivery: AV1 NVENC CQ38 with the preset fixed at `p7`, `tune hq`, VBR, full-resolution multipass, lookahead 32, spatial and temporal AQ, AQ strength 8, GOP 240, `yuv420p`, and BT.709 color metadata. Verify every value with `ffprobe`; use another profile only when explicitly requested and recorded.
-- Keep speed and image quality claims separate. Use `libaom-av1` as the CPU fallback and reproducible quality lane, and do not infer hardware support from the encoder list alone; run a short probe encode first.
-- Preserve documented HDR metadata. For ordinary SDR sources, do not introduce HDR or conflicting color tags; verify expected BT.709 metadata when applicable.
+## Language contract
 
-## Audio And Container Gate
+- **Japanese (`ja`):** ruby may be present only in the reviewed canonical SUG.
+  Pure katakana spans receive no separate ruby; a stale pure-katakana ruby is
+  ignored by validation and rendering without mutating the source project.
+  Preserve other reviewed ruby, validate lexical boundaries and rendered
+  agreement, and reject any cross-singer ruby span. Pass canonical reviewed
+  readings to MMS first and use generic reading fallback only for uncovered
+  visible text. Numeric and mixed text use the same generic rules; keep
+  release-specific corrections in external review data, never shared code.
+- **Chinese (`zh`):** use whole-sentence context plus tone-less pinyin only as
+  supplied alignment input. Preserve the frozen display text.
+- **English (`en`):** use orthographic whole words as supplied alignment input.
+  Keep one editable timing unit per word; renderer-only letter interpolation
+  must not be persisted to the SUG.
+- **Chinese and English display:** render zero ruby, zero pinyin, and zero
+  phonetic overlays. MMS and stable-ts are supplied-token forced alignment,
+  not independent ASR or phoneme recognition.
+- **Independent ASR:** transcribe without lyric prompting, remain separate from
+  forced alignment, and never rewrite frozen lyrics. Full zh/en MMS requires
+  exactly two accepted reports: one `stem` lane and one `mix` lane, both with
+  `support`.
 
-- Mix stems before final muxing and check gain, clipping, channel layout, sample rate, silence, and start/end synchronization.
-- Map intended streams explicitly. Default to one selected audio stream; when preserving multiple tracks, enumerate and validate every track. Do not rely on FFmpeg automatic stream selection.
-- When independent video and audio durations differ, choose and document trim, pad, loop, or stop behavior. Do not use `-shortest` to hide an unresolved timeline mismatch.
-- Inspect non-zero start times and preserve relative offsets unless one documented timeline normalization is applied consistently. Decide whether VFR is preserved or converted to an explicit CFR.
-- Make the default compatibility delivery MP4 with AAC-LC at 320 kb/s. Keep `--output` and ordinary playback/package references pointed at this MP4. MKV is never an implicit companion: create or report it only after the user explicitly requests `--lossless-companion` (or an underlying explicit `--lossless-output`) and probing proves FLAC or PCM WAV.
-- For an explicit MKV request, copy the encoded video stream from the verified MP4 and encode FLAC directly from the same trimmed source-audio interval; never transcode MP4 AAC to FLAC or label a lossy-source conversion as lossless. Without the opt-in, do not create, expect, or report an MKV.
-- Reject an explicit MKV request when the source codec is MP3/AAC or otherwise lossy, even when its extension claims FLAC/WAV. Preserve the lossless source sample rate and channel structure; do not force the MP4's 44.1 kHz stereo conversion onto the MKV.
-- Use MP4 for hard-subtitle platform delivery. Use MKV when preserving ASS as a soft subtitle track or carrying multiple tracks.
-- Do not promise complex ASS soft-subtitle styling in MP4; burn it in or switch to MKV.
-- Produce an H.264 compatibility fallback when the target device or platform has uncertain AV1 support.
-- Keep master, subtitle source, font manifest, encode log, and delivery outputs distinct.
-- Validate the default MP4 alone before promotion. Only when the MKV opt-in is present validate MP4 and MKV as one generation: AAC-LC/320k target metadata on MP4, FLAC-only audio on MKV, identical encoded video-stream hashes, decoded MKV PCM equal to the selected lossless source slice, matching timeline bounds within tolerance, and rollback-safe paired publication. Do not use `-shortest` to conceal drift.
-- When pitch shifting is requested, run `scripts/pitch_shift_audio.py` on the complete mix before timing/rendering. Require a probed FLAC or PCM source and reject MP3/AAC input for an explicit lossless companion; never relabel a lossy-source transform as lossless. Treat signed semitones literally, use Rubber Band R3 Finer with formant preservation by default for vocals, keep tempo unchanged, and feed the verified FLAC result into timing evidence and default MP4 muxing. Add it to an MKV only when the explicit opt-in is present. Do not separate vocals merely to shift the complete mix.
+Resolve singer identity only from explicit SUG metadata. Build one shared
+`karaoke-color-plan/v1`; color planning must not mutate the source SUG.
 
-## Verification Gate
+## Editable-project and release rules
 
-1. Use ffprobe to verify video codec, pixel format, dimensions, frame rate, color metadata, audio codec, channel layout, duration, and subtitle tracks.
-2. Do not run a complete null decode by default. Use it only when the user requests it or when probe, mux, transport, or corruption evidence makes it a useful diagnostic. Full decode is never a mandatory release gate: missing full-decode evidence alone must not block promotion, lower verification status, or create a requirement that every artifact carry a decoder exit code. Report an unperformed diagnostic as `performed: false`, never as a successful decode; only an executed diagnostic can pass or fail.
-3. Inspect frames at the beginning, representative lyric changes, longest subtitle, and ending.
-4. Check audio/video synchronization near both the start and end, not only the first lyric.
-5. Confirm dimensions are even, timestamps are monotonic, ASS events remain within the output timeline, and first/last audio-video timestamps differ by no more than the stricter project tolerance or `max(1 frame, 2 audio frames, 50 ms)`.
-6. Confirm the output duration is expected, file size is plausible, and no stream disappeared during muxing. When an optional full or sampled decode is performed, map every intended stream and record its exact window and exit code.
-7. Keep the temporary output on the same volume as the destination. Promote it only after every mandatory gate passes; retain a rollback path to the previous accepted artifact, and probe the final destination again after promotion.
-8. Capture the actual decoder process exit code for every executed full or sampled decode. Do not treat media-info output, an unperformed decode, a missing serialized exit code, or a status flag from a different generation as decode success.
-9. Pair timing and overlap metrics with boundary-frame inspection. Do not accept release counts until source, override, ASS, report, output, and `color_plan_sha256` identities belong to the same generation. Fail closed when composition `cover_sha256`, extractor hash, or palette is stale or inconsistent.
+Treat the reviewed SUG as the editable source, not as an incidental export.
+Use the project-local audio probe for manual review, prove that audio reached
+the playback engine, and never auto-save a guarded probe session. Rebuild ASS
+and media from a deliberately saved canonical source.
 
-## Reporting
+Keep the default output MP4 with hard subtitles, AV1 video, and AAC-LC audio.
+Create an MKV/FLAC companion only after explicit `--lossless-companion` and a
+probe proves a lossless FLAC or PCM source. Never transcode MP4 AAC to a
+lossless companion or accept MP3/AAC as lossless.
 
-Report redacted input labels, subtitle and font sources, rights evidence status, fact-chain identities, cover/extractor/palette inputs, `color_plan_sha256`, phrase/cue/ruby/release decisions, FFmpeg version/build configuration, encoder and rate-control lane, dependency and redistribution assumptions, pixel format, color decision, audio/container choices, sanitized commands, previews, probe summary, output files, archive verification when applicable, compatibility fallback, remaining risks, and rollback point. Represent full decode with `performed`, `required`, `recommended`, and `reason`; list sampled windows and real exit codes only when actually executed. Do not expose absolute local paths or unapproved media tags.
+## AV1 4:2:0 release gate
+
+- Target the documented AV1 Main/`av01` profile with `yuv420p`, BT.709 metadata,
+  and the project release frame rate/resolution. Verify the final stream with
+  `ffprobe`; never infer 4:2:0 from the encoder list.
+- Prefer the tested NVENC release lane after a real probe encode; use
+  `libaom-av1` as the CPU/reproducible fallback. Keep speed claims separate
+  from quality claims.
+- Keep MP4/AAC as the default compatibility delivery. Require explicit
+  opt-in and lossless-source proof for MKV/FLAC.
+- Treat full null decode as an optional diagnostic. Record
+  `performed: false` and a reason when it is not run; never turn an unperformed
+  decode into a pass or a release blocker.
+- Inspect representative frames, subtitle boundaries, audio/video sync, stream
+  presence, timestamps, dimensions, and duration before promotion. Preserve a
+  same-volume rollback copy and re-probe the promoted destination.
+
+## First pass and reporting
+
+1. Read project instructions and inventory audio, lyrics, SUG/ASS, artwork,
+   fonts, model identities, and rights evidence.
+2. Use `uv run --no-sync` with the existing project environment. Use a
+   task-owned temporary output and preserve source artifacts until all gates
+   pass.
+3. Generate a short preview covering title, first lyric, longest line, dense
+   timing, representative color/secondary states, and ending.
+4. Report sanitized inputs, route and mode, source/model/cache identities,
+   SUG and sidecar identities, timing/ASR decisions, AV1/audio/container
+   choices, probe results, optional diagnostics, output paths, remaining risks,
+   and the rollback point. Do not expose absolute local paths or unapproved
+   media tags.
+
+For any layout coordinate, font size, margin, or spectrum-bar question, read
+[wide-visual-templates.md](references/wide-visual-templates.md). Do not add a
+second numeric layout source.

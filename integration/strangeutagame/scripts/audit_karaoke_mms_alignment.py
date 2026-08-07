@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
 """Run a reproducible dual-audio MMS alignment audit for karaoke timings.
 
-This is the production version of the two issue-review scripts that were used
-to audit only the first two tracks.  It deliberately keeps the expensive MMS
-imports and model construction behind :func:`load_mms_runtime`, so the pure
-mapping and crop-window helpers can be unit-tested without downloading or
-loading the model.
-
-Typical invocations from the repository root are::
-
-    uv run --no-sync python scripts/audit_karaoke_mms_alignment.py
-    uv run --no-sync python scripts/audit_karaoke_mms_alignment.py \
-        --song-id SONG_ID [SONG_ID ...]
-
-With no ``--song-id`` the complete manifest is audited.  The report defaults
-to ``deliverables/<album>/sources/mms_alignment_audit.json`` and keeps
-the existing ``karaoke-mms-dual-audio-audit/v1`` shape.
+The command audits tracks selected from an explicit manifest. Expensive MMS
+imports and model construction stay behind :func:`load_mms_runtime`, so pure
+mapping and crop-window helpers remain unit-testable without loading the model.
+With no ``--song-id`` the complete explicit manifest is audited, and the
+default report location is derived from that manifest.
 """
 
 from __future__ import annotations
@@ -23,7 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
+import re
 import sys
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
@@ -39,7 +29,6 @@ if str(ROOT) not in sys.path:
 try:
     from scripts import karaoke_timing
     from scripts.karaoke_album import (
-        DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         AlbumTrack,
         load_album_manifest,
@@ -48,14 +37,19 @@ try:
     )
     from scripts.karaoke_language import (
         DEFAULT_LANGUAGE,
+        contextual_pinyin_for_text,
+        english_word_spans,
+        is_chinese_character,
         language_identity,
         mms_granularity,
         normalize_language,
+        pinyin_for_character,
     )
+    from scripts.karaoke_model_paths import resolve_mms_model_path
+    from scripts.sug_ruby import iter_sug_ruby_spans
 except ImportError:  # pragma: no cover - direct execution fallback
     import karaoke_timing  # type: ignore[no-redef]
     from karaoke_album import (  # type: ignore[no-redef]
-        DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         AlbumTrack,
         load_album_manifest,
@@ -64,30 +58,31 @@ except ImportError:  # pragma: no cover - direct execution fallback
     )
     from karaoke_language import (  # type: ignore[no-redef]
         DEFAULT_LANGUAGE,
+        contextual_pinyin_for_text,
+        english_word_spans,
+        is_chinese_character,
         language_identity,
         mms_granularity,
         normalize_language,
+        pinyin_for_character,
     )
+    from karaoke_model_paths import resolve_mms_model_path  # type: ignore[no-redef]
+    from sug_ruby import iter_sug_ruby_spans  # type: ignore[no-redef]
 
 
 SCHEMA_VERSION = "karaoke-mms-dual-audio-audit/v1"
+SCHEMA_VERSION_V2 = "karaoke-mms-dual-audio-audit/v2"
+UNIT_OVERRIDES_SCHEMA_VERSION = "karaoke-mms-unit-overrides/v1"
 MODEL_NAME = "torchaudio.pipelines.MMS_FA"
-DEFAULT_TORCH_HOME = ROOT / ".cache" / "torch"
 DEFAULT_VOCALS_ROOT = ROOT / ".cache" / "msst-vocals"
 _MORA_JOINING_SMALL_KANA = karaoke_timing._MORA_JOINING_SMALL_KANA
 _DEFAULT_ALLOWED_UNITS = frozenset("abcdefghijklmnopqrstuvwxyz'")
+_ASCII_MMS_UNIT_RE = re.compile(r"[a-z]+(?:'[a-z]+)*\Z")
 ALIGNMENT_EVIDENCE_CONTRACT = karaoke_timing.ALIGNMENT_EVIDENCE_CONTRACT
 
 Character = Mapping[str, Any]
 Unit = Mapping[str, Any]
-
-
-def configure_torch_home(project_root: Path = ROOT) -> Path:
-    """Point Torch and MMS at the repository-local cache before importing them."""
-
-    torch_home = (Path(project_root).resolve() / ".cache" / "torch").resolve()
-    os.environ["TORCH_HOME"] = str(torch_home)
-    return torch_home
+OverrideKey = tuple[str, int, int]
 
 
 def _coerce_ms(value: Any) -> int | None:
@@ -287,38 +282,258 @@ def _filter_mms_unit(
     value: str,
     allowed_units: Iterable[str] | None = None,
 ) -> str:
-    """Normalize one romanized mora to the MMS alphabet."""
+    """Normalize a pinyin/word token to the MMS alphabet."""
 
     allowed = set(allowed_units or _DEFAULT_ALLOWED_UNITS)
-    unit = "".join(
-        character for character in str(value).lower() if character in allowed
-    )
+    unit = "".join(character for character in str(value).lower() if character in allowed)
     return unit or "x"
+
+
+def _validated_ascii_mms_unit(
+    value: Any,
+    *,
+    allowed_units: Iterable[str] | None = None,
+    label: str,
+) -> str:
+    """Validate one explicit MMS lexical unit without silently filtering it."""
+
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    unit = value.lower()
+    if value != unit or _ASCII_MMS_UNIT_RE.fullmatch(unit) is None:
+        raise ValueError(
+            f"{label} must use the lowercase ASCII MMS alphabet with only "
+            "internal apostrophes"
+        )
+    allowed = set(allowed_units or _DEFAULT_ALLOWED_UNITS)
+    unsupported = sorted(set(unit) - allowed)
+    if unsupported:
+        raise ValueError(f"{label} contains unsupported MMS symbols: {unsupported}")
+    return unit
+
+
+def normalize_unit_overrides(document: Mapping[str, Any] | None) -> dict[OverrideKey, str]:
+    """Validate structured song/line/token pronunciation overrides."""
+
+    if document is None:
+        return {}
+    if not isinstance(document, Mapping):
+        raise ValueError("unit_overrides must be an object")
+    schema = document.get("schema_version", document.get("schema"))
+    if schema != UNIT_OVERRIDES_SCHEMA_VERSION:
+        raise ValueError(
+            "unit_overrides schema_version must be "
+            f"{UNIT_OVERRIDES_SCHEMA_VERSION!r}"
+        )
+    raw_records = document.get("overrides", document.get("unit_overrides"))
+    if not isinstance(raw_records, list):
+        raise ValueError("unit_overrides overrides must be an array")
+    result: dict[OverrideKey, str] = {}
+    for position, record in enumerate(raw_records):
+        label = f"unit_overrides[{position}]"
+        if not isinstance(record, Mapping):
+            raise ValueError(f"{label} must be an object")
+        required = {"song_id", "line_index", "token_index"}
+        missing = sorted(required - set(record))
+        if missing:
+            raise ValueError(f"{label} is missing fields: {missing}")
+        song_id = record["song_id"]
+        line_index = record["line_index"]
+        token_index = record["token_index"]
+        if not isinstance(song_id, str) or not song_id:
+            raise ValueError(f"{label}.song_id must be a non-empty string")
+        if isinstance(line_index, bool) or not isinstance(line_index, int) or line_index < 0:
+            raise ValueError(f"{label}.line_index must be a non-negative integer")
+        if isinstance(token_index, bool) or not isinstance(token_index, int) or token_index < 0:
+            raise ValueError(f"{label}.token_index must be a non-negative integer")
+        has_unit = "unit" in record
+        has_alignment_text = "alignment_text" in record
+        if has_unit == has_alignment_text:
+            raise ValueError(
+                f"{label} must contain exactly one of unit or alignment_text"
+            )
+        value = record["unit"] if has_unit else record["alignment_text"]
+        unit = _validated_ascii_mms_unit(value, label=f"{label}.unit")
+        key = (song_id, line_index, token_index)
+        if key in result:
+            raise ValueError(f"duplicate unit override target: {key}")
+        result[key] = unit
+    return result
+
+
+def build_alignment_input_units(
+    characters: Sequence[Character],
+    *,
+    language: str,
+    song_id: str,
+    line_index: int,
+    unit_overrides: Mapping[OverrideKey, str] | None = None,
+    matched_override_keys: set[OverrideKey] | None = None,
+    allowed_units: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build v2 MMS input on the structured SUG ``characters`` token axis."""
+
+    language = normalize_language(language)
+    if language not in {"zh", "en"}:
+        raise ValueError("structured SUG token alignment supports only zh/en")
+    overrides = unit_overrides or {}
+    texts = [str(character.get("char") or "") for character in characters]
+    contextual_pinyin = (
+        contextual_pinyin_for_text("".join(texts)) if language == "zh" else ()
+    )
+    text_offsets: list[int] = []
+    offset = 0
+    for text in texts:
+        text_offsets.append(offset)
+        offset += len(text)
+
+    result: list[dict[str, Any]] = []
+    previous_english_word_index: int | None = None
+    for token_index, (character, source_text) in enumerate(zip(characters, texts)):
+        timed = _first_timestamp_ms(character) is not None
+        key = (song_id, line_index, token_index)
+        explicit = overrides.get(key)
+        if explicit is not None:
+            if not timed:
+                raise ValueError(f"unit override targets untimed SUG token {key}")
+            alignment_text = _validated_ascii_mms_unit(
+                explicit,
+                allowed_units=allowed_units,
+                label=f"unit override {key}",
+            )
+            provenance = "explicit-unit-override"
+            if matched_override_keys is not None:
+                matched_override_keys.add(key)
+        elif language == "zh" and len(source_text) == 1 and is_chinese_character(source_text):
+            if not timed:
+                raise ValueError(
+                    f"Chinese lexical SUG token {token_index} is untimed"
+                )
+            alignment_text = _validated_ascii_mms_unit(
+                contextual_pinyin[text_offsets[token_index]],
+                allowed_units=allowed_units,
+                label=f"contextual pypinyin for token {token_index}",
+            )
+            provenance = "contextual-pypinyin"
+        elif language == "en" or (source_text.isascii() and source_text):
+            spans = english_word_spans(source_text)
+            if not spans:
+                if timed:
+                    raise ValueError(
+                        f"punctuation/space SUG token {token_index} must be untimed"
+                    )
+                alignment_text = ""
+                provenance = "non-acoustic-display-token"
+            else:
+                if len(spans) != 1:
+                    raise ValueError(
+                        f"SUG token {token_index} contains multiple English words"
+                    )
+                start, end, word = spans[0]
+                outside = source_text[:start] + source_text[end:]
+                if any(character.isspace() or character.isalnum() for character in outside):
+                    raise ValueError(
+                        f"SUG token {token_index} mixes a word with whitespace/text"
+                    )
+                if not timed:
+                    raise ValueError(f"English word SUG token {token_index} is untimed")
+                if language == "en" and previous_english_word_index is not None:
+                    raise ValueError(
+                        "letter-level or multi-token English word axis is not allowed: "
+                        f"tokens {previous_english_word_index} and {token_index} have no "
+                        "untimed separator"
+                    )
+                alignment_text = _validated_ascii_mms_unit(
+                    word.replace("’", "'").lower(),
+                    allowed_units=allowed_units,
+                    label=f"English word token {token_index}",
+                )
+                provenance = "sug-word-token"
+                previous_english_word_index = token_index
+        else:
+            if timed:
+                raise ValueError(
+                    f"unsupported timed zh SUG token {token_index}: {source_text!r}"
+                )
+            alignment_text = ""
+            provenance = "non-acoustic-display-token"
+
+        if language == "en" and not alignment_text:
+            previous_english_word_index = None
+        result.append(
+            {
+                "source_token_index": token_index,
+                "source_text": source_text,
+                "timed": timed,
+                "alignment_text": alignment_text,
+                "provenance": provenance,
+            }
+        )
+    return result
+
+
+def build_source_token_display_mapping(
+    characters: Sequence[Character],
+) -> list[dict[str, Any]]:
+    """Map every structured SUG token directly to its complete display text."""
+
+    mapping: list[dict[str, Any]] = []
+    for source_token_index, character in enumerate(characters):
+        source_token_display = str(character.get("char") or "")
+        if not source_token_display:
+            raise ValueError(
+                f"SUG token {source_token_index} has empty display text"
+            )
+        mapping.append(
+            {
+                "source_token_index": source_token_index,
+                "source_token_display": source_token_display,
+            }
+        )
+    return mapping
 
 
 def line_units(
     text: str,
     helper: Any,
     *,
-    reading_overrides: Mapping[str, str] | None = None,
     allowed_units: Iterable[str] | None = None,
     language: str = DEFAULT_LANGUAGE,
 ) -> list[tuple[str, int]]:
-    """Convert a lyric line to MMS units while reusing contextual overrides.
+    """Convert display text to generic MMS units for the selected language."""
 
-    ``reading_overrides`` is injectable for deterministic tests or an
-    experiment.  By default the current mapping is read from the imported
-    ``karaoke_timing`` module at call time, so a separately reviewed update to
-    that module is automatically reused by this production script.
-    """
+    language = normalize_language(language)
+    if language == "zh":
+        units: list[tuple[str, int]] = []
+        covered_word_characters: set[int] = set()
+        for start, end, word in english_word_spans(text):
+            unit = _filter_mms_unit(word, allowed_units)
+            if unit == "x":
+                for index in range(start, end):
+                    if karaoke_timing.is_timed_character(text[index]):
+                        units.append((unit, index))
+            else:
+                units.append((unit, start))
+            covered_word_characters.update(range(start, end))
+        for index, character in enumerate(text):
+            if index in covered_word_characters or not is_chinese_character(character):
+                continue
+            unit = _filter_mms_unit(pinyin_for_character(character), allowed_units)
+            if unit == "x":
+                raise ValueError(
+                    f"pypinyin produced no MMS unit for Chinese character "
+                    f"{character!r} at index {index}"
+                )
+            units.append((unit, index))
+        units.sort(key=lambda item: item[1])
+        return units
+    if language == "en":
+        units = [
+            (_filter_mms_unit(word, allowed_units), start)
+            for start, _end, word in english_word_spans(text)
+        ]
+        return units
 
-    normalize_language(language)
-
-    overrides = (
-        reading_overrides
-        if reading_overrides is not None
-        else karaoke_timing._CONTEXTUAL_READING_OVERRIDES
-    )
     cursor = 0
     units: list[tuple[str, int]] = []
     for item in _romanizer().convert(text):
@@ -329,7 +544,7 @@ def line_units(
         if start < 0:
             continue
         cursor = start + len(original)
-        reading = overrides.get(original, str(item.get("hira") or original))
+        reading = str(item.get("hira") or original)
         units.extend(
             allocate_chunk(
                 text,
@@ -342,6 +557,56 @@ def line_units(
             )
         )
     return units
+
+
+def japanese_line_units(
+    sentence: Mapping[str, Any],
+    helper: Any,
+    *,
+    allowed_units: Iterable[str] | None = None,
+) -> list[tuple[str, int]]:
+    """Build Japanese MMS units, preferring canonical SUG ruby spans."""
+
+    characters = sentence.get("characters")
+    if not isinstance(characters, list):
+        raise ValueError("Japanese SUG sentence has no characters array")
+    text = "".join(str(character.get("char") or "") for character in characters)
+    fallback = line_units(
+        text,
+        helper,
+        allowed_units=allowed_units,
+        language="ja",
+    )
+    spans = iter_sug_ruby_spans(
+        {"metadata": {"language": "ja"}, "sentences": [sentence]}
+    )
+    if not spans:
+        return fallback
+
+    covered = {
+        index
+        for span in spans
+        for index in range(span.start, span.end)
+    }
+    canonical: list[tuple[str, int]] = []
+    for span in spans:
+        canonical.extend(
+            allocate_chunk(
+                text,
+                span.start,
+                span.surface,
+                span.reading,
+                helper,
+                allowed_units=allowed_units,
+                language="ja",
+            )
+        )
+
+    result: list[tuple[str, int]] = []
+    for index in range(len(characters)):
+        source = canonical if index in covered else fallback
+        result.extend(item for item in source if item[1] == index)
+    return result
 
 
 def validate_mms_units(
@@ -367,12 +632,16 @@ def validate_mms_units(
     return supported, frozenset(retained_indices)
 
 
-def char_candidates(units: Sequence[Unit]) -> dict[int, dict[str, Any]]:
+def char_candidates(
+    units: Sequence[Unit],
+    *,
+    index_field: str = "character_index",
+) -> dict[int, dict[str, Any]]:
     """Group MMS units by source character, preserving first onset semantics."""
 
     grouped: dict[int, list[Unit]] = defaultdict(list)
     for item in units:
-        grouped[int(item["character_index"])].append(item)
+        grouped[int(item[index_field])].append(item)
     return {
         index: {
             "start_ms": int(items[0]["start_ms"]),
@@ -428,14 +697,43 @@ def inherit_display_group_candidates(
 ) -> dict[int, dict[str, Any]]:
     """Share one acoustic onset across glyphs forming one spoken unit.
 
-    Small kana already inherit their base mora.  Consecutive digits need the
-    same treatment after a reviewed reading override expands a written number
-    such as ``100`` to ``ひゃく``: MMS aligns the reading's morae, while the
-    three display glyphs must sweep as one lexical unit.
+    Small kana already inherit their base mora. Consecutive digits similarly
+    share an onset when a general romanizer emits a spoken unit spanning
+    multiple display glyphs.
     """
 
-    normalize_language(language)
+    language = normalize_language(language)
     candidates = inherit_small_kana_candidates(text, units)
+    if language == "en":
+        for start, end, _word in english_word_spans(text):
+            group = [
+                (candidate_index, candidates[candidate_index])
+                for candidate_index in range(start, end)
+                if candidate_index in candidates
+            ]
+            if not group:
+                continue
+            source_index, source = min(
+                group,
+                key=lambda item: (int(item[1]["start_ms"]), item[0]),
+            )
+            grouped = {
+                "start_ms": int(source["start_ms"]),
+                "end_ms": max(int(item[1]["end_ms"]) for item in group),
+                "score": round(
+                    sum(float(item[1]["score"]) for item in group) / len(group),
+                    6,
+                ),
+            }
+            for word_index in range(start, end):
+                candidates[word_index] = {
+                    **grouped,
+                    **(
+                        {"inherited_from_character_index": source_index}
+                        if word_index != source_index
+                        else {}
+                    ),
+                }
     index = 0
     while index < len(text):
         if not text[index].isdigit():
@@ -481,11 +779,16 @@ def build_comparisons(
     *,
     retained_character_indices: Iterable[int] = (),
     language: str = DEFAULT_LANGUAGE,
+    index_field: str = "character_index",
 ) -> list[dict[str, Any]]:
     """Build current-vs-MMS comparisons, including inherited small kana."""
 
     text = "".join(str(character.get("char") or "") for character in characters)
-    candidates = inherit_display_group_candidates(text, units, language=language)
+    candidates = (
+        inherit_display_group_candidates(text, units, language=language)
+        if index_field == "character_index"
+        else char_candidates(units, index_field=index_field)
+    )
     retained = frozenset(int(index) for index in retained_character_indices)
     timed = _timed_characters(characters)
     comparisons: list[dict[str, Any]] = []
@@ -495,7 +798,7 @@ def build_comparisons(
             if character_index in retained:
                 comparisons.append(
                     {
-                        "character_index": character_index,
+                        index_field: character_index,
                         "character": str(character.get("char") or ""),
                         "current_ms": current_ms,
                         "mms_ms": current_ms,
@@ -512,7 +815,7 @@ def build_comparisons(
             )
         mms_ms = int(candidate["start_ms"])
         comparison: dict[str, Any] = {
-            "character_index": character_index,
+            index_field: character_index,
             "character": str(character.get("char") or ""),
             "current_ms": current_ms,
             "mms_ms": mms_ms,
@@ -534,15 +837,20 @@ def build_dual_audio_comparisons(
     mix_units: Sequence[Unit],
     *,
     language: str = DEFAULT_LANGUAGE,
+    index_field: str = "character_index",
 ) -> list[dict[str, Any]]:
     """Pair isolated-vocal and original-mix MMS candidates by character index."""
 
     text = "".join(str(character.get("char") or "") for character in characters)
-    vocal = inherit_display_group_candidates(text, vocal_units, language=language)
-    mix = inherit_display_group_candidates(text, mix_units, language=language)
+    if index_field == "character_index":
+        vocal = inherit_display_group_candidates(text, vocal_units, language=language)
+        mix = inherit_display_group_candidates(text, mix_units, language=language)
+    else:
+        vocal = char_candidates(vocal_units, index_field=index_field)
+        mix = char_candidates(mix_units, index_field=index_field)
     paired: list[dict[str, Any]] = []
     for comparison in comparisons:
-        index = int(comparison["character_index"])
+        index = int(comparison[index_field])
         if comparison.get("alignment_disposition") == "stable-ts-retained-ascii":
             current_ms = int(comparison["current_ms"])
             paired.append(
@@ -643,20 +951,11 @@ def _validate_mms_model_access(
     model_path: Path | None,
     *,
     allow_network: bool,
-) -> Path | None:
-    """Require a local checkpoint unless network access is explicitly allowed."""
+) -> Path:
+    """Resolve only a local MMS checkpoint; network fallback is unsupported."""
 
-    if model_path is not None:
-        resolved = Path(model_path).expanduser().resolve()
-        if not resolved.is_file():
-            raise FileNotFoundError(f"MMS model checkpoint does not exist: {resolved}")
-        return resolved
-    if not allow_network:
-        raise RuntimeError(
-            "MMS model loading is offline by default; provide model_path "
-            "or explicitly set allow_network=True"
-        )
-    return None
+    del allow_network
+    return resolve_mms_model_path(model_path)
 
 
 def load_mms_runtime(
@@ -665,28 +964,23 @@ def load_mms_runtime(
     model_path: Path | None = None,
     allow_network: bool = False,
 ) -> MmsRuntime:
-    """Configure the project cache and load one explicitly authorized MMS model."""
+    """Load one explicitly authorized or canonical repository-local MMS model."""
 
     local_model_path = _validate_mms_model_access(
         model_path,
         allow_network=allow_network,
     )
 
-    torch_home = configure_torch_home(project_root)
+    del project_root
     import torch
     import torchaudio
     from torchaudio.pipelines import MMS_FA
 
-    torch.hub.set_dir(str(torch_home / "hub"))
-    checkpoint_dir = Path(torch.hub.get_dir()) / "checkpoints"
-    download_options = {"model_dir": str(checkpoint_dir)}
-    if local_model_path is not None:
-        download_options = {
-            "model_dir": str(local_model_path.parent),
-            "file_name": local_model_path.name,
-        }
+    download_options = {
+        "model_dir": str(local_model_path.parent),
+        "file_name": local_model_path.name,
+    }
     model = MMS_FA.get_model(dl_kwargs=download_options).eval()
-    resolved_model_path = local_model_path or checkpoint_dir / "model.pt"
     return MmsRuntime(
         torch=torch,
         torchaudio=torchaudio,
@@ -695,7 +989,7 @@ def load_mms_runtime(
         aligner=MMS_FA.get_aligner(),
         allowed_units=frozenset(str(unit) for unit in MMS_FA.get_dict()),
         sample_rate=int(MMS_FA.sample_rate),
-        model_path=resolved_model_path,
+        model_path=local_model_path,
     )
 
 
@@ -705,6 +999,8 @@ def align_audio_units(
     crop_end_ms: int,
     units: Sequence[Unit],
     runtime: MmsRuntime,
+    *,
+    index_field: str = "character_index",
 ) -> list[dict[str, Any]]:
     """Run MMS on one crop and retain the source character index per unit."""
 
@@ -751,7 +1047,7 @@ def align_audio_units(
         if not unit_spans:
             raise RuntimeError(
                 "MMS returned an empty token span for "
-                f"{source['unit']!r} at character {source['character_index']}"
+                f"{source['unit']!r} at source index {source[index_field]}"
             )
         start_frame = min(span.start for span in unit_spans)
         end_frame = max(span.end for span in unit_spans)
@@ -762,7 +1058,7 @@ def align_audio_units(
         results.append(
             {
                 "unit": str(source["unit"]),
-                "character_index": int(source["character_index"]),
+                index_field: int(source[index_field]),
                 "start_ms": round(crop_start_ms + start_frame * ratio_ms),
                 "end_ms": round(crop_start_ms + end_frame * ratio_ms),
                 "score": round(score, 6),
@@ -794,7 +1090,9 @@ def audit_track(
     runtime: MmsRuntime,
     vocals_root: Path,
     *,
-    reading_overrides: Mapping[str, str] | None = None,
+    schema_version: str = SCHEMA_VERSION,
+    unit_overrides: Mapping[OverrideKey, str] | None = None,
+    matched_override_keys: set[OverrideKey] | None = None,
 ) -> dict[str, Any]:
     """Audit one manifest track against its MSST vocal and original MP3."""
 
@@ -816,6 +1114,9 @@ def audit_track(
     metadata = project.get("metadata")
     metadata_language = metadata.get("language") if isinstance(metadata, dict) else None
     language = normalize_language(metadata_language, default=track.language)
+    structured_axis = schema_version == SCHEMA_VERSION_V2
+    if structured_axis and language not in {"zh", "en"}:
+        raise ValueError("audit v2 supports only zh/en tracks")
     song: dict[str, Any] = {
         "song_id": track.song_id,
         "title": track.title,
@@ -853,13 +1154,7 @@ def audit_track(
                 characters,
                 vocal_duration_ms,
             )
-            raw_units = line_units(
-                text,
-                helper,
-                reading_overrides=reading_overrides,
-                allowed_units=runtime.allowed_units,
-                language=language,
-            )
+            alignment_input_units: list[dict[str, Any]] = []
             timed_character_indices = [
                 character_index
                 for character_index, _character, _timestamp in _timed_characters(
@@ -874,26 +1169,70 @@ def audit_track(
             comparisons: list[dict[str, Any]] = []
             dual: list[dict[str, Any]] = []
             try:
-                units, retained_character_indices = validate_mms_units(text, raw_units)
+                if structured_axis:
+                    alignment_input_units = build_alignment_input_units(
+                        characters,
+                        language=language,
+                        song_id=track.song_id,
+                        line_index=line_index,
+                        unit_overrides=unit_overrides,
+                        matched_override_keys=matched_override_keys,
+                        allowed_units=runtime.allowed_units,
+                    )
+                    units = [
+                        (str(item["alignment_text"]), int(item["source_token_index"]))
+                        for item in alignment_input_units
+                        if item["alignment_text"]
+                    ]
+                else:
+                    raw_units = (
+                        japanese_line_units(
+                            sentence,
+                            helper,
+                            allowed_units=runtime.allowed_units,
+                        )
+                        if language == "ja"
+                        else line_units(
+                            text,
+                            helper,
+                            allowed_units=runtime.allowed_units,
+                            language=language,
+                        )
+                    )
+                    units, retained_character_indices = validate_mms_units(
+                        text, raw_units
+                    )
+                index_field = (
+                    "source_token_index" if structured_axis else "character_index"
+                )
                 vocal_units = align_audio_units(
                     vocals_audio,
                     crop_start_ms,
                     crop_end_ms,
-                    [{"unit": unit, "character_index": index} for unit, index in units],
+                    [
+                        {"unit": unit, index_field: index}
+                        for unit, index in units
+                    ],
                     runtime,
+                    index_field=index_field,
                 )
                 mix_units = align_audio_units(
                     mix_audio,
                     crop_start_ms,
                     crop_end_ms,
-                    [{"unit": unit, "character_index": index} for unit, index in units],
+                    [
+                        {"unit": unit, index_field: index}
+                        for unit, index in units
+                    ],
                     runtime,
+                    index_field=index_field,
                 )
                 comparisons = build_comparisons(
                     characters,
                     vocal_units,
                     retained_character_indices=retained_character_indices,
                     language=language,
+                    index_field=index_field,
                 )
                 dual = build_dual_audio_comparisons(
                     characters,
@@ -901,11 +1240,13 @@ def audit_track(
                     vocal_units,
                     mix_units,
                     language=language,
+                    index_field=index_field,
                 )
             except (RuntimeError, ValueError) as exc:
                 alignment_error = f"{type(exc).__name__}: {exc}"
-            comparison_indices = [int(item["character_index"]) for item in comparisons]
-            dual_indices = [int(item["character_index"]) for item in dual]
+            index_field = "source_token_index" if structured_axis else "character_index"
+            comparison_indices = [int(item[index_field]) for item in comparisons]
+            dual_indices = [int(item[index_field]) for item in dual]
             coverage_complete = (
                 alignment_error is None
                 and comparison_indices == timed_character_indices
@@ -927,7 +1268,9 @@ def audit_track(
                 else None
             )
             mix_last_unit_end_ms = (
-                max(int(item["end_ms"]) for item in mix_units) if mix_units else None
+                max(int(item["end_ms"]) for item in mix_units)
+                if mix_units
+                else None
             )
             line = {
                 "line_index": line_index,
@@ -937,11 +1280,16 @@ def audit_track(
                 "mms_granularity": mms_granularity(language),
                 "crop_start_ms": crop_start_ms,
                 "crop_end_ms": crop_end_ms,
-                "timed_character_indices": timed_character_indices,
-                "timed_character_count": len(timed_character_indices),
-                "stable_ts_retained_character_indices": sorted(
-                    retained_character_indices
-                ),
+                (
+                    "timed_source_token_indices"
+                    if structured_axis
+                    else "timed_character_indices"
+                ): timed_character_indices,
+                (
+                    "timed_source_token_count"
+                    if structured_axis
+                    else "timed_character_count"
+                ): len(timed_character_indices),
                 "sug_release_ms": release_ms,
                 "vocal_last_unit_end_ms": vocal_last_unit_end_ms,
                 "mix_last_unit_end_ms": mix_last_unit_end_ms,
@@ -959,8 +1307,7 @@ def audit_track(
                 "comparisons": comparisons,
                 "mix_units": mix_units,
                 "dual_audio_comparisons": dual,
-                "actual_dual_audio": coverage_complete
-                and not retained_character_indices,
+                "actual_dual_audio": coverage_complete and not retained_character_indices,
                 "coverage_complete": coverage_complete,
                 "unresolved": bool(unresolved_reasons),
                 "unresolved_reasons": unresolved_reasons,
@@ -973,6 +1320,19 @@ def audit_track(
                     ],
                 },
             }
+            if structured_axis:
+                line.update(
+                    alignment_input_units=alignment_input_units,
+                    source_token_display_mapping=build_source_token_display_mapping(
+                        characters
+                    ),
+                    unit_axis="structured-sug-token",
+                    phoneme_alignment=False,
+                )
+            else:
+                line["stable_ts_retained_character_indices"] = sorted(
+                    retained_character_indices
+                )
             song["lines"].append(line)
             notable = [
                 item
@@ -988,16 +1348,17 @@ def audit_track(
                         f" inherited-from={inherited}" if inherited is not None else ""
                     )
                     print(
-                        f"  i{int(item['character_index']):02} {item['character']} "
+                        f"  i{int(item[index_field]):02} {item['character']} "
                         f"old={item['current_ms']} vocal={item['vocal_mms_ms']} "
                         f"mix={item['mix_mms_ms']} agree={item['vocal_minus_mix_ms']:+} "
                         f"scores={float(item['vocal_score']):.3f}/"
                         f"{float(item['mix_score']):.3f}{marker}"
                     )
     song["line_count"] = len(song["lines"])
-    song["timed_character_count"] = sum(
-        int(line["timed_character_count"]) for line in song["lines"]
+    count_field = (
+        "timed_source_token_count" if structured_axis else "timed_character_count"
     )
+    song[count_field] = sum(int(line[count_field]) for line in song["lines"])
     song["unresolved"] = [
         {
             "line_index": line["line_index"],
@@ -1009,7 +1370,7 @@ def audit_track(
     song["unresolved_count"] = len(song["unresolved"])
     song["gate_ok"] = (
         song["line_count"] > 0
-        and song["timed_character_count"] > 0
+        and song[count_field] > 0
         and song["unresolved_count"] == 0
     )
     return song
@@ -1038,16 +1399,32 @@ def _report_gate_ok(songs: Sequence[Mapping[str, Any]], unresolved_count: int) -
 def run_audit(
     *,
     song_ids: Sequence[str] | None = None,
-    manifest_path: Path = DEFAULT_MANIFEST_PATH,
+    manifest_path: Path,
     source_path: Path | None = None,
     output_path: Path | None = None,
     vocals_root: Path | None = None,
-    reading_overrides: Mapping[str, str] | None = None,
+    schema_version: str = SCHEMA_VERSION,
+    version: str | None = None,
+    unit_overrides: Mapping[str, Any] | None = None,
     allow_partial_manifest: bool = False,
     model_path: Path | None = None,
     allow_network: bool = False,
 ) -> dict[str, Any]:
     """Load the manifest, audit selected tracks, and write the report."""
+
+    requested_schema = version or schema_version
+    if (
+        version is not None
+        and schema_version != SCHEMA_VERSION
+        and version != schema_version
+    ):
+        raise ValueError("conflicting audit schema_version and version")
+    if requested_schema not in {SCHEMA_VERSION, SCHEMA_VERSION_V2}:
+        raise ValueError(f"unsupported MMS audit schema version: {requested_schema!r}")
+    normalized_unit_overrides = normalize_unit_overrides(unit_overrides)
+    if normalized_unit_overrides and requested_schema != SCHEMA_VERSION_V2:
+        raise ValueError("structured unit_overrides require MMS audit v2")
+    matched_override_keys: set[OverrideKey] = set()
 
     album = load_album_manifest(
         manifest_path,
@@ -1076,14 +1453,20 @@ def run_audit(
         else (album.deliverable_dir / "sources" / "netease_lyrics.json").resolve()
     )
     report: dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": requested_schema,
         "evidence_contract": ALIGNMENT_EVIDENCE_CONTRACT,
         "manifest_path": _report_path(Path(manifest_path).resolve(), project_root),
         "manifest_sha256": sha256_file(Path(manifest_path).resolve()),
         "lyric_source_path": _report_path(resolved_source, project_root),
         "lyric_source_sha256": sha256_file(resolved_source),
-        "netease_lyrics_path": _report_path(resolved_source, project_root),
-        "netease_lyrics_sha256": sha256_file(resolved_source),
+        **(
+            {
+                "netease_lyrics_path": _report_path(resolved_source, project_root),
+                "netease_lyrics_sha256": sha256_file(resolved_source),
+            }
+            if requested_schema == SCHEMA_VERSION
+            else {}
+        ),
         "lyric_corrections_path": _report_path(
             album.deliverable_dir / "sources" / "lyric_corrections.json",
             project_root,
@@ -1105,11 +1488,25 @@ def run_audit(
                 album,
                 runtime,
                 resolved_vocals_root,
-                reading_overrides=reading_overrides,
+                schema_version=requested_schema,
+                unit_overrides=normalized_unit_overrides,
+                matched_override_keys=matched_override_keys,
             )
             for track in tracks
         ],
     }
+    if requested_schema == SCHEMA_VERSION_V2:
+        report["alignment_contract"] = {
+            "alignment_type": "supplied-known-token-forced-alignment",
+            "supplied_tokens": True,
+            "known_tokens": True,
+            "forced_alignment": True,
+            "independent_recognition": False,
+            "phoneme_alignment": False,
+        }
+        unmatched = sorted(set(normalized_unit_overrides) - matched_override_keys)
+        if unmatched:
+            raise ValueError(f"unit overrides did not match SUG tokens: {unmatched}")
     report["language_codes"] = {
         song["song_id"]: song["language"] for song in report["songs"]
     }
@@ -1136,18 +1533,6 @@ def run_audit(
     return report
 
 
-def _load_override_file(path: Path) -> dict[str, str]:
-    document = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict):
-        raise ValueError("reading override JSON must be an object")
-    result: dict[str, str] = {}
-    for key, value in document.items():
-        if not isinstance(key, str) or not isinstance(value, str):
-            raise ValueError("reading override keys and values must be strings")
-        result[key] = value
-    return result
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -1169,7 +1554,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=DEFAULT_MANIFEST_PATH,
+        required=True,
         help="album.json manifest owning the SUG and original MP3 inputs",
     )
     parser.add_argument(
@@ -1193,11 +1578,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="MSST vocal cache root (default: .cache/msst-vocals)",
     )
     parser.add_argument(
-        "--reading-overrides",
-        type=Path,
-        help="optional JSON object merged over karaoke_timing contextual readings",
-    )
-    parser.add_argument(
         "--model-path",
         type=Path,
         help="existing local MMS checkpoint; validated before model loading",
@@ -1205,7 +1585,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-network",
         action="store_true",
-        help="allow torchaudio to download MMS_FA when --model-path is absent",
+        help=argparse.SUPPRESS,
     )
     return parser
 
@@ -1218,11 +1598,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.song_ids
         else None
     )
-    overrides = None
-    if args.reading_overrides is not None:
-        overrides = dict(karaoke_timing._CONTEXTUAL_READING_OVERRIDES)
-        overrides.update(_load_override_file(args.reading_overrides))
-
     output_path = args.output
     if output_path is not None and not output_path.is_absolute():
         output_path = ROOT / output_path
@@ -1236,7 +1611,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         source_path=args.source,
         output_path=output_path,
         vocals_root=vocals_root,
-        reading_overrides=overrides,
         allow_partial_manifest=args.allow_partial_manifest,
         model_path=args.model_path,
         allow_network=args.allow_network,

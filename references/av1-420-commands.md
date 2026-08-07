@@ -35,7 +35,7 @@ The default delivery is MP4 with AAC-LC audio at 320 kb/s and explicit stream ma
   $temporaryMp4
 ```
 
-Verify the profile, dimensions, frame rate, pixel format, and BT.709 metadata with `ffprobe`. Produce an H.264 fallback when the target device has uncertain AV1 support. MP4 is the default; MKV is a separate explicit selection and accepts only a probed FLAC or PCM WAV source; reject MP3 and AAC sources. Do not create MKV or run full decode unless explicitly requested.
+Verify the profile, dimensions, frame rate, pixel format, and BT.709 metadata with `ffprobe`. Produce an H.264 fallback when the target device has uncertain AV1 support. MKV is a separate explicit selection and accepts only a probed FLAC or PCM WAV source; reject MP3 and AAC sources. Do not create MKV or run a full decode unless explicitly selected.
 
 ## Soft ASS and FLAC-in-MKV
 
@@ -55,5 +55,5 @@ Do not add `-shortest`, `-ar`, or `-ac`. Preserve the lossless source sample rat
 - Inspect input `start_time`, stream durations, frame-rate mode, and final ASS events; do not use `-shortest` to conceal drift.
 - Map and verify every selected stream explicitly.
 - Probe the final video codec, pixel format, dimensions, frame rate, color metadata, audio codec, channels, duration, and subtitle streams.
-- Treat a complete null decode as an optional diagnostic that is off by default, not a release gate. When it is run, record the mapped streams, tested window, and real exit code; an unperformed diagnostic is neither success nor failure.
+- Treat a complete null decode as an optional diagnostic that is off by default and enabled only by an explicit selection. When it is run, record the mapped streams, tested window, and real exit code.
 - Keep temporary output, destination, and backups on the same volume. Resolve target paths before promotion and probe the final path again after replacement.

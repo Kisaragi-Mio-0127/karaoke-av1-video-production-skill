@@ -1,5 +1,3 @@
-# Overlay requirement source. The installer copies this file into the root of a
-# compatible StrangeUtaGame checkout, where the referenced files and -e . exist.
 # Reproducible Windows environment for StrangeUtaGame plus the karaoke pipeline.
 -r requirements.txt
 -r requirements-winrt.txt

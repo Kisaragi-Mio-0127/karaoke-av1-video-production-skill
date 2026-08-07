@@ -119,6 +119,49 @@ def _manifest_python_paths() -> list[Path]:
     return sorted(paths, key=lambda path: path.as_posix().casefold())
 
 
+def _manifest_requirement_paths() -> list[tuple[Path, Path]]:
+    """Return manifest-authorized requirement sources and target names."""
+
+    try:
+        manifest = json.loads(DEPENDENCY_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise SystemExit(f"Cannot read dependency manifest: {DEPENDENCY_MANIFEST}") from error
+
+    records = manifest.get("requirements", [])
+    if not isinstance(records, list) or not records:
+        raise SystemExit("Dependency manifest authorizes no requirement files")
+    result: list[tuple[Path, Path]] = []
+    seen_sources: set[str] = set()
+    seen_destinations: set[str] = set()
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise SystemExit(f"Dependency manifest record is not an object: requirements[{index}]")
+        raw_path = record.get("path")
+        raw_destination = record.get("destination")
+        if not isinstance(raw_path, str) or not isinstance(raw_destination, str):
+            raise SystemExit(f"Requirement path or destination is missing: requirements[{index}]")
+        relative = PurePosixPath(raw_path)
+        destination = PurePosixPath(raw_destination)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or relative.parts[0] != "requirements"
+            or destination.is_absolute()
+            or len(destination.parts) != 1
+            or destination.name in {"", ".", ".."}
+        ):
+            raise SystemExit(f"Unsafe requirement mapping: requirements[{index}]")
+        source_key = relative.as_posix().casefold()
+        destination_key = destination.as_posix().casefold()
+        if source_key in seen_sources or destination_key in seen_destinations:
+            raise SystemExit(f"Duplicate requirement mapping: requirements[{index}]")
+        seen_sources.add(source_key)
+        seen_destinations.add(destination_key)
+        result.append((Path(*relative.parts), Path(destination.name)))
+    return sorted(result, key=lambda item: item[0].as_posix().casefold())
+
+
 def _assert_regular_bundle_source(source: Path, relative: Path) -> None:
     """Reject missing files and reparse points in a manifest-authorized path."""
 
@@ -141,11 +184,11 @@ def _mapping(target: Path) -> list[tuple[Path, Path]]:
         _assert_safe_destination(target, destination)
         result.append((source, destination))
 
-    for source in sorted((BUNDLE_ROOT / "requirements").glob("*")):
+    for source_relative, destination_relative in _manifest_requirement_paths():
+        source = BUNDLE_ROOT / source_relative
         if not source.is_file() or _is_reparse_point(source):
             raise SystemExit(f"Bundled source is not a regular file: {source}")
-        suffix = source.name.removeprefix("requirements-karaoke")
-        destination = target / f"requirements-karaoke.skill{suffix}"
+        destination = target / destination_relative
         _assert_safe_destination(target, destination)
         result.append((source, destination))
     return result

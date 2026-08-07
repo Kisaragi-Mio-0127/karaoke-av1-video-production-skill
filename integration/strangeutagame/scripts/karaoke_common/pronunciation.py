@@ -1,4 +1,4 @@
-"""Japanese pronunciation validation policy."""
+"""Language-neutral pronunciation validation policy."""
 
 from __future__ import annotations
 
@@ -62,6 +62,23 @@ def validate_pronunciation(
     rendered_count = source_count if rendered_ruby_count is None else rendered_ruby_count
     records = sidecar.get("records", []) if isinstance(sidecar, Mapping) else []
     record_count = len(records) if isinstance(records, list) else 0
+
+    if language in {"zh", "en"}:
+        if source_count or rendered_count:
+            raise RubyValidationError(
+                f"{language} requires source ruby=0 and rendered ruby=0 "
+                f"(source={source_count}, rendered={rendered_count})"
+            )
+        return PronunciationValidationResult(
+            mode=mode,
+            status="pass",
+            reason="ruby-disabled-source-and-rendered-zero",
+            language=language,
+            source_ruby_count=0,
+            rendered_ruby_count=0,
+            sidecar_present=sidecar is not None,
+            sidecar_record_count=record_count,
+        )
 
     if mode == "off":
         return PronunciationValidationResult(

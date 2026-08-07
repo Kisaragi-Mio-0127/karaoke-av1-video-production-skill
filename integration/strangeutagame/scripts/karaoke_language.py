@@ -1,21 +1,55 @@
-"""Japanese language policy for the public karaoke production chain.
+"""Shared language policy for the reproducible karaoke production chain.
 
-The bundled integration intentionally exposes only its validated Japanese
-profile.  Additional languages belong in separately distributed adapters and
-must not be implemented in this shared module.
+The album manifest stores short language codes so every downstream stage can
+carry one identity from source lyrics through stable-ts, SUG, MMS and reports.
+The default is deliberately Japanese for compatibility with older manifests.
 """
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections.abc import Iterable, Iterator
 from typing import Any
 
 DEFAULT_LANGUAGE = "ja"
-SUPPORTED_LANGUAGES = frozenset({DEFAULT_LANGUAGE})
+SUPPORTED_LANGUAGES = frozenset({"ja", "zh", "en"})
 
-_JAPANESE_ALIASES = frozenset(
-    {"ja", "jp", "jpn", "japanese", "ja-jp"}
+LANGUAGE_NAMES = {
+    "ja": "Japanese",
+    "zh": "Chinese",
+    "en": "English",
+}
+
+LANGUAGE_ALIASES = {
+    "ja": "ja",
+    "jp": "ja",
+    "jpn": "ja",
+    "japanese": "ja",
+    "ja-jp": "ja",
+    "ja_jp": "ja",
+    "zh": "zh",
+    "chi": "zh",
+    "zho": "zh",
+    "chinese": "zh",
+    "zh-cn": "zh",
+    "zh_cn": "zh",
+    "zh-hans": "zh",
+    "zh_hans": "zh",
+    "en": "en",
+    "eng": "en",
+    "english": "en",
+    "en-us": "en",
+    "en_us": "en",
+}
+
+_CJK_RANGES = (
+    (0x3400, 0x4DBF),
+    (0x4E00, 0x9FFF),
+    (0xF900, 0xFAFF),
+    (0x20000, 0x2FA1F),
 )
+_ENGLISH_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*")
 
 
 def normalize_language(
@@ -23,66 +57,102 @@ def normalize_language(
     *,
     default: str = DEFAULT_LANGUAGE,
 ) -> str:
-    """Return ``ja`` or fail closed for an unbundled language adapter."""
+    """Return a supported short language code.
+
+    Missing and blank values use ``default`` so manifests written before the
+    language field was introduced remain Japanese.  Non-empty unknown values
+    fail early instead of silently selecting the wrong stable-ts model.
+    """
 
     fallback = str(default or DEFAULT_LANGUAGE).strip().lower().replace("_", "-")
-    if fallback not in _JAPANESE_ALIASES:
-        raise ValueError(
-            f"unsupported default karaoke language: {default!r}; "
-            "install a separately validated project adapter"
-        )
+    fallback = LANGUAGE_ALIASES.get(fallback, fallback)
+    if fallback not in SUPPORTED_LANGUAGES:
+        raise ValueError(f"unsupported default karaoke language: {default!r}")
     if value is None or (isinstance(value, str) and not value.strip()):
-        return DEFAULT_LANGUAGE
+        return fallback
     raw = str(value).strip().lower().replace("_", "-")
-    if raw not in _JAPANESE_ALIASES:
+    language = LANGUAGE_ALIASES.get(raw, raw)
+    if language not in SUPPORTED_LANGUAGES:
         raise ValueError(
             f"unsupported karaoke language {value!r}; "
-            "the public integration bundles only Japanese"
+            f"expected one of {sorted(SUPPORTED_LANGUAGES)}"
         )
-    return DEFAULT_LANGUAGE
+    return language
 
 
 def stable_ts_language(language: Any = DEFAULT_LANGUAGE) -> str:
-    """Return the validated stable-ts language name."""
+    """Return the human-readable language name expected by stable-ts."""
 
-    normalize_language(language)
-    return "Japanese"
+    return LANGUAGE_NAMES[normalize_language(language)]
 
 
 def uses_ruby(language: Any = DEFAULT_LANGUAGE) -> bool:
-    """Return whether the validated public profile uses reviewed ruby."""
+    """Whether the production chain may generate Japanese contextual ruby."""
 
-    normalize_language(language)
-    return True
+    return normalize_language(language) == "ja"
 
 
 def timing_granularity(language: Any = DEFAULT_LANGUAGE) -> str:
-    """Return the validated fallback timing unit."""
+    """Return the acoustic unit used for fallback timing diagnostics."""
 
-    normalize_language(language)
-    return "mora-character"
+    return {
+        "ja": "mora-character",
+        "zh": "character",
+        "en": "word-character",
+    }[normalize_language(language)]
 
 
 def mms_granularity(language: Any = DEFAULT_LANGUAGE) -> str:
-    """Return the validated MMS alignment unit."""
+    """Return the MMS source-unit policy for one language."""
 
-    normalize_language(language)
-    return "mora"
+    return {
+        "ja": "mora",
+        "zh": "pypinyin-character",
+        "en": "word",
+    }[normalize_language(language)]
 
 
 def language_identity(language: Any = DEFAULT_LANGUAGE) -> dict[str, Any]:
-    """Return the stable Japanese identity shared by pipeline reports."""
+    """Return a stable report-shaped identity shared by all pipeline stages."""
 
     code = normalize_language(language)
     return {
         "code": code,
-        "name": "Japanese",
-        "stable_ts_language": "Japanese",
+        "name": LANGUAGE_NAMES[code],
+        "stable_ts_language": LANGUAGE_NAMES[code],
         "timing_granularity": timing_granularity(code),
         "mms_granularity": mms_granularity(code),
-        "ruby_enabled": True,
-        "ruby_policy": "japanese-contextual-only",
+        "ruby_enabled": uses_ruby(code),
+        "ruby_policy": "japanese-contextual-only" if code == "ja" else "disabled",
     }
+
+
+def is_chinese_character(character: str) -> bool:
+    """Return whether one character is a Han ideograph usable by pypinyin."""
+
+    if not character:
+        return False
+    codepoint = ord(character)
+    return any(start <= codepoint <= end for start, end in _CJK_RANGES)
+
+
+def is_english_word_character(character: str) -> bool:
+    """Return whether a character belongs to an ASCII English word."""
+
+    return len(character) == 1 and (
+        ("A" <= character <= "Z")
+        or ("a" <= character <= "z")
+        or ("0" <= character <= "9")
+    )
+
+
+def english_word_spans(text: str) -> tuple[tuple[int, int, str], ...]:
+    """Return ``(start, end, word)`` spans for English word-level timing."""
+
+    return tuple(
+        (match.start(), match.end(), match.group(0))
+        for match in _ENGLISH_WORD_RE.finditer(text)
+    )
 
 
 def iter_non_space_characters(texts: Iterable[str]) -> Iterator[str]:
@@ -95,3 +165,52 @@ def iter_non_space_characters(texts: Iterable[str]) -> Iterator[str]:
                 continue
             seen.add(character)
             yield character
+
+
+def pinyin_for_character(character: str) -> str:
+    """Return tone-free pinyin for one Chinese character.
+
+    ``pypinyin`` is imported lazily so Japanese-only timing and report tests do
+    not pay its import cost.  The returned value is ASCII and suitable for the
+    MMS_FA character tokenizer; ``Style.NORMAL`` intentionally omits tone marks.
+    """
+
+    from pypinyin import Style, lazy_pinyin
+
+    values = lazy_pinyin(character, style=Style.NORMAL, errors="default")
+    value = "".join(str(item or "") for item in values).lower()
+    value = value.replace("ü", "v")
+    value = "".join(char for char in unicodedata.normalize("NFKD", value) if ord(char) < 128)
+    return value
+
+
+def contextual_pinyin_for_text(text: str) -> tuple[str, ...]:
+    """Return one tone-free pinyin/fallback value per source character.
+
+    The complete line is passed to pypinyin in one call so polyphonic Han
+    characters retain sentence context.  Splitting unknown runs in the error
+    callback keeps the returned axis one-to-one with the original text.
+    """
+
+    from pypinyin import Style, lazy_pinyin
+
+    values = lazy_pinyin(
+        text,
+        style=Style.NORMAL,
+        errors=lambda value: list(value),
+    )
+    if len(values) != len(text):
+        raise ValueError(
+            "contextual pypinyin did not preserve the source character axis: "
+            f"expected {len(text)} values, got {len(values)}"
+        )
+    normalized: list[str] = []
+    for value in values:
+        ascii_value = str(value or "").lower().replace("ü", "v")
+        ascii_value = "".join(
+            character
+            for character in unicodedata.normalize("NFKD", ascii_value)
+            if ord(character) < 128
+        )
+        normalized.append(ascii_value)
+    return tuple(normalized)

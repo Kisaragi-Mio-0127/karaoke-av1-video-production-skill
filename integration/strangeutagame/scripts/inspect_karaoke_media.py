@@ -20,16 +20,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from karaoke_album import (  # noqa: E402
-    DEFAULT_MANIFEST_PATH,
-    load_album_manifest,
-    project_relative,
-)
+from karaoke_album import load_album_manifest, project_relative  # noqa: E402
 from render_vinyl_karaoke import (  # noqa: E402
-    DEFAULT_ARTIST,
-    DEFAULT_AUDIO,
-    DEFAULT_SLUG,
-    DEFAULT_TITLE,
     REPO_ROOT,
     SHARED_FONT_DIR,
     ass_candidates,
@@ -185,13 +177,17 @@ def make_parser() -> argparse.ArgumentParser:
         help="inspect one explicitly selected track",
     )
     parser.set_defaults(all_tracks=True)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
+    parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument(
         "--allow-partial-manifest",
         action="store_true",
         help="allow an explicitly supplied manifest with fewer than five tracks",
     )
-    parser.add_argument("--audio", type=Path, default=DEFAULT_AUDIO)
+    parser.add_argument(
+        "--track",
+        dest="song_id",
+        help="manifest song_id required with --single-track",
+    )
     parser.add_argument("--video", type=Path)
     parser.add_argument(
         "--video-dir",
@@ -200,9 +196,10 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--ass", type=Path)
     parser.add_argument("--timing-dir", type=Path)
-    parser.add_argument("--slug", default=DEFAULT_SLUG)
-    parser.add_argument("--title", default=DEFAULT_TITLE)
-    parser.add_argument("--artist", default=DEFAULT_ARTIST)
+    parser.add_argument(
+        "--slug",
+        help="optional deliverable directory override; defaults to the manifest",
+    )
     parser.add_argument(
         "--fonts-dir",
         type=Path,
@@ -443,10 +440,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     deliverable_root = (
-        album.deliverable_dir
-        if args.slug == DEFAULT_SLUG
-        else (REPO_ROOT / "deliverables" / args.slug).resolve()
+        (REPO_ROOT / "deliverables" / args.slug).resolve()
+        if args.slug
+        else album.deliverable_dir
     )
+    args.slug = args.slug or album.title
     args.deliverable_root = deliverable_root
     args.project_root = album.project_root
     args.timing_dir = (args.timing_dir or album.deliverable_dir / "timing").resolve()
@@ -480,14 +478,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.all_tracks:
         track_specs = [track_dict(track) for track in album.tracks]
     else:
-        track_specs = [
-            {
-                "audio": args.audio,
-                "title": args.title,
-                "artist": args.artist,
-                "basename": args.title,
-            }
-        ]
+        matches = [track for track in album.tracks if track.song_id == args.song_id]
+        if len(matches) != 1:
+            print(
+                "ERROR: --single-track requires exactly one explicit --track song_id",
+                file=sys.stderr,
+            )
+            return 1
+        track_specs = [track_dict(matches[0])]
     reports = [
         inspect_track(
             args=args,

@@ -8,7 +8,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).with_name("open_editable_project_with_audio_probe.py")
+MODULE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "open_editable_project_with_audio_probe.py"
+)
 SPEC = importlib.util.spec_from_file_location("audio_probe", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 PROBE = importlib.util.module_from_spec(SPEC)

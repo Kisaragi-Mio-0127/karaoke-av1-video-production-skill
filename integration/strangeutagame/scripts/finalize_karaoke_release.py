@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,16 +19,11 @@ from typing import Any
 import imageio_ffmpeg
 
 try:
-    from .karaoke_album import DEFAULT_MANIFEST_PATH, load_album_manifest
+    from .karaoke_album import load_album_manifest
 except ImportError:  # pragma: no cover - direct script execution
-    from karaoke_album import (  # type: ignore[no-redef]
-        DEFAULT_MANIFEST_PATH,
-        load_album_manifest,
-    )
+    from karaoke_album import load_album_manifest  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ALBUM = load_album_manifest(DEFAULT_MANIFEST_PATH)
-DEFAULT_ROOT = DEFAULT_ALBUM.deliverable_dir
 PROFILES = ("standard", "wide")
 
 
@@ -45,9 +41,6 @@ def track_record(track: Any) -> dict[str, Any]:
         "audio": track.audio_path,
         "expected_cues": track.expected_cues,
     }
-
-
-TRACKS = tuple(track_record(track) for track in DEFAULT_ALBUM.tracks)
 
 
 def sha256_file(path: Path) -> str:
@@ -519,7 +512,7 @@ def validate_alignment_audit(
     audit: Any,
     timing_overrides: Any,
     sug_documents: dict[str, Any],
-    tracks: tuple[dict[str, Any], ...] = TRACKS,
+    tracks: tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:
     """Validate audit provenance and every audited character against current SUG JSON."""
 
@@ -694,7 +687,7 @@ def _hevc_rext_value(value: Any) -> bool:
 
 def validate_hevc444_delivery(
     hevc444_report: Any,
-    tracks: tuple[dict[str, Any], ...] = TRACKS,
+    tracks: tuple[dict[str, Any], ...],
     profiles: tuple[str, ...] = PROFILES,
     direct_report_paths: dict[tuple[str, str], Any] | None = None,
 ) -> dict[str, Any]:
@@ -853,7 +846,7 @@ def _has_video_master_source(item: dict[str, Any]) -> bool:
 
 def validate_av1_420_delivery(
     av1_report: Any,
-    tracks: tuple[dict[str, Any], ...] = TRACKS,
+    tracks: tuple[dict[str, Any], ...],
     profiles: tuple[str, ...] = PROFILES,
     direct_report_paths: dict[tuple[str, str], Any] | None = None,
 ) -> dict[str, Any]:
@@ -1026,7 +1019,7 @@ validate_av1_report = validate_av1_420_delivery
 
 
 def validate_timing_report(
-    report: dict[str, Any], tracks: tuple[dict[str, Any], ...] = TRACKS
+    report: dict[str, Any], tracks: tuple[dict[str, Any], ...]
 ) -> dict[str, Any]:
     """Validate that the forced vocal/mix alignment gate reached the release."""
     expected_song_ids = {str(track["song_id"]) for track in tracks}
@@ -1526,20 +1519,59 @@ def write_checksums(root: Path) -> int:
     return len(files)
 
 
-def validate_numbered_packages(report: Any, root: Path) -> dict[str, Any]:
-    expected = {
-        "hevc444": root / "video" / f"{root.name}_HEVC444.zip",
-        "av1-420": root / "video" / f"{root.name}_AV1-420.zip",
+def numbered_package_paths(root: Path, *, album_title: str) -> dict[str, Path]:
+    """Build expected numbered archive paths from selected manifest data."""
+
+    title = str(album_title).strip()
+    if not title:
+        raise ValueError("album_title must not be empty")
+    return {
+        "hevc444": root / "video" / f"{title}_HEVC444.zip",
+        "av1-420": root / "video" / f"{title}_AV1-420.zip",
     }
+
+
+def _resolve_package_path(value: object, root: Path) -> Path | None:
+    if value is None:
+        return None
+    path = Path(str(value))
+    return (root / path).resolve() if not path.is_absolute() else path.resolve()
+
+
+def validate_numbered_packages(
+    report: Any,
+    root: Path,
+    *,
+    expected_archives: Mapping[str, Path] | None = None,
+) -> dict[str, Any]:
+    """Validate numbered package contents against explicit archive paths.
+
+    When callers do not have manifest metadata, report paths are used only as
+    a compatibility fallback. The release finalizer always supplies paths
+    derived from the selected manifest title.
+    """
+
     packages = report.get("packages") if isinstance(report, dict) else None
     packages = packages if isinstance(packages, list) else []
     by_lane = {
         str(item.get("lane")): item for item in packages if isinstance(item, dict)
     }
+    if expected_archives is None:
+        expected_archives = {
+            lane: path
+            for lane, item in by_lane.items()
+            if (path := _resolve_package_path(item.get("path"), root)) is not None
+        }
+    expected = {
+        lane: _resolve_package_path(path, root)
+        for lane, path in expected_archives.items()
+    }
     lane_checks: dict[str, dict[str, Any]] = {}
-    for lane, expected_path in expected.items():
+    required_lanes = ("hevc444", "av1-420")
+    for lane in required_lanes:
+        expected_path = expected.get(lane)
         item = by_lane.get(lane)
-        exists = expected_path.is_file()
+        exists = expected_path is not None and expected_path.is_file()
         entries = item.get("entries") if isinstance(item, dict) else None
         entries = entries if isinstance(entries, list) else []
         video_entries = [
@@ -1571,7 +1603,8 @@ def validate_numbered_packages(report: Any, root: Path) -> dict[str, Any]:
         checks = {
             "report_entry_present": item is not None,
             "path_matches": item is not None
-            and Path(str(item.get("path", ""))).resolve() == expected_path.resolve(),
+            and expected_path is not None
+            and _resolve_package_path(item.get("path"), root) == expected_path,
             "archive_exists": exists,
             "size_matches": exists
             and item is not None
@@ -1599,7 +1632,7 @@ def validate_numbered_packages(report: Any, root: Path) -> dict[str, Any]:
         isinstance(report, dict)
         and report.get("schema_version") == "karaoke-numbered-packages/v2"
     )
-    lanes_exact = set(by_lane) == set(expected)
+    lanes_exact = set(by_lane) == set(required_lanes)
     return {
         "ok": status_ok
         and schema_ok
@@ -1614,7 +1647,7 @@ def validate_numbered_packages(report: Any, root: Path) -> dict[str, Any]:
 
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
+    parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--root", type=Path, default=None)
     parser.add_argument("--skip-decode", action="store_true")
     parser.add_argument("--skip-tests", action="store_true")
@@ -1924,6 +1957,7 @@ def main(argv: list[str] | None = None) -> int:
     numbered_packages_validation = validate_numbered_packages(
         numbered_packages_report,
         root,
+        expected_archives=numbered_package_paths(root, album_title=album.title),
     )
     numbered_packages_ok = numbered_packages_validation["ok"]
 

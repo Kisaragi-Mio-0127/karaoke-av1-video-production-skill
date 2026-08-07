@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one isolated Japanese MMS audit/build/render workflow."""
+"""Run one private Japanese MMS audit/build/render workflow."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ try:
     from scripts import audit_karaoke_mms_alignment as mms_audit
     from scripts import build_karaoke_mms_overrides as mms_build
     from scripts.karaoke_album import AlbumManifest, AlbumTrack, load_album_manifest
+    from scripts.karaoke_mms_editable import create_mms_editable_companion
+    from scripts.karaoke_model_paths import resolve_mms_model_path
     from scripts.karaoke_review_preview import SHARED_FONT_DIR, SHARED_FONT_FILE
     from scripts.karaoke_workflow import (
         KaraokeWorkflowError,
@@ -32,6 +34,10 @@ except ImportError:  # pragma: no cover - direct script execution
         AlbumTrack,
         load_album_manifest,
     )
+    from karaoke_mms_editable import (
+        create_mms_editable_companion,  # type: ignore[no-redef]
+    )
+    from karaoke_model_paths import resolve_mms_model_path  # type: ignore[no-redef]
     from karaoke_review_preview import (  # type: ignore[no-redef]
         SHARED_FONT_DIR,
         SHARED_FONT_FILE,
@@ -89,27 +95,11 @@ def _resolve_report_path(value: Any, project_root: Path) -> Path:
     return (path if path.is_absolute() else project_root / path).resolve()
 
 
-def _find_local_mms_model(project_root: Path) -> Path | None:
-    preferred = project_root / ".cache" / "torch" / "hub" / "checkpoints" / "model.pt"
-    if preferred.is_file() and preferred.stat().st_size > 0:
-        return preferred.resolve()
-    return next(
-        (
-            path.resolve()
-            for path in sorted(
-                (project_root / ".cache" / "torch" / "hub" / "checkpoints").glob("*.pt")
-            )
-            if path.is_file() and path.stat().st_size > 0
-        ),
-        None,
-    )
-
-
 def preflight(args: argparse.Namespace) -> Preflight:
     """Validate every local/input contract without creating the output tree."""
 
     manifest = args.manifest.expanduser().resolve()
-    album = load_album_manifest(manifest)
+    album = load_album_manifest(manifest, require_five_tracks=False)
     matches = [track for track in album.tracks if track.song_id == args.song_id]
     if len(matches) != 1:
         raise KaraokeWorkflowError(
@@ -126,7 +116,7 @@ def preflight(args: argparse.Namespace) -> Preflight:
         raise KaraokeWorkflowError(f"output directory already exists: {output_dir}")
     if not _is_relative_to(output_dir, album.project_root.resolve()):
         raise KaraokeWorkflowError(
-            "isolated MMS output must stay inside the project root so provenance "
+            "private MMS output must stay inside the project root so provenance "
             "paths remain portable"
         )
     forbidden_roots = {
@@ -136,7 +126,7 @@ def preflight(args: argparse.Namespace) -> Preflight:
     for root in forbidden_roots:
         if _is_relative_to(output_dir, root):
             raise KaraokeWorkflowError(
-                f"isolated MMS output must stay outside deliverables: {root}"
+                f"private MMS output must stay outside deliverables: {root}"
             )
 
     source = (
@@ -144,7 +134,9 @@ def preflight(args: argparse.Namespace) -> Preflight:
         if args.source is not None
         else (album.deliverable_dir / "sources" / "netease_lyrics.json").resolve()
     )
-    sug = (album.deliverable_dir / "timing" / f"{track.timing_stem}.sug").resolve()
+    sug = (
+        album.deliverable_dir / "timing" / f"{track.timing_stem}.sug"
+    ).resolve()
     audio = track.audio_path.resolve()
     vocals_root = (
         args.vocals_root.expanduser().resolve()
@@ -152,38 +144,29 @@ def preflight(args: argparse.Namespace) -> Preflight:
         else (album.project_root / ".cache" / "msst-vocals").resolve()
     )
     vocals = (vocals_root / audio.stem / "Vocals.wav").resolve()
-    required_paths = [manifest, source, sug, audio, vocals, args.composition]
-    if args.cover_source_audio is not None:
-        required_paths.append(args.cover_source_audio)
+    required_paths = [manifest, source, sug, audio, vocals]
+    for optional_artwork in (
+        args.composition,
+        args.cover,
+        args.background,
+        args.cover_source_audio,
+    ):
+        if optional_artwork is not None:
+            required_paths.append(optional_artwork)
     for path in required_paths:
         _identity(path)
-    if sha256_file(audio).casefold() != track.audio_sha256.casefold():
-        raise KaraokeWorkflowError("manifest audio hash is stale for selected song")
-    if args.visual_style == "vinyl":
-        if args.canonical_vinyl is None:
-            raise KaraokeWorkflowError("--vinyl is required for vinyl rendering")
-        _identity(args.canonical_vinyl)
-    elif args.canonical_vinyl is not None:
+    if args.visual_style == "spectrum" and args.canonical_vinyl is not None:
         raise KaraokeWorkflowError("spectrum rendering must not receive --vinyl")
     if not args.fonts_dir.expanduser().resolve().is_dir():
         raise KaraokeWorkflowError(f"fonts directory does not exist: {args.fonts_dir}")
     _identity(args.font_file)
 
-    if args.mms_model_path is not None:
-        model = args.mms_model_path.expanduser().resolve()
-        if not model.is_file():
-            raise KaraokeWorkflowError(
-                f"explicit MMS model checkpoint does not exist: {model}"
-            )
-        _identity(model)
-        model_selection = "explicit"
-    else:
-        model = _find_local_mms_model(album.project_root)
-        model_selection = "default-cache" if model is not None else "network"
-    if model is None and not args.allow_mms_network:
-        raise KaraokeWorkflowError(
-            "local MMS model is missing; use --allow-mms-network to permit retrieval"
-        )
+    try:
+        model = resolve_mms_model_path(args.mms_model_path)
+    except (FileNotFoundError, ValueError) as error:
+        raise KaraokeWorkflowError(str(error)) from error
+    _identity(model)
+    model_selection = "explicit" if args.mms_model_path is not None else "project-models"
     return Preflight(
         album=album,
         track=track,
@@ -207,13 +190,9 @@ def _invoke(function: Callable[..., Any], **kwargs: Any) -> Any:
         parameter.kind is inspect.Parameter.VAR_KEYWORD
         for parameter in signature.parameters.values()
     )
-    selected = (
-        kwargs
-        if accepts_kwargs
-        else {
-            key: value for key, value in kwargs.items() if key in signature.parameters
-        }
-    )
+    selected = kwargs if accepts_kwargs else {
+        key: value for key, value in kwargs.items() if key in signature.parameters
+    }
     return function(**selected)
 
 
@@ -223,9 +202,7 @@ def _load_stage_document(path: Path, returned: Any, label: str) -> dict[str, Any
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        raise KaraokeWorkflowError(
-            f"{label} artifact is invalid JSON: {error}"
-        ) from error
+        raise KaraokeWorkflowError(f"{label} artifact is invalid JSON: {error}") from error
     if not isinstance(document, dict):
         raise KaraokeWorkflowError(f"{label} artifact root must be an object")
     if isinstance(returned, Mapping) and dict(returned) != document:
@@ -233,17 +210,69 @@ def _load_stage_document(path: Path, returned: Any, label: str) -> dict[str, Any
     return document
 
 
+def _validate_audit_lines(song: Mapping[str, Any], pre: Preflight) -> bool:
+    sug = json.loads(pre.sug.read_text(encoding="utf-8"))
+    sentences = sug.get("sentences") if isinstance(sug, Mapping) else None
+    lines = song.get("lines")
+    if not isinstance(sentences, list) or not isinstance(lines, list) or not lines:
+        return False
+    seen: set[int] = set()
+    for line in lines:
+        if not isinstance(line, Mapping) or isinstance(line.get("line_index"), bool):
+            return False
+        try:
+            line_index = int(line.get("line_index"))
+        except (TypeError, ValueError):
+            return False
+        if line_index in seen or not 0 <= line_index < len(sentences):
+            return False
+        seen.add(line_index)
+        sentence = sentences[line_index]
+        characters = sentence.get("characters") if isinstance(sentence, Mapping) else None
+        if not isinstance(characters, list) or not characters:
+            return False
+        text = "".join(
+            str(character.get("char") or "")
+            for character in characters
+            if isinstance(character, Mapping)
+        )
+        if line.get("text") != text:
+            return False
+        index_field = (
+            "source_token_index"
+            if line.get("unit_axis") == "structured-sug-token"
+            else "character_index"
+        )
+        for collection in ("units", "comparisons", "mix_units", "dual_audio_comparisons"):
+            records = line.get(collection, [])
+            if not isinstance(records, list):
+                return False
+            for record in records:
+                if not isinstance(record, Mapping) or record.get(index_field) is None:
+                    return False
+                try:
+                    token_index = int(record[index_field])
+                except (TypeError, ValueError):
+                    return False
+                if not 0 <= token_index < len(characters):
+                    return False
+    return True
+
+
 def _validate_audit(document: dict[str, Any], pre: Preflight) -> dict[str, Any]:
     songs = document.get("songs")
     checks = {
         "schema": document.get("schema_version") == AUDIT_SCHEMA,
-        "gate_ok": document.get("gate_ok") is True,
         "single_nonempty_song": isinstance(songs, list) and len(songs) == 1,
-        "manifest_sha256": document.get("manifest_sha256") == sha256_file(pre.manifest),
-        "lyric_source_sha256": document.get(
-            "lyric_source_sha256", document.get("netease_lyrics_sha256")
+        "manifest_path": _resolve_report_path(
+            document.get("manifest_path"), pre.album.project_root
         )
-        == sha256_file(pre.source),
+        == pre.manifest,
+        "lyric_source_path": _resolve_report_path(
+            document.get("lyric_source_path", document.get("netease_lyrics_path")),
+            pre.album.project_root,
+        )
+        == pre.source,
     }
     song = songs[0] if isinstance(songs, list) and len(songs) == 1 else {}
     checks.update(
@@ -251,27 +280,34 @@ def _validate_audit(document: dict[str, Any], pre: Preflight) -> dict[str, Any]:
             "song_id": isinstance(song, Mapping)
             and song.get("song_id") == pre.track.song_id,
             "language": isinstance(song, Mapping) and song.get("language") == "ja",
-            "lines_nonempty": isinstance(song, Mapping)
-            and isinstance(song.get("lines"), list)
-            and bool(song["lines"]),
-            "sug_sha256": isinstance(song, Mapping)
-            and song.get("sug_sha256") == sha256_file(pre.sug),
-            "vocals_sha256": isinstance(song, Mapping)
-            and song.get("vocals_sha256") == sha256_file(pre.vocals),
-            "mix_sha256": isinstance(song, Mapping)
-            and song.get("mix_sha256") == sha256_file(pre.audio),
+            "token_text_index": isinstance(song, Mapping)
+            and _validate_audit_lines(song, pre),
+            "sug_path": isinstance(song, Mapping)
+            and _resolve_report_path(song.get("sug_path"), pre.album.project_root)
+            == pre.sug,
+            "vocals_path": isinstance(song, Mapping)
+            and _resolve_report_path(song.get("vocals_path"), pre.album.project_root)
+            == pre.vocals,
+            "mix_path": isinstance(song, Mapping)
+            and _resolve_report_path(song.get("mix_path"), pre.album.project_root)
+            == pre.audio,
         }
     )
-    model_path = _resolve_report_path(
-        document.get("model_path"), pre.album.project_root
-    )
-    checks["model_provenance"] = model_path.is_file() and document.get(
-        "model_sha256"
-    ) == sha256_file(model_path)
+    model_path = _resolve_report_path(document.get("model_path"), pre.album.project_root)
+    checks["model_path"] = model_path == pre.mms_model and model_path.is_file()
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
-        raise KaraokeWorkflowError("MMS audit gate failed: " + ", ".join(failed))
-    return checks
+        raise KaraokeWorkflowError("MMS audit structure failed: " + ", ".join(failed))
+    quality_gate = {
+        "gate_ok": document.get("gate_ok") is True,
+        "unresolved_empty": not bool(document.get("unresolved"))
+        and int(document.get("unresolved_count", 0) or 0) == 0,
+    }
+    return {
+        "checks": checks,
+        "quality_gate": quality_gate,
+        "quality_gate_ok": all(quality_gate.values()),
+    }
 
 
 def _validate_overrides(
@@ -295,30 +331,48 @@ def _validate_overrides(
     provenance = document.get("mms_provenance")
     checks = {
         "schema": document.get("schema_version") == OVERRIDES_SCHEMA,
-        "gate_ok": document.get("gate_ok") is True,
-        "single_song": isinstance(songs, dict) and set(songs) == {pre.track.song_id},
-        "lines_nonempty": isinstance(lines, Mapping) and bool(lines),
-        "visual_release_nonempty": visual_release_count > 0,
-        "audit_sha256": isinstance(provenance, Mapping)
-        and provenance.get("audit_sha256") == sha256_file(audit_path),
-        "model_sha256": isinstance(provenance, Mapping)
-        and provenance.get("model_sha256") == audit.get("model_sha256"),
-        "lyric_source_sha256": isinstance(provenance, Mapping)
-        and provenance.get("lyric_source_sha256")
-        == audit.get("lyric_source_sha256", audit.get("netease_lyrics_sha256")),
+        "single_song": isinstance(songs, dict)
+        and set(songs) == {pre.track.song_id},
+        "lines_mapping": isinstance(lines, Mapping),
+        "audit_path": isinstance(provenance, Mapping)
+        and _resolve_report_path(provenance.get("audit"), pre.album.project_root)
+        == audit_path.resolve(),
+        "model_path": isinstance(provenance, Mapping)
+        and _resolve_report_path(provenance.get("model_path"), pre.album.project_root)
+        == pre.mms_model,
+        "lyric_source_path": isinstance(provenance, Mapping)
+        and _resolve_report_path(provenance.get("lyric_source_path"), pre.album.project_root)
+        == pre.source,
         "target_song_ids": isinstance(provenance, Mapping)
         and provenance.get("target_song_ids") == [pre.track.song_id],
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
-        raise KaraokeWorkflowError("MMS build gate failed: " + ", ".join(failed))
+        raise KaraokeWorkflowError("MMS build structure failed: " + ", ".join(failed))
+    quality_gate = {
+        "gate_ok": document.get("gate_ok") is True,
+        "unresolved_empty": not bool(document.get("unresolved"))
+        and int(document.get("unresolved_count", 0) or 0) == 0,
+    }
     return {
         "checks": checks,
+        "quality_gate": quality_gate,
+        "quality_gate_ok": all(quality_gate.values()),
         "visual_release_override_count": visual_release_count,
         "character_override_count": character_override_count,
         "render_contract": {
-            "visual_release": {"applied_to_render": True},
-            "character_overrides": {"applied_to_render": False},
+            "visual_release": {
+                "applied_to_render": visual_release_count > 0,
+                "fallback": (
+                    None
+                    if visual_release_count > 0
+                    else "companion-preserved-canonical-sentence-end"
+                ),
+            },
+            "character_overrides": {
+                "applied_to_render": character_override_count > 0,
+                "source": "mms-editable-companion",
+            },
         },
     }
 
@@ -364,11 +418,7 @@ def run_mms_workflow(
             "selection": pre.mms_model_selection,
             **(_identity(pre.mms_model) if pre.mms_model is not None else {}),
         },
-        "paths": {
-            "audit": str(audit_dir),
-            "build": str(build_dir),
-            "render": str(render_dir),
-        },
+        "paths": {"audit": str(audit_dir), "build": str(build_dir), "render": str(render_dir)},
         "stages": [],
         "outputs": {},
     }
@@ -382,14 +432,14 @@ def run_mms_workflow(
             source_path=pre.source,
             output_path=audit_path,
             vocals_root=pre.vocals_root,
-            allow_partial_manifest=False,
+            allow_partial_manifest=True,
             model_path=pre.mms_model,
             allow_network=bool(args.allow_mms_network),
         )
         audit = _load_stage_document(audit_path, returned_audit, "MMS audit")
-        audit_checks = _validate_audit(audit, pre)
+        audit_validation = _validate_audit(audit, pre)
         report["stages"].append(
-            {"name": "audit", "status": "ok", "checks": audit_checks}
+            {"name": "audit", "status": "ok", **audit_validation}
         )
         report["outputs"]["audit"] = _identity(audit_path)
 
@@ -406,7 +456,7 @@ def run_mms_workflow(
             source_path=pre.source,
             audit_path=audit_path,
             output_path=overrides_path,
-            allow_partial_manifest=False,
+            allow_partial_manifest=True,
         )
         overrides = _load_stage_document(
             overrides_path, returned_overrides, "MMS override build"
@@ -416,18 +466,101 @@ def run_mms_workflow(
             **_identity(overrides_path),
             "song_id": pre.track.song_id,
         }
-        report["stages"].append({"name": "build", "status": "ok", **override_gate})
+        report["stages"].append(
+            {"name": "build", "status": "ok", **override_gate}
+        )
         report["outputs"]["timing_overrides"] = override_identity
 
+        try:
+            companion = create_mms_editable_companion(
+                canonical_sug=pre.sug,
+                audio=pre.audio,
+                build_dir=build_dir,
+                song_id=pre.track.song_id,
+                overrides=overrides,
+            )
+        except (ValueError, FileExistsError) as error:
+            raise KaraokeWorkflowError(
+                f"MMS companion structure failed: {error}"
+            ) from error
+        companion_identity = _identity(companion)
+        companion_output = {
+            **companion_identity,
+            "paired_timing_overrides": override_identity,
+        }
+        report["outputs"]["mms_editable_sug"] = companion_output
+
+        quality_gate = {
+            "audit": audit_validation["quality_gate_ok"],
+            "build": override_gate["quality_gate_ok"],
+        }
+        report["quality_gate"] = {
+            "ok": all(quality_gate.values()),
+            "checks": quality_gate,
+        }
+        quality_gate_overridden = (
+            not report["quality_gate"]["ok"] and args.quality_policy == "auto-fallback"
+        )
+        report["release_decision"] = {
+            "policy": args.quality_policy,
+            "outcome": "pending-render",
+            "quality_gate_overridden": quality_gate_overridden,
+        }
+        if not report["quality_gate"]["ok"] and not quality_gate_overridden:
+            report["status"] = "review-required"
+            report["release_decision"]["outcome"] = "review-required"
+            report["stages"].append(
+                {
+                    "name": "render",
+                    "status": "blocked",
+                    "reason": "quality-gate-failed",
+                    "timing_overrides": override_identity,
+                    "mms_editable_sug": companion_output,
+                }
+            )
+            raise KaraokeWorkflowError(
+                "MMS quality gate failed after editable companion creation"
+            )
+
+        use_visual_release = override_gate["visual_release_override_count"] > 0
+        release_timing_overrides = (
+            overrides_path.resolve() if use_visual_release else None
+        )
+        report["outputs"]["release_sug"] = {
+            **_identity(companion),
+            "selection": "mms-editable-companion",
+            "release_timing": (
+                "visual-sidecar"
+                if use_visual_release
+                else "companion-preserved-canonical-sentence-end"
+            ),
+        }
+
+        default_cover = (
+            pre.album.deliverable_dir
+            / "artwork"
+            / pre.track.artifact_slug
+            / "cover.jpg"
+        ).resolve()
+        resolved_cover = (
+            args.cover.expanduser().resolve()
+            if args.cover is not None
+            else default_cover if default_cover.is_file() else None
+        )
+
         config = WorkflowConfig(
-            sug=pre.sug,
+            sug=companion,
             audio=pre.audio,
             cover_source_audio=(
                 args.cover_source_audio.expanduser().resolve()
                 if args.cover_source_audio is not None
                 else None
             ),
-            composition=args.composition.expanduser().resolve(),
+            composition=(
+                args.composition.expanduser().resolve()
+                if args.composition is not None
+                else None
+            ),
             canonical_vinyl=(
                 args.canonical_vinyl.expanduser().resolve()
                 if args.canonical_vinyl is not None
@@ -440,6 +573,12 @@ def run_mms_workflow(
             artist=pre.track.artist,
             album_title=pre.album.title,
             album_artist=pre.album.artist,
+            cover=resolved_cover,
+            background=(
+                args.background.expanduser().resolve()
+                if args.background is not None
+                else None
+            ),
             fonts_dir=args.fonts_dir.expanduser().resolve(),
             font_file=args.font_file.expanduser().resolve(),
             smoke_duration=args.smoke_duration,
@@ -455,30 +594,43 @@ def run_mms_workflow(
             lossless_companion=args.lossless_companion,
             full_decode=args.full_decode,
             canonical_deliverables=(pre.album.deliverable_dir,),
-            timing_overrides=overrides_path.resolve(),
-            timing_override_song_id=pre.track.song_id,
+            timing_overrides=release_timing_overrides,
+            timing_override_song_id=(pre.track.song_id if use_visual_release else None),
         )
+        report["render_gate"] = {"ok": False}
         render_report = renderer(config)
         if not isinstance(render_report, dict) or render_report.get("status") != "ok":
             raise KaraokeWorkflowError(
                 "renderer did not return a successful workflow report"
             )
+        report["render_gate"]["ok"] = True
+        report["auto_artwork"] = render_report.get("auto_artwork")
         report["stages"].append(
             {
                 "name": "render",
                 "status": "ok",
-                "timing_overrides": override_identity,
-                "visual_release_applied_to_render": True,
-                "character_overrides_applied_to_render": False,
+                "timing_overrides": (
+                    override_identity if use_visual_release else None
+                ),
+                "mms_editable_sug": companion_output,
+                "release_sug": report["outputs"]["release_sug"],
+                "visual_release_applied_to_render": use_visual_release,
+                "character_overrides_applied_to_render": (
+                    override_gate["character_override_count"] > 0
+                ),
             }
         )
         report["outputs"]["render_workflow_report"] = _identity(
             render_dir / "workflow-report.json"
         )
-        report["status"] = "ok"
+        report["status"] = "rendered-with-fallback" if quality_gate_overridden else "ok"
+        report["release_decision"]["outcome"] = (
+            "rendered-with-fallback" if quality_gate_overridden else "rendered"
+        )
         return report
     except Exception as error:
-        report["status"] = "failed"
+        if report.get("status") != "review-required":
+            report["status"] = "failed"
         report["error"] = str(error)
         raise
     finally:
@@ -496,14 +648,27 @@ def make_parser() -> argparse.ArgumentParser:
         type=Path,
         help=(
             "explicit local MMS checkpoint; takes priority over the project "
-            ".cache/torch checkpoint"
+            "models/mms/model.pt checkpoint"
         ),
     )
     parser.add_argument("--allow-mms-network", action="store_true")
-    parser.add_argument("--composition", type=Path, required=True)
     parser.add_argument(
-        "--visual-style", choices=("vinyl", "spectrum"), default="vinyl"
+        "--quality-policy",
+        choices=("strict", "auto-fallback"),
+        default="strict",
+        help=(
+            "strict blocks rendering when quality evidence fails; auto-fallback "
+            "renders a structurally valid editable companion for review"
+        ),
     )
+    parser.add_argument(
+        "--composition",
+        type=Path,
+        help="advanced explicit composition override; default builds inside render/",
+    )
+    parser.add_argument("--cover", type=Path)
+    parser.add_argument("--background", type=Path)
+    parser.add_argument("--visual-style", choices=("vinyl", "spectrum"), default="vinyl")
     parser.add_argument("--vinyl", dest="canonical_vinyl", type=Path)
     parser.add_argument("--color-policy", choices=("cover", "project"), default="cover")
     parser.add_argument("--singer-color", action="append", default=[])

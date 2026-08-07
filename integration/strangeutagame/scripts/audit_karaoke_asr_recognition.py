@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import functools
 import hashlib
 import json
 import math
-import os
+import re
+import sys
 import unicodedata
 import wave
 from collections.abc import Callable, Mapping, Sequence
@@ -36,9 +38,11 @@ from scripts.karaoke_album import (  # noqa: E402
 from scripts.karaoke_language import (  # noqa: E402
     DEFAULT_LANGUAGE,
     SUPPORTED_LANGUAGES,
+    is_chinese_character,
     language_identity,
     normalize_language,
 )
+from scripts.karaoke_model_paths import WHISPER_MODEL_DIR  # noqa: E402
 
 SCHEMA_VERSION = "karaoke-asr-recognition-audit/v2"
 MATCHER_VERSION = "line-window-bounded/v2"
@@ -53,6 +57,70 @@ EXACT_MATCH_THRESHOLD = 0.995
 SUPPORT_CONFIDENCE_THRESHOLD = 0.55
 VETO_CONFIDENCE_THRESHOLD = 0.75
 VETO_SIMILARITY_THRESHOLD = 0.45
+_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:['’][A-Za-z0-9]+)*")
+_TRADITIONAL_FALLBACK = str.maketrans(
+    {
+        "風": "风",
+        "聽": "听",
+        "見": "见",
+        "說": "说",
+        "話": "话",
+        "夢": "梦",
+        "愛": "爱",
+        "來": "来",
+        "時": "时",
+        "間": "间",
+        "無": "无",
+        "與": "与",
+        "為": "为",
+        "裏": "里",
+        "裡": "里",
+        "這": "这",
+        "個": "个",
+        "們": "们",
+        "會": "会",
+        "還": "还",
+        "過": "过",
+        "從": "从",
+        "後": "后",
+        "開": "开",
+        "關": "关",
+        "長": "长",
+        "聲": "声",
+        "樂": "乐",
+        "葉": "叶",
+        "雲": "云",
+        "萬": "万",
+        "國": "国",
+        "點": "点",
+        "歸": "归",
+        "當": "当",
+        "歲": "岁",
+        "離": "离",
+        "別": "别",
+        "飛": "飞",
+        "尋": "寻",
+        "盡": "尽",
+        "頭": "头",
+        "邊": "边",
+        "遠": "远",
+        "處": "处",
+        "隻": "只",
+        "雙": "双",
+        "體": "体",
+        "書": "书",
+        "畫": "画",
+        "門": "门",
+        "問": "问",
+        "記": "记",
+        "讓": "让",
+        "對": "对",
+        "發": "发",
+        "現": "现",
+        "轉": "转",
+        "變": "变",
+    }
+)
 
 EVIDENCE_CONTRACT = {
     "stable_ts": {
@@ -107,21 +175,88 @@ def _confidence(item: Any, fallback: Any = None) -> float | None:
     return None
 
 
+@functools.lru_cache(maxsize=4096)
+def _simplify_chinese(value: str) -> str:
+    """Canonicalize traditional glyphs without making lyrics model input."""
+
+    if not value:
+        return value
+    try:
+        from opencc import OpenCC
+
+        return str(OpenCC("t2s").convert(value))
+    except ImportError:
+        pass
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            simplified_flag = 0x02000000
+            required = ctypes.windll.kernel32.LCMapStringEx(
+                "zh-CN",
+                simplified_flag,
+                value,
+                len(value),
+                None,
+                0,
+                None,
+                None,
+                0,
+            )
+            if required:
+                destination = ctypes.create_unicode_buffer(required)
+                written = ctypes.windll.kernel32.LCMapStringEx(
+                    "zh-CN",
+                    simplified_flag,
+                    value,
+                    len(value),
+                    destination,
+                    required,
+                    None,
+                    None,
+                    0,
+                )
+                if written:
+                    return destination.value
+        except (AttributeError, OSError):
+            pass
+    return value.translate(_TRADITIONAL_FALLBACK)
+
+
 def normalize_token_text(text: Any, language: str = DEFAULT_LANGUAGE) -> str:
     """Normalize comparable text without changing the frozen lyric source."""
 
     language = normalize_language(language)
     value = unicodedata.normalize("NFKC", str(text or "")).casefold()
-    return "".join(char for char in value if not char.isspace() and char.isalnum())
+    value = value.replace("’", "'")
+    if language == "en":
+        return "".join(_WORD_RE.findall(value)).replace(" ", "")
+    comparable = "".join(
+        char
+        for char in value
+        if not char.isspace() and (is_chinese_character(char) or char.isalnum())
+    )
+    # Simplifying Han glyphs is a Chinese comparison policy. Applying it to
+    # Japanese would silently rewrite kanji and could create false evidence.
+    return _simplify_chinese(comparable) if language == "zh" else comparable
 
 
 def lyric_token_units(text: str, language: str = DEFAULT_LANGUAGE) -> list[dict[str, Any]]:
     """Split known lyrics into match units while preserving source indices."""
 
-    normalize_language(language)
+    language = normalize_language(language)
+    if language == "en":
+        return [
+            {
+                "token": match.group(0),
+                "source_start": match.start(),
+                "source_end": match.end(),
+            }
+            for match in _WORD_RE.finditer(str(text))
+        ]
     units: list[dict[str, Any]] = []
     for index, char in enumerate(str(text)):
-        if char.isspace() or not char.isalnum():
+        if char.isspace() or not (is_chinese_character(char) or char.isalnum()):
             continue
         units.append({"token": char, "source_start": index, "source_end": index + 1})
     return units
@@ -133,8 +268,11 @@ def _split_recognized_text(
     end_ms: int,
     language: str,
 ) -> list[tuple[str, int, int]]:
-    normalize_language(language)
-    values = [char for char in text if char.isalnum()]
+    language = normalize_language(language)
+    if language == "en":
+        values = [match.group(0) for match in _WORD_RE.finditer(text)]
+    else:
+        values = [char for char in text if is_chinese_character(char) or char.isalnum()]
     if not values:
         return []
     duration = max(0, end_ms - start_ms)
@@ -577,34 +715,10 @@ def _resolve_model_path(
     root = (
         Path(model_cache).expanduser().resolve()
         if model_cache is not None
-        else Path(
-            os.getenv("XDG_CACHE_HOME", str(Path.home() / ".cache"))
-        ).expanduser().resolve()
-        / "whisper"
+        else WHISPER_MODEL_DIR.resolve()
     )
     candidate = root / f"{model_name}.pt"
     return candidate if candidate.is_file() else None
-
-
-def _validate_model_access(
-    model_path: Path | None,
-    *,
-    allow_network: bool,
-    model_loading_required: bool,
-) -> Path | None:
-    """Require an existing checkpoint or explicit download authorization."""
-
-    if model_path is not None:
-        resolved = Path(model_path).expanduser().resolve()
-        if not resolved.is_file():
-            raise FileNotFoundError(f"ASR model checkpoint does not exist: {resolved}")
-        return resolved
-    if model_loading_required and not allow_network:
-        raise RuntimeError(
-            "ASR model loading is offline by default; provide --model-path "
-            "or authorize downloads with --allow-network"
-        )
-    return None
 
 
 def _recognition_cache_key(
@@ -653,7 +767,6 @@ def run_recognition_audit(
     audio_loader: Callable[[Path], tuple[Any, int]] | None = None,
     transcribe_fn: Callable[[Any, int, str, str, Path | None], Any] | None = None,
     model_loader: Callable[..., Any] | None = None,
-    allow_network: bool = False,
 ) -> dict[str, Any]:
     """Run or load one cached independent recognition report."""
 
@@ -667,11 +780,6 @@ def run_recognition_audit(
     audio_path = Path(audio_path).expanduser().resolve()
     if not audio_path.is_file():
         raise FileNotFoundError(audio_path)
-    model_path = _validate_model_access(
-        model_path,
-        allow_network=allow_network,
-        model_loading_required=transcribe_fn is None,
-    )
     audio_hash = sha256_file(audio_path)
     lyric_hash = _lyrics_hash(lyric_lines, language)
     inspect_model_artifact = (
@@ -717,18 +825,24 @@ def run_recognition_audit(
     loader = audio_loader or load_audio_numpy
     waveform, sample_rate = loader(audio_path)
     if transcribe_fn is None:
+        if resolved_model_path is None:
+            expected = (
+                Path(model_path).expanduser().resolve()
+                if model_path is not None
+                else (
+                    Path(model_cache).expanduser().resolve()
+                    if model_cache is not None
+                    else WHISPER_MODEL_DIR.resolve()
+                )
+                / f"{model_name}.pt"
+            )
+            raise FileNotFoundError(f"Whisper model checkpoint does not exist: {expected}")
         try:
             import stable_whisper
         except ImportError as exc:  # pragma: no cover - environment dependency
             raise RuntimeError("stable_whisper is required for ASR recognition audit") from exc
         load = model_loader or stable_whisper.load_model
-        kwargs: dict[str, Any] = {"device": "cpu"}
-        if model_cache is not None:
-            kwargs["download_root"] = str(Path(model_cache).resolve())
-        model = load(
-            str(model_path) if model_path is not None else model_name,
-            **kwargs,
-        )
+        model = load(str(resolved_model_path), device="cpu")
         result = model.transcribe(
             waveform,
             language=language,
@@ -924,7 +1038,6 @@ def run_manifest_audit(
     force: bool = False,
     window_tolerance_ms: int = DEFAULT_WINDOW_TOLERANCE_MS,
     allow_partial_manifest: bool = False,
-    allow_network: bool = False,
 ) -> dict[str, Any]:
     album = load_album_manifest(
         manifest_path, require_five_tracks=not allow_partial_manifest
@@ -943,7 +1056,7 @@ def run_manifest_audit(
     if len(selected_languages) != 1:
         raise ValueError(
             "one manifest ASR run must select tracks in exactly one language; "
-            "use --song-id to split tracks into separate runs"
+            "use --song-id to split ja, zh, and en into separate runs"
         )
     selected_language = next(iter(selected_languages))
     resolved_vocals_root = (
@@ -972,7 +1085,6 @@ def run_manifest_audit(
             window_tolerance_ms=window_tolerance_ms,
             song_id=track.song_id,
             title=track.title,
-            allow_network=allow_network,
         )
         song_reports.extend(single["songs"])
         recognition_audits.append(
@@ -1099,17 +1211,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--language",
         choices=tuple(sorted(SUPPORTED_LANGUAGES)),
         default=None,
-        help="bundled language profile for direct audio/lyrics mode",
+        help="language for direct audio/lyrics mode (ja, zh, or en)",
     )
     parser.add_argument("--audio-kind", choices=tuple(sorted(SUPPORTED_AUDIO_KINDS)), default="mix")
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--model-cache", type=Path)
+    parser.add_argument("--model-cache", type=Path, default=WHISPER_MODEL_DIR)
     parser.add_argument("--model-path", type=Path)
-    parser.add_argument(
-        "--allow-network",
-        action="store_true",
-        help="allow stable-whisper to download a named model when --model-path is absent",
-    )
     parser.add_argument("--vocals-root", type=Path)
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument(
@@ -1135,7 +1242,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--audio and --lyrics must be supplied together")
     if args.audio is not None:
         if args.language not in SUPPORTED_LANGUAGES:
-            raise SystemExit("--language must select the bundled profile with direct audio")
+            raise SystemExit("--language ja, zh, or en is required with direct audio")
         report = run_recognition_audit(
             audio_path=args.audio,
             lyric_lines=_load_direct_lines(args.lyrics),
@@ -1148,7 +1255,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_path=args.output,
             force=args.force,
             window_tolerance_ms=args.window_tolerance_ms,
-            allow_network=args.allow_network,
         )
     else:
         report = run_manifest_audit(
@@ -1165,7 +1271,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             force=args.force,
             window_tolerance_ms=args.window_tolerance_ms,
             allow_partial_manifest=args.allow_partial_manifest,
-            allow_network=args.allow_network,
         )
     disposition = str(report.get("disposition") or "unresolved")
     structural_ok = report.get("structural_gate_ok", report.get("gate_ok")) is True

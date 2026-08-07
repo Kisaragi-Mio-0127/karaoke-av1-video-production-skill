@@ -2,40 +2,21 @@
 
 [简体中文](batch-release-gates.zh-CN.md) | English
 
-Use these gates when encoding, promoting, or packaging multiple songs or delivery profiles together. Apply the same gates to one-click and underlying renderer routes.
-
-## AV1 4:2:0 batch visual styles
-
-The AV1 4:2:0 batch entry accepts `--visual-style vinyl|spectrum|both` and
-defaults to `vinyl`:
-
-```powershell
-uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
-  --manifest <album-manifest> `
-  --visual-style <vinyl|spectrum|both>
-```
-
-`spectrum` does not require a vinyl input or asset. `both` creates two
-independent products—one vinyl and one spectrum—with separate media, report,
-hash, and promotion identities. The pair shares one hash-identical profile
-ASS and publishes serially; it is not a combined visual output.
-`--single-track` selects exactly one song and one profile; with
-`--visual-style both`, it can produce two variants for that song/profile.
-`--lossless-companion` and `--full-decode` remain explicit opt-ins and are not
-implied by the selected style or by `both`. Run the release gates separately
-for every produced variant.
+Use these gates when encoding, promoting, or packaging multiple songs or delivery profiles together.
 
 ## Freeze the generation
 
-Before full encoding, record a parameter fingerprint covering source files, timing overrides, renderer, report and test identities, explicit singer resolution and colours, secondary roles and top-overlay geometry, encoder, pixel format, quality control, preset, audio, container, fonts, lyric and ruby sizes, spacing, render options, timing evidence, and delivery profile. Keep song counts, cue counts, quality values, font sizes, and filenames in project configuration rather than the generic skill.
+Before full encoding, record a parameter fingerprint covering source files, timing overrides, renderer, report and test identities, encoder, pixel format, quality control, preset, audio, container, fonts, lyric and ruby sizes, spacing, render options, timing evidence, and delivery profile. Keep song counts, cue counts, quality values, font sizes, and filenames in project configuration rather than the generic skill.
+
+Batch rendering never runs MMS. If the fixed-path `timing_overrides` artifact exists, automatically consume its existing visual-release overrides and record the artifact identity; do not create a new override during the batch run. The renderer does not validate MMS provenance, so validate the artifact's source, generation identity, and review status before encoding or promotion. If the artifact is absent, do not invoke MMS implicitly.
 
 ## Isolated staging
 
 - Encode in a dedicated staging directory outside accepted deliverables.
 - Require successful renderer and encoder exits; reject partial files, stale outputs, unverified profiles, and mixed generation identities.
 - Compare per-track and total sizes with the previous accepted generation. Treat unusual changes as investigation signals rather than quality proof.
-- Treat complete null decoding as optional and off by default. When performed, map the intended streams and record actual exit codes; do not make an unperformed diagnostic a release failure.
-- Extract boundary frames for cues, longest phrases, top overlays, ruby exceptions, and release-overlap conflicts.
+- Treat complete null decoding as optional and off by default; enable it only after an explicit selection. When performed, map the intended streams and record actual exit codes.
+- Extract boundary frames for cues, longest phrases, ruby exceptions, and release-overlap conflicts.
 
 ## Multi-file promotion
 

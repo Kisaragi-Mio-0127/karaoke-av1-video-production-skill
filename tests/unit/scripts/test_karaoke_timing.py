@@ -27,6 +27,96 @@ from scripts.karaoke_timing import (
     validate_project,
 )
 
+
+def test_single_song_private_output_root_redirects_all_timing_artifacts(
+    tmp_path: Path, monkeypatch
+):
+    project = tmp_path / "repo"
+    private_output = project / ".render-work" / "one-song" / "initial"
+    deliverables = project / "canonical"
+    source = deliverables / "sources" / "lyrics.json"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"songs":{"selected":{"lrc":"[00:01.00]line"}}}', encoding="utf-8")
+    audio = project / "audio.flac"
+    audio.write_bytes(b"audio")
+    track = SimpleNamespace(
+        song_id="selected",
+        title="Title",
+        artist="Artist",
+        audio_file=audio.name,
+        artifact_slug="slug",
+        expected_duration_ms=2_000,
+        audio_sha256="0" * 64,
+        expected_cues=1,
+        audio_path=audio,
+        language="ja",
+    )
+    album = SimpleNamespace(
+        tracks=(track,),
+        project_root=project,
+        deliverable_dir=deliverables,
+        title="Album",
+    )
+    captured = []
+    monkeypatch.setattr(karaoke_timing, "load_album_manifest", lambda *_a, **_k: album)
+    monkeypatch.setattr(
+        karaoke_timing,
+        "load_or_fetch_source",
+        lambda *_a, **_k: ({"songs": {"selected": {"lrc": ""}}}, "frozen-cache"),
+    )
+
+    def fake_build(spec, *_args, **_kwargs):
+        captured.append(spec)
+        return {
+            "song_id": spec.song_id,
+            "alignment": {"overall_method": "deterministic", "unresolved": []},
+            "audio": {"duration_ms": 2_000},
+            "exports": {"sug_roundtrip": {"ok": True}},
+            "source": {"lyric_texts": []},
+        }
+
+    monkeypatch.setattr(karaoke_timing, "build_song", fake_build)
+    monkeypatch.setattr(karaoke_timing, "verify_font", lambda *_a, **_k: {"ok": True})
+    monkeypatch.setattr(karaoke_timing, "build_report", lambda *_a, **_k: {"ok": True})
+
+    result = karaoke_timing.main(
+        [
+            "--manifest", str(project / "album.json"),
+            "--allow-partial-manifest",
+            "--song-id", "selected",
+            "--source", str(source),
+            "--output-root", str(private_output),
+        ]
+    )
+
+    assert result == 0
+    assert [spec.song_id for spec in captured] == ["selected"]
+    assert captured[0].deliverable_dir == private_output.resolve()
+    assert (private_output / "validation" / "timing_report.json").is_file()
+
+
+def test_single_song_refuses_canonical_or_existing_output_root(tmp_path: Path, monkeypatch):
+    project = tmp_path / "repo"
+    existing = project / ".render-work" / "existing"
+    existing.mkdir(parents=True)
+    album = SimpleNamespace(
+        tracks=(SimpleNamespace(song_id="x"),),
+        project_root=project,
+        deliverable_dir=project / "canonical",
+    )
+    monkeypatch.setattr(karaoke_timing, "load_album_manifest", lambda *_a, **_k: album)
+
+    with pytest.raises(SystemExit, match="requires --output-root"):
+        karaoke_timing.main(["--manifest", "album.json", "--song-id", "x"])
+
+    with pytest.raises(SystemExit, match="already exists"):
+        karaoke_timing.main(
+            [
+                "--manifest", "album.json", "--song-id", "x",
+                "--output-root", str(existing),
+            ]
+        )
+
 TEST_SONG = SongSpec(
     song_id="generic-song",
     title="Generic Title",

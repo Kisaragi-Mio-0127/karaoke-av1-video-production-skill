@@ -1315,6 +1315,11 @@ def make_parser() -> argparse.ArgumentParser:
         help="frozen local/net lyrics JSON used by the audit and line windows",
     )
     parser.add_argument(
+        "--sug",
+        type=Path,
+        help="explicit audited SUG timing project; requires exactly one selected song",
+    )
+    parser.add_argument(
         "--allow-partial-manifest",
         action="store_true",
         default=True,
@@ -1361,6 +1366,7 @@ def validate_audit_source_hashes(
     manifest_path: Path,
     song_ids: tuple[str, ...],
     source_path: Path | None = None,
+    sug_path: Path | None = None,
 ) -> None:
     """Validate MMS input paths and non-empty files; hashes are record-only."""
 
@@ -1410,13 +1416,20 @@ def validate_audit_source_hashes(
         for song in audit.get("songs", [])
         if isinstance(song, dict) and song.get("song_id") is not None
     }
+    resolved_sug_path = (
+        Path(sug_path).expanduser().resolve() if sug_path is not None else None
+    )
+    if resolved_sug_path is not None and len(set(song_ids)) != 1:
+        raise ValueError("explicit sug_path requires exactly one selected song")
     for song_id in song_ids:
         song = audit_songs.get(song_id)
         if song is None:
             raise ValueError(f"MMS audit is missing song {song_id}")
         track = tracks[song_id]
         expected_sug = _require_nonempty_file(
-            album.deliverable_dir / "timing" / f"{track.timing_stem}.sug",
+            resolved_sug_path
+            if resolved_sug_path is not None
+            else album.deliverable_dir / "timing" / f"{track.timing_stem}.sug",
             label=f"SUG for song {song_id}",
         )
         reported_sug = _reported_file(
@@ -1490,6 +1503,7 @@ def run_build(
     *,
     manifest_path: Path,
     source_path: Path | None = None,
+    sug_path: Path | None = None,
     audit_path: Path | None = None,
     recognition_audit_paths: Sequence[Path] = (),
     output_path: Path | None = None,
@@ -1544,6 +1558,14 @@ def run_build(
     release_target_song_ids = tuple(
         str(item) for item in (release_song_ids or target_song_ids)
     )
+    provenance_song_ids = tuple(
+        dict.fromkeys([*target_song_ids, *release_target_song_ids])
+    )
+    resolved_sug_path = (
+        Path(sug_path).expanduser().resolve() if sug_path is not None else None
+    )
+    if resolved_sug_path is not None and len(provenance_song_ids) != 1:
+        raise ValueError("explicit sug_path requires exactly one selected song")
     manifest_song_ids = {str(track.song_id) for track in album.tracks}
     if not (set(target_song_ids) | set(release_target_song_ids)) <= manifest_song_ids:
         raise ValueError("requested song ID is not present in the album manifest")
@@ -1551,8 +1573,9 @@ def run_build(
         audit,
         album,
         manifest_path,
-        tuple(dict.fromkeys([*target_song_ids, *release_target_song_ids])),
+        provenance_song_ids,
         resolved_source_path,
+        resolved_sug_path,
     )
     validate_recognition_audio_sources(recognition_audits, album, target_song_ids)
     existing = (
@@ -1595,6 +1618,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     result = run_build(
         manifest_path=args.manifest,
         source_path=args.source,
+        sug_path=args.sug,
         audit_path=args.audit,
         recognition_audit_paths=tuple(args.recognition_audits or ()),
         output_path=args.output,

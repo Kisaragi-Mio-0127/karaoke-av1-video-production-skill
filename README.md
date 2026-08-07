@@ -4,33 +4,52 @@
 
 This repository packages a reusable Codex Skill and a guarded
 StrangeUtaGame integration for Japanese karaoke timing and AV1 video
-production. The public integration contains generic and Japanese workflow
-code only; track-specific data stays in external manifests and review JSON.
+production. The public integration contains Japanese and language-neutral
+workflow files only; track-specific data stays in external manifests and
+frozen lyric sources.
 
 ## What is automatic
 
-- The normal Japanese entry consumes an existing SUG and audio file, builds
-  the current composition, and renders the final MP4.
-- The Japanese MMS entry audits timing, writes a separate editable companion
-  SUG, builds the current composition, and renders the final MP4. Use
-  `--quality-policy auto-fallback` when the run must finish without manual
-  timing review while preserving unresolved evidence in its report.
-- The timing builder can create canonical timing deliverables from a manifest
-  and frozen lyric source before either render route is used.
+The recommended Japanese entry is the single-command
+`scripts/run_karaoke_japanese_full_auto.py`. Given a manifest, a song ID, a
+frozen lyric source, and a new output directory, it automatically:
 
-Automatic does not mean input-free. The selected route still needs its local
-manifest, authorized audio and frozen lyrics, fonts, and the required model or
-stem inputs. It never replaces frozen lyrics with an unreviewed transcription.
+- prepares the selected MSST vocal stem;
+- builds a private initial SUG;
+- runs the Japanese MMS workflow and creates an editable companion SUG;
+- prepares the current layout and renders the AV1 MP4 delivery.
 
-## Fixed generated layout
+`auto-fallback` is the default quality policy. The run can complete without
+manual timing alignment: usable high-confidence MMS timing is applied, while
+low-confidence or unresolved units retain canonical timing and remain visible
+in the report. Manual or Agent timing alignment is an optional follow-up using
+the companion SUG; it is not required for the automated run.
 
-One-click workflows generate `wide-layout-v7/cover-palette` inside every new
-output directory. `vinyl` creates a fresh record asset for that run;
-`spectrum` creates no vinyl asset. Explicit composition files are advanced
-compatibility overrides and must pass the same layout gates.
+The existing `scripts/run_karaoke_japanese_workflow.py` has a different role:
+it takes an existing manually adjusted or reviewed SUG and directly rerenders
+it. It does not create the private initial SUG or run MMS.
 
-Detailed geometry lives only in
+The lower-level `scripts/run_karaoke_japanese_mms_workflow.py` is the staged
+MMS/recovery entry. Use it when a run needs stage-by-stage audit, build,
+companion, or render handling, or when its artifacts need inspection. It is
+not the normal first command for a new Japanese track.
+
+Automatic does not mean input-free. The selected track still needs an
+authorized local audio source, a manifest, frozen lyrics, fonts, and the
+project-owned model or stem inputs. The workflow never replaces frozen lyrics
+with an unreviewed transcription.
+
+## Generated layout and delivery
+
+The full-auto route prepares the current wide layout automatically. Choose
+`spectrum` for the default spectrum presentation or `vinyl` when a record
+visual is wanted; the run keeps generated layout assets with that run.
+Detailed geometry belongs to
 [wide-visual-templates.md](references/wide-visual-templates.md).
+
+The default delivery is an MP4 with AV1 video, hard subtitles, and AAC-LC
+audio. Other containers or diagnostics are opt-in and must be verified before
+promotion.
 
 ## Install
 
@@ -55,42 +74,44 @@ and keeps rollback backups for replaced files.
 
 ## Main commands
 
-Normal Japanese video from an existing SUG:
+Japanese full-auto production from a manifest track:
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
+  --manifest <manifest> `
+  --song-id <song-id> `
+  --source <frozen-lyrics.json> `
+  --output-dir <new-private-output-dir> `
+  --quality-policy auto-fallback
+```
+
+Japanese video rerender from an existing adjusted SUG:
 
 ```powershell
 uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
-  --sug <project.sug> --audio <audio> --output-dir <new-output> `
+  --sug <adjusted-project.sug> --audio <post-mix-audio> `
+  --output-dir <new-output-dir> `
   --title <title> --artist <artist> `
   --album-title <album-title> --album-artist <album-artist> `
   --visual-style spectrum
 ```
 
-Japanese MMS timing companion and video without manual timing intervention:
-
-```powershell
-uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
-  --manifest <manifest> --song-id <song-id> `
-  --mms-model-path models/mms/model.pt `
-  --quality-policy auto-fallback `
-  --output-dir <new-output> --visual-style spectrum
-```
-
-Batch AV1 4:2:0 rendering from reviewed timing:
+Generic batch AV1 4:2:0 rendering from reviewed timing:
 
 ```powershell
 uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
   --manifest <manifest> --visual-style <vinyl-or-spectrum>
 ```
 
-MP4 is the default. MKV and full null decoding are created or run only after
-their explicit flags are supplied. Lyrics and cover network access also
-require their separate explicit authorization flags.
+Use a new output directory for each one-command run. The full-auto command
+uses the project defaults for model and stem locations; explicit overrides are
+available when the project configuration requires them.
 
 ## Repository layout
 
-- `SKILL.md`: concise routing and release contract.
-- `references/`: detailed workflow, layout, timing, and media gates.
-- `integration/strangeutagame/`: installable generic and Japanese scripts.
+- `SKILL.md`: concise route selection and release contract.
+- `references/`: detailed workflow, timing, integration, and media guidance.
+- `integration/strangeutagame/`: installable generic and Japanese support files.
 - `scripts/`: installer and local Skill support tools.
 - `tests/`: repository and integration regression tests; not installed into
   StrangeUtaGame.

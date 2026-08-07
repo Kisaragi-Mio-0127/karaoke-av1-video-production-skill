@@ -1090,6 +1090,7 @@ def audit_track(
     runtime: MmsRuntime,
     vocals_root: Path,
     *,
+    sug_path: Path | None = None,
     schema_version: str = SCHEMA_VERSION,
     unit_overrides: Mapping[OverrideKey, str] | None = None,
     matched_override_keys: set[OverrideKey] | None = None,
@@ -1099,7 +1100,11 @@ def audit_track(
     import soundfile as sf
 
     project_root = album.project_root
-    sug_path = album.deliverable_dir / "timing" / f"{track.timing_stem}.sug"
+    sug_path = (
+        Path(sug_path).expanduser().resolve()
+        if sug_path is not None
+        else (album.deliverable_dir / "timing" / f"{track.timing_stem}.sug").resolve()
+    )
     vocals_path = _vocal_path(track, vocals_root)
     mix_path = track.audio_path
     for path, label in (
@@ -1401,6 +1406,7 @@ def run_audit(
     song_ids: Sequence[str] | None = None,
     manifest_path: Path,
     source_path: Path | None = None,
+    sug_path: Path | None = None,
     output_path: Path | None = None,
     vocals_root: Path | None = None,
     schema_version: str = SCHEMA_VERSION,
@@ -1432,6 +1438,11 @@ def run_audit(
     )
     project_root = album.project_root
     tracks = select_tracks(album.tracks, song_ids)
+    resolved_sug_path = (
+        Path(sug_path).expanduser().resolve() if sug_path is not None else None
+    )
+    if resolved_sug_path is not None and len(tracks) != 1:
+        raise ValueError("explicit sug_path requires exactly one selected song")
     runtime = load_mms_runtime(
         project_root,
         model_path=model_path,
@@ -1488,6 +1499,7 @@ def run_audit(
                 album,
                 runtime,
                 resolved_vocals_root,
+                sug_path=resolved_sug_path,
                 schema_version=requested_schema,
                 unit_overrides=normalized_unit_overrides,
                 matched_override_keys=matched_override_keys,
@@ -1563,6 +1575,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="frozen local/net lyrics JSON bound into the audit provenance",
     )
     parser.add_argument(
+        "--sug",
+        type=Path,
+        help="explicit SUG timing project; requires exactly one selected song",
+    )
+    parser.add_argument(
         "--allow-partial-manifest",
         action="store_true",
         help="allow an explicitly supplied manifest with fewer than five tracks",
@@ -1609,6 +1626,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         song_ids=flattened_song_ids,
         manifest_path=args.manifest,
         source_path=args.source,
+        sug_path=args.sug,
         output_path=output_path,
         vocals_root=vocals_root,
         allow_partial_manifest=args.allow_partial_manifest,

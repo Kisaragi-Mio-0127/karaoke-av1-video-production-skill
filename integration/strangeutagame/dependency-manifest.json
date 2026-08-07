@@ -39,6 +39,12 @@
       "category": "shared-internal-module",
       "upstream_dependency": "no-upstream-code-import",
       "reason": "Resolves project-owned MMS model paths without treating runtime caches as model storage."
+    },
+    {
+      "path": "karaoke_full_auto.py",
+      "category": "shared-internal-module",
+      "upstream_dependency": "transitive-runtime",
+      "reason": "Reusable private single-song orchestration imported by language-specific full-auto entries; Japanese routing remains independent of omitted Chinese/English entry modules."
     }
   ],
   "package_files": [
@@ -193,6 +199,11 @@
       "path": "run_karaoke_japanese_mms_workflow.py",
       "category": "transitive-runtime",
       "reason": "Separate Japanese-only MMS audit/build/companion/render entry; defaults offline, supports automatic fallback, and preserves the canonical SUG."
+    },
+    {
+      "path": "run_karaoke_japanese_full_auto.py",
+      "category": "transitive-runtime",
+      "reason": "Japanese-only private full-auto entry that restricts the reusable orchestration to Japanese and does not require Chinese/English entry modules."
     }
   ],
   "requirements": [

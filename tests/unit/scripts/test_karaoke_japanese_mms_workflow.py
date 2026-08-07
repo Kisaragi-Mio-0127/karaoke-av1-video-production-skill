@@ -705,6 +705,7 @@ def test_parser_requires_manifest_and_exactly_one_song_id():
     help_text = parser.format_help()
     assert "--mms-model-path" in help_text
     assert "--quality-policy" in help_text
+    assert "--sug" in help_text
     assert "models/mms/model.pt" in help_text
     assert ".cache/torch" not in help_text
     with pytest.raises(SystemExit):
@@ -724,9 +725,23 @@ def test_parser_requires_manifest_and_exactly_one_song_id():
         ]
     )
     assert parsed.song_id == "one"
+    assert parsed.sug is None
     assert parsed.quality_policy == "strict"
     assert parsed.allow_mms_network is True
     assert parsed.allow_cover_network is True
+
+
+def test_advanced_sug_override_replaces_manifest_canonical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    env = _environment(tmp_path, monkeypatch)
+    override = env.project / "reviewed-override.sug"
+    override.write_bytes(env.sug.read_bytes())
+    env.args.sug = override
+
+    pre = mms_workflow.preflight(env.args)
+
+    assert pre.sug == override.resolve()
 
 
 def test_main_exits_zero_for_rendered_with_fallback(

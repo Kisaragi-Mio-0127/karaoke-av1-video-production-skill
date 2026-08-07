@@ -2,30 +2,43 @@
 
 [English](README.md)
 
-本仓库提供可复用的 Codex Skill，以及受保护的 StrangeUtaGame 日文卡拉 OK
-时间轴和 AV1 视频制作集成。公开集成只包含通用及日文流程代码；逐曲数据放在
-外部清单和复核 JSON 中。
+本仓库提供可复用的 Codex Skill，以及受保护的 StrangeUtaGame 日文卡拉 OK 时间轴和
+AV1 视频制作集成。公开集成只包含日文与通用流程文件；逐曲数据放在外部清单和冻结
+歌词源中。
 
 ## 可以自动完成什么
 
-- 普通日文入口读取已有 SUG 和音频，自动生成当前构图并渲染最终 MP4。
-- 日文 MMS 入口自动审计时间轴、生成独立的可编辑 companion SUG、生成当前
-  构图并渲染最终 MP4。需要无人工调轴完成时使用
-  `--quality-policy auto-fallback`，未解决证据仍会原样保留在报告中。
-- 时间轴构建脚本可先从清单和冻结歌词源生成规范时间轴产物，再交给任一渲染
-  入口。
+推荐的日文入口是单命令
+`scripts/run_karaoke_japanese_full_auto.py`。给定清单、歌曲 ID、冻结歌词源和
+新的输出目录后，它会自动完成：
 
-“自动”不代表不需要输入。所选流程仍需本地清单、已授权音频、冻结歌词、字体，
-以及对应模型或人声分轨。流程不会用未经复核的转写替换冻结歌词。
+- 准备选中歌曲的 MSST 人声分轨；
+- 生成私有初始 SUG；
+- 运行日文 MMS 流程并生成可编辑的 companion SUG；
+- 准备当前布局并渲染 AV1 MP4 交付物。
 
-## 固定的自动布局
+默认质量策略是 `auto-fallback`。流程可以在没有人工校轴的情况下完成：采用可用的
+高置信度 MMS 时间，同时让低置信度或未解决单元保留规范时间，并在报告中保留相应
+证据。人工或 Agent 校轴只是针对 companion SUG 的可选后续，不是自动流程的前置条件。
 
-一键流程会在每个新输出目录中生成 `wide-layout-v7/cover-palette`。
-`vinyl` 会为本次运行重新生成黑胶资源；`spectrum` 不生成黑胶资源。显式构图
-文件仅作为高级兼容覆盖，并且仍须通过同一布局门禁。
+现有的 `scripts/run_karaoke_japanese_workflow.py` 用途不同：它接收已有的人工调整或
+复核后的 SUG，直接重新渲染视频；它不会生成私有初始 SUG，也不会运行 MMS。
 
-具体几何参数只保存在
-[wide-visual-templates.zh-CN.md](references/wide-visual-templates.zh-CN.md)。
+底层的 `scripts/run_karaoke_japanese_mms_workflow.py` 是分阶段的 MMS/恢复入口。需要
+逐阶段处理审计、构建、companion 或渲染，或检查阶段产物时使用它；新日文歌曲的通常
+首选命令仍是 full-auto 入口。
+
+“自动”不代表不需要输入。所选歌曲仍需已授权的本地音频、清单、冻结歌词、字体，以及
+项目自有的模型或分轨输入。流程不会用未经复核的转写替换冻结歌词。
+
+## 自动布局与交付物
+
+full-auto 流程会自动准备当前宽屏布局。需要频谱呈现时使用默认的 `spectrum`，需要
+黑胶视觉时选择 `vinyl`；本次运行生成的布局资源会与该次产物放在一起。具体几何参数
+请阅读 [wide-visual-templates.md](references/wide-visual-templates.md)。
+
+默认交付物是包含 AV1 视频、硬字幕和 AAC-LC 音频的 MP4。其他容器或诊断操作需要显式
+选择，并在交付前完成验证。
 
 ## 安装
 
@@ -49,24 +62,26 @@ python scripts/install_strangeutagame_integration.py --target <project> --force
 
 ## 主要命令
 
-从已有 SUG 生成普通日文视频：
+从清单歌曲执行日文 full-auto 制作：
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
+  --manifest <manifest> `
+  --song-id <song-id> `
+  --source <frozen-lyrics.json> `
+  --output-dir <new-private-output-dir> `
+  --quality-policy auto-fallback
+```
+
+从已有调整后 SUG 重新渲染日文视频：
 
 ```powershell
 uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
-  --sug <project.sug> --audio <audio> --output-dir <new-output> `
+  --sug <adjusted-project.sug> --audio <post-mix-audio> `
+  --output-dir <new-output-dir> `
   --title <title> --artist <artist> `
   --album-title <album-title> --album-artist <album-artist> `
   --visual-style spectrum
-```
-
-无需人工调轴生成日文 MMS companion 和视频：
-
-```powershell
-uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
-  --manifest <manifest> --song-id <song-id> `
-  --mms-model-path models/mms/model.pt `
-  --quality-policy auto-fallback `
-  --output-dir <new-output> --visual-style spectrum
 ```
 
 从已复核时间轴批量渲染 AV1 4:2:0：
@@ -76,14 +91,14 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
   --manifest <manifest> --visual-style <vinyl-or-spectrum>
 ```
 
-默认输出 MP4。只有显式提供相应参数后才生成 MKV 或执行完整空解码。歌词和
-封面联网也分别需要显式授权。
+每次一键运行都使用新的输出目录。full-auto 默认使用项目配置中的模型和分轨位置；
+项目有特殊配置时可以提供显式覆盖。
 
 ## 仓库结构
 
 - `SKILL.md`：精简的流程选择和发布契约。
-- `references/`：详细工作流、布局、时间轴和媒体门禁。
-- `integration/strangeutagame/`：可安装的通用及日文脚本。
+- `references/`：详细工作流、时间轴、集成和媒体说明。
+- `integration/strangeutagame/`：可安装的通用及日文支持文件。
 - `scripts/`：安装器和本地 Skill 支持工具。
 - `tests/`：仓库及集成回归测试，不会安装到 StrangeUtaGame。
 

@@ -32,7 +32,7 @@ import sys
 import tempfile
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
@@ -3193,6 +3193,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="allow an explicitly supplied manifest with fewer than five tracks",
     )
+    parser.add_argument(
+        "--song-id",
+        help="build exactly one manifest track (requires --output-root)",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=Path,
+        help=(
+            "new private output root below <project>/.render-work; timing and "
+            "validation artifacts are written here instead of canonical deliverables"
+        ),
+    )
     parser.add_argument("--source", type=Path, default=None)
     parser.add_argument("--refresh-source", action="store_true")
     parser.add_argument(
@@ -3251,7 +3263,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.manifest,
         require_five_tracks=not args.allow_partial_manifest,
     )
-    specs = tuple(song_spec_from_track(track, album) for track in album.tracks)
+    if args.song_id and args.output_root is None:
+        raise SystemExit("--song-id requires --output-root to prevent canonical overwrite")
+    selected_tracks = tuple(
+        track
+        for track in album.tracks
+        if args.song_id is None or str(track.song_id) == str(args.song_id)
+    )
+    if args.song_id is not None and len(selected_tracks) != 1:
+        raise SystemExit(
+            f"manifest must contain exactly one selected song-id: {args.song_id}"
+        )
+    output_root = album.deliverable_dir.resolve()
+    if args.output_root is not None:
+        output_root = args.output_root.expanduser().resolve()
+        private_root = (album.project_root / ".render-work").resolve()
+        try:
+            output_root.relative_to(private_root)
+        except ValueError as error:
+            raise SystemExit(
+                f"--output-root must stay below the project private root: {private_root}"
+            ) from error
+        if output_root == private_root:
+            raise SystemExit("--output-root must be a new child of .render-work")
+        if output_root.exists():
+            raise SystemExit(f"--output-root already exists: {output_root}")
+    specs = tuple(
+        replace(song_spec_from_track(track, album), deliverable_dir=output_root)
+        for track in selected_tracks
+    )
     args.project_root = album.project_root
     args.source = (
         args.source or album.deliverable_dir / "sources" / "netease_lyrics.json"
@@ -3315,7 +3355,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = build_report(
         args.source, source_mode, song_reports, args, font_verification
     )
-    report_path = album.deliverable_dir / "validation" / "timing_report.json"
+    report_path = output_root / "validation" / "timing_report.json"
     _json_dump(report_path, report)
     print("karaoke timing build complete")
     for song in song_reports:

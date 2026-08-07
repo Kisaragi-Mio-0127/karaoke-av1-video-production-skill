@@ -6,13 +6,13 @@
 
 - Read the application version from `src/strange_uta_game/__version__.py` and the storage format from `SugMigrator.CURRENT_VERSION`. Do not use a stale packaging version or README badge as the parser contract.
 - The current tested baseline is StrangeUtaGame 1.4.5 and SUG format 0.3.0. A newer application may keep the same storage format.
-- Run `scripts/check_sug_compatibility.py` with the target repository's project-local Python for normal non-MMS SUG compatibility checks. Use the configured language profile for the documented ASR/alignment path. Loading is read-only; require parser/schema compatibility and a focused render test. Dedicated Japanese and zh/en MMS entries do not use before/after hashes in checks or gates; record any `*_sha256` only in reports.
+- Run `scripts/check_sug_compatibility.py` with the target repository's project-local Python for normal non-MMS SUG compatibility checks. Loading is read-only; require parser/schema compatibility and a focused render test. Japanese MMS does not use before/after hashes as checks or gates; record any `*_sha256` only in reports.
 - Unknown SUG versions are not automatically compatible merely because their JSON shape looks similar. Require a real parser load and a focused render test before release.
 
 ## Independent ASR and explicit Japanese MMS policy
 
 - stable-ts receives known lyrics or tokens as forced-alignment evidence. Independent ASR transcribes without lyric prompts and is a separate optional review lane.
-- `run_karaoke_japanese_mms_workflow.py` is the only documented MMS entry and is Japanese-only. It requires `--manifest`, `--song-id`, and a new `--output-dir`; the current composition is generated inside that output, while `--composition` remains an advanced gated override. Manifest/project defaults resolve the reviewed SUG, frozen lyrics, and MSST `Vocals.wav`, with optional `--source` and `--vocals-root` overrides. It accepts no separate SUG-path argument and is not a `zh`/`en` adapter or default ASR/MMS review.
+- Use `run_karaoke_japanese_full_auto.py` as the first command for a new Japanese track. Use `run_karaoke_japanese_mms_workflow.py` as the staged recovery entry; it accepts an explicit single-song `--sug` and generates the current composition inside the new output.
 - The Japanese MMS entry uses the project-owned `models/mms/model.pt` through `--mms-model-path`. `.cache` is for derived runtime data and evidence, not model authority; there is no model-download fallback. Keep cover access separate and record resolved model/cache provenance.
 - Require only `audit/`, `build/`, and `render/` as workflow subdirectories under the new output directory. Pass audit and override-build gates, and allow only reviewed `visual_release_overrides_ms` from `build/timing_overrides.json` into render.
 - A batch run never invokes MMS. When the fixed-path `timing_overrides` artifact exists, batch consumes its existing `visual_release_overrides_ms` and records the artifact identity; the renderer does not validate MMS provenance. Validate the artifact and the Japanese workflow gate before batch promotion.

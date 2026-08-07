@@ -14,7 +14,10 @@ python "$skillRoot/scripts/install_strangeutagame_integration.py" --target D:\pa
 python "$skillRoot/scripts/install_strangeutagame_integration.py" --target D:\path\to\StrangeUtaGame
 ```
 
-The installer checks `pyproject.toml`, `src/strange_uta_game`, and `scripts`. It copies only paths listed under `scripts`, `shared_modules`, and `package_files` in `integration/strangeutagame/dependency-manifest.json`. A differing destination file requires an explicit overwrite decision and is backed up under `.karaoke-skill-backup/<UTC stamp>/`.
+The installer checks the project layout and copies only paths listed under
+`scripts`, `shared_modules`, and `package_files` in
+`integration/strangeutagame/dependency-manifest.json`. A differing destination
+file requires an explicit overwrite decision and is backed up for rollback.
 
 ## Environment
 
@@ -28,9 +31,12 @@ if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
 uv run --no-sync python --version
 ```
 
-Install `ffmpeg` and `ffprobe` separately and verify libass plus an available AV1 encoder. Rubber Band is required only for pitch shifting. CJK fonts are selected according to the production configuration. Independent ASR/Whisper and MSST are optional evidence lanes. MMS is not an installation or runtime dependency for the one-click or batch entry. The only documented MMS entry is the separate Japanese-only `run_karaoke_japanese_mms_workflow.py`; install or configure its model only for that explicit contract.
-
-The tested compatibility baseline is StrangeUtaGame 1.4.5 with SUG storage format 0.3.0. Read the application version from `src/strange_uta_game/__version__.py` and the storage format from `SugMigrator.CURRENT_VERSION`.
+Install `ffmpeg` and `ffprobe` separately and verify libass plus an available
+AV1 encoder. Rubber Band is required only for pitch shifting. CJK fonts are
+selected according to the production configuration. The Japanese full-auto
+entry also needs the project-local MSST preparation and MMS model inputs; the
+staged Japanese MMS wrapper uses the same local evidence. Use the existing
+project environment rather than downloading models during a run.
 
 ## Project configuration
 
@@ -41,26 +47,29 @@ Song-specific display, ruby-group, and timing-reading decisions can be supplied 
 ## Production order
 
 ```text
-manifest -> one-click Japanese workflow (no MMS)
--> source lyrics -> candidate ruby in canonical SUG -> contextual ruby review
--> timing and phrase decisions -> read-only renderer -> ASS/report/frames
--> composition -> AV1 render -> media inspection -> finalization -> archive
+manifest + song-id + frozen lyric source + new output directory
+-> MSST -> private initial SUG -> Japanese MMS
+-> editable companion SUG -> current layout -> AV1 MP4
 ```
 
-The one-click interface exposes no MMS option and never invokes MMS. Independent ASR and MSST are separate optional evidence lanes. The dedicated Japanese MMS entry is not a default `ASR/MMS review` step and must remain outside the one-click and batch commands.
+The public Japanese one-command entry is
+`scripts/run_karaoke_japanese_full_auto.py`. Its default quality policy is
+`auto-fallback`, so manual or Agent timing alignment is optional after the
+companion SUG is created. The existing
+`scripts/run_karaoke_japanese_workflow.py` remains the direct rerender entry
+for an already adjusted or reviewed SUG; it does not run MMS.
 
-## Explicit Japanese MMS entry
+## Staged Japanese MMS entry
 
 When the validated bundle includes `scripts/run_karaoke_japanese_mms_workflow.py`,
-use it only for an explicitly requested Japanese timing workflow. It is not a
-generic language adapter and must never be called for `zh` or `en`. Its required
-arguments are `--manifest`, `--song-id`, and a new, non-existent
+use it as the lower-level stage/recovery entry for Japanese timing. Its
+required arguments are `--manifest`, `--song-id`, and a new, non-existent
 `--output-dir`:
 
 ```powershell
 uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
   --manifest <existing-manifest> --song-id <song-id> `
-  --mms-model-path models/mms/model.pt `
+  --mms-model-path <project-mms-model> `
   --quality-policy auto-fallback --output-dir <new-output-dir> `
   --visual-style spectrum
 ```
@@ -78,13 +87,9 @@ selects the project-owned checkpoint. `.cache` is reserved for derived runtime
 data and evidence, not model authority, and no model-download fallback is part
 of this contract. Keep resolved-model and cache provenance separate in reports.
 
-The new output directory contains only `audit/`, `build/`, and `render/`. Gate
-audit before build and build before render. Only reviewed
-`visual_release_overrides_ms` from `build/timing_overrides.json` enter render;
-audit data, other build values, and separated vocals are never delivery tracks.
-If a gate fails, keep review artifacts without producing or replacing a release
-video. If the entry is absent, do not reconstruct it by adding MMS flags to
-another workflow.
+The staged wrapper keeps audit, build, companion, and render artifacts
+separate. Use it for stage-by-stage handling, recovery, or gate inspection; a
+failed gate leaves review artifacts without replacing a release video.
 
 The canonical editable timing source is the `.sug` project. Candidate generation fills missing ruby spans, review writes accepted corrections to the canonical SUG, and rendering reads that reviewed project without inferring new ruby.
 
@@ -92,15 +97,15 @@ When pitch shifting is requested, run `scripts/pitch_shift_audio.py` on the comp
 
 ## Visual contract
 
-The vinyl remains rotating and is regenerated for formal and test runs with `direction-neutral-concentric-grooves/v3/backplate-absent`.
-
-The current wide composition, vinyl/spectrum geometry, secondary-overlay rules,
-and all numeric layout constants are defined only in
+The current wide composition, vinyl/spectrum choices, and secondary-overlay
+rules are defined only in
 [`wide-visual-templates.md`](wide-visual-templates.md). Keep this integration
-guide linked to that single source; do not copy coordinates or typography
-constants here.
+guide linked to that single source; this guide intentionally keeps layout
+details high level.
 
-The shared cover-palette extractor filters near-black pixels by absolute chroma before Lab-neighbourhood area aggregation, emits an ordered deterministic eight-colour palette, and records the cover and extractor identities. Review the selected colours in representative frames before accepting the composition.
+The full-auto route prepares the selected visual style and keeps its generated
+artwork with the run. Review representative frames before accepting the
+composition.
 
 The supported direct album entry is `render_karaoke_direct_av1_420_album.py`.
 It uses `karaoke_direct_album_planning.py` for manifest selection and task
@@ -110,12 +115,17 @@ Batch rendering never invokes MMS or creates timing overrides. If the fixed-path
 
 ## Installed files
 
-The public default workflow entry is `scripts/run_karaoke_japanese_workflow.py`, coordinated by `scripts/karaoke_workflow.py`. A validated bundle may additionally expose the separate Japanese-only `scripts/run_karaoke_japanese_mms_workflow.py`; its absence must not be worked around by changing the default entry. Shared code lives under `karaoke_common/`, while Japanese layout code lives under `karaoke_japanese/`.
+The public Japanese automation entry is
+`scripts/run_karaoke_japanese_full_auto.py`. The existing
+`scripts/run_karaoke_japanese_workflow.py` is the direct SUG rerender entry,
+and `scripts/run_karaoke_japanese_mms_workflow.py` is the staged MMS/recovery
+entry. Shared code lives under `karaoke_common/`, while Japanese layout code
+lives under `karaoke_japanese/`.
 
 The compatibility checker remains in the Skill repository. Run it and the environment checker with the target checkout's project-local Python:
 
 ```powershell
-Set-Location D:\path\to\StrangeUtaGame
+Set-Location <StrangeUtaGame>
 uv run --no-sync python D:\path\to\skill\scripts\check_karaoke_environment.py --target .
-uv run --no-sync python D:\path\to\skill\scripts\check_sug_compatibility.py --repo . --project D:\path\to\project.sug
+uv run --no-sync python <skill>\scripts\check_sug_compatibility.py --repo . --project <project.sug>
 ```

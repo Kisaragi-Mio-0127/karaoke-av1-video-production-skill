@@ -313,6 +313,83 @@ def test_run_audit_forwards_explicit_mms_model_permissions(monkeypatch, tmp_path
     }
 
 
+def test_run_audit_forwards_and_records_single_explicit_sug(monkeypatch, tmp_path):
+    import scripts.audit_karaoke_mms_alignment as audit_module
+
+    deliverable_dir = tmp_path / "deliverables" / "album"
+    source_dir = deliverable_dir / "sources"
+    source_dir.mkdir(parents=True)
+    manifest = tmp_path / "album.json"
+    source = source_dir / "lyrics.json"
+    corrections = source_dir / "lyric_corrections.json"
+    model = tmp_path / "model.pt"
+    explicit_sug = tmp_path / "private" / "initial.sug"
+    output = tmp_path / "audit.json"
+    for path in (manifest, source, corrections, model, explicit_sug):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+
+    track = SimpleNamespace(song_id="song", language="zh")
+    album = SimpleNamespace(
+        project_root=tmp_path,
+        deliverable_dir=deliverable_dir,
+        tracks=(track,),
+    )
+    runtime = SimpleNamespace(model_path=model)
+    captured = {}
+
+    def fake_audit_track(_track, _album, _runtime, _vocals_root, *, sug_path, **_kwargs):
+        captured["sug_path"] = sug_path
+        return {
+            "song_id": "song",
+            "language": "zh",
+            "language_identity": audit_module.language_identity("zh"),
+            "sug_path": audit_module._report_path(sug_path, tmp_path),
+            "lines": [],
+            "unresolved": [],
+            "unresolved_count": 0,
+            "gate_ok": False,
+        }
+
+    monkeypatch.setattr(audit_module, "load_album_manifest", lambda *_a, **_k: album)
+    monkeypatch.setattr(audit_module, "load_mms_runtime", lambda *_a, **_k: runtime)
+    monkeypatch.setattr(audit_module, "audit_track", fake_audit_track)
+
+    report = audit_module.run_audit(
+        manifest_path=manifest,
+        source_path=source,
+        sug_path=explicit_sug,
+        output_path=output,
+        song_ids=("song",),
+        allow_partial_manifest=True,
+    )
+
+    assert captured["sug_path"] == explicit_sug.resolve()
+    assert report["songs"][0]["sug_path"] == "private/initial.sug"
+
+
+def test_run_audit_rejects_ambiguous_explicit_sug_for_multiple_tracks(
+    monkeypatch, tmp_path
+):
+    import scripts.audit_karaoke_mms_alignment as audit_module
+
+    album = SimpleNamespace(
+        project_root=tmp_path,
+        tracks=(
+            SimpleNamespace(song_id="one", language="zh"),
+            SimpleNamespace(song_id="two", language="en"),
+        ),
+    )
+    monkeypatch.setattr(audit_module, "load_album_manifest", lambda *_a, **_k: album)
+
+    with pytest.raises(ValueError, match="exactly one selected song"):
+        audit_module.run_audit(
+            manifest_path=tmp_path / "album.json",
+            sug_path=tmp_path / "private.sug",
+            allow_partial_manifest=True,
+        )
+
+
 def test_v2_english_sug_word_axis_maps_words_to_sug_token_indices():
     characters = [
         _character("Hello", 1_000),

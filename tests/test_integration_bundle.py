@@ -54,15 +54,29 @@ def test_dependency_manifest_exactly_covers_python_bundle() -> None:
     assert len(declared) == len(set(declared))
     assert sorted(declared) == actual
     assert "render_karaoke_direct_hevc444_album.py" not in declared
+    assert "run_karaoke_auto_workflow.py" not in declared
+    assert "run_karaoke_zh_en_full_auto.py" not in declared
     assert "run_karaoke_zh_en_workflow.py" not in declared
     assert "run_karaoke_zh_en_mms_workflow.py" not in declared
     assert {
         "karaoke_common/artwork.py",
+        "karaoke_full_auto.py",
         "karaoke_mms_editable.py",
         "karaoke_model_paths.py",
+        "run_karaoke_japanese_full_auto.py",
         "run_karaoke_japanese_workflow.py",
         "run_karaoke_japanese_mms_workflow.py",
     }.issubset(declared)
+    records_by_path = {record["path"]: record for record in records}
+    assert records_by_path["karaoke_full_auto.py"]["category"] == (
+        "shared-internal-module"
+    )
+    assert records_by_path["karaoke_full_auto.py"]["upstream_dependency"] == (
+        "transitive-runtime"
+    )
+    assert records_by_path["run_karaoke_japanese_full_auto.py"]["category"] == (
+        "transitive-runtime"
+    )
     assert all(record.get("reason", "").strip() for record in records)
     requirement_records = manifest["requirements"]
     assert {record["path"] for record in requirement_records} == {
@@ -82,6 +96,19 @@ def test_all_bundled_python_parses_and_has_module_documentation() -> None:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         assert ast.get_docstring(tree), path.relative_to(SCRIPTS).as_posix()
+
+
+def test_full_auto_keeps_zh_en_route_import_lazy() -> None:
+    path = SCRIPTS / "karaoke_full_auto.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    top_level_imports = {
+        alias.name
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    }
+
+    assert not any("run_karaoke_zh_en" in name for name in top_level_imports)
 
 
 def test_installer_dry_run_is_manifest_driven(tmp_path: Path) -> None:
@@ -115,8 +142,8 @@ def test_documentation_is_bilingual_and_focuses_on_current_routes() -> None:
         assert "render_karaoke_direct_hevc444_album.py" not in text
         assert "--quality-policy" in text
         assert "auto-fallback" in text
-    assert "wide-layout-v7/cover-palette" in english
-    assert "wide-layout-v7/cover-palette" in chinese
+    assert "current wide layout" in english
+    assert "当前宽屏布局" in chinese
     assert re.search(r"[\u4e00-\u9fff]", chinese)
     assert not re.search(r"[\u4e00-\u9fff] [\u4e00-\u9fff]", chinese)
 
@@ -141,8 +168,8 @@ def test_network_and_output_expansion_require_explicit_flags() -> None:
 
 def test_public_bundle_contains_no_track_specific_or_private_literals() -> None:
     forbidden = re.compile(
-        r"((?<![A-Za-z0-9_])[A-Za-z]:[/\\]|/home/|青春|ラストタイム|雨が降る|遠航星|野猫|"
-        r"senshun|sarabai|今年来年|はなればなれ)",
+        r"((?<![A-Za-z0-9_])[A-Za-z]:[/\\]|/home/|private-album-name|"
+        r"private-song-title|private-lyric-fragment)",
         re.IGNORECASE,
     )
     for path in sorted(

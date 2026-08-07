@@ -30,7 +30,6 @@ if str(ROOT) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(ROOT))
 
 from scripts.karaoke_album import (  # noqa: E402
-    DEFAULT_MANIFEST_PATH,
     load_album_manifest,
     project_relative,
     sha256_file,
@@ -1025,7 +1024,7 @@ def _stem_path(track: Any, vocals_root: Path) -> Path:
 
 def run_manifest_audit(
     *,
-    manifest_path: Path = DEFAULT_MANIFEST_PATH,
+    manifest_path: Path,
     source_path: Path | None = None,
     song_ids: Sequence[str] | None = None,
     audio_kind: str = "mix",
@@ -1198,7 +1197,11 @@ def _load_direct_lines(path: Path) -> list[dict[str, Any]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST_PATH)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="explicit album.json manifest for manifest audit mode",
+    )
     parser.add_argument(
         "--source",
         type=Path,
@@ -1257,6 +1260,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             window_tolerance_ms=args.window_tolerance_ms,
         )
     else:
+        if args.manifest is None:
+            raise SystemExit("--manifest is required unless direct --audio/--lyrics are supplied")
         report = run_manifest_audit(
             manifest_path=args.manifest,
             source_path=args.source,

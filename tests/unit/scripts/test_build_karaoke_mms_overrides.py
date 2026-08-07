@@ -1033,6 +1033,64 @@ def test_mms_audit_path_mismatch_still_blocks(tmp_path):
         )
 
 
+def test_mms_audit_explicit_sug_provenance_replaces_manifest_canonical(tmp_path):
+    project_root = tmp_path
+    deliverable_dir = project_root / "deliverables" / "album"
+    source_dir = deliverable_dir / "sources"
+    files = {
+        "manifest": project_root / "album.json",
+        "source": source_dir / "lyrics.json",
+        "corrections": source_dir / "lyric_corrections.json",
+        "canonical_sug": deliverable_dir / "timing" / "song.sug",
+        "explicit_sug": project_root / "private" / "initial.sug",
+        "mix": project_root / "audio" / "mix.flac",
+        "vocals": project_root / "evidence" / "Vocals.wav",
+        "model": project_root / "models" / "mms.pt",
+    }
+    for path in files.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"non-empty")
+    album = SimpleNamespace(
+        project_root=project_root,
+        deliverable_dir=deliverable_dir,
+        tracks=[
+            SimpleNamespace(song_id="song", timing_stem="song", audio_path=files["mix"])
+        ],
+    )
+    audit = {
+        "manifest_path": str(files["manifest"]),
+        "lyric_source_path": str(files["source"]),
+        "lyric_corrections_path": str(files["corrections"]),
+        "model_path": str(files["model"]),
+        "songs": [
+            {
+                "song_id": "song",
+                "sug_path": str(files["explicit_sug"]),
+                "mix_path": str(files["mix"]),
+                "vocals_path": str(files["vocals"]),
+            }
+        ],
+    }
+
+    validate_audit_source_hashes(
+        audit,
+        album,
+        files["manifest"],
+        ("song",),
+        files["source"],
+        files["explicit_sug"],
+    )
+
+    with pytest.raises(ValueError, match="SUG.*path mismatch"):
+        validate_audit_source_hashes(
+            audit,
+            album,
+            files["manifest"],
+            ("song",),
+            files["source"],
+        )
+
+
 def test_invalid_schema_and_timeline_semantics_still_block():
     audit = _single_line_audit()
     audit["schema_version"] = "karaoke-mms-dual-audio-audit/v999"
@@ -1134,6 +1192,39 @@ def test_run_build_new_output_does_not_merge_canonical(monkeypatch, tmp_path):
     assert captured["target_song_ids"] == ("song",)
     assert result["schema_version"] == "karaoke-timing-overrides/v2"
     assert output_path.is_file()
+
+
+def test_run_build_rejects_ambiguous_explicit_sug_for_multiple_songs(
+    monkeypatch, tmp_path
+):
+    import scripts.build_karaoke_mms_overrides as build_module
+
+    manifest = tmp_path / "album.json"
+    audit_path = tmp_path / "audit.json"
+    manifest.write_text("{}", encoding="utf-8")
+    audit_path.write_text("{}", encoding="utf-8")
+    album = SimpleNamespace(
+        project_root=tmp_path,
+        deliverable_dir=tmp_path / "deliverables" / "album",
+        tracks=[SimpleNamespace(song_id="one"), SimpleNamespace(song_id="two")],
+    )
+    audit = {
+        "songs": [
+            {"song_id": "one", "lines": []},
+            {"song_id": "two", "lines": []},
+        ]
+    }
+    monkeypatch.setattr(build_module, "load_album_manifest", lambda *_a, **_k: album)
+    monkeypatch.setattr(build_module, "_load", lambda _path: audit)
+    monkeypatch.setattr(build_module, "_audit_contract", lambda *_a, **_k: None)
+
+    with pytest.raises(ValueError, match="exactly one selected song"):
+        run_build(
+            manifest_path=manifest,
+            audit_path=audit_path,
+            sug_path=tmp_path / "private.sug",
+            song_ids=("one", "two"),
+        )
 
 
 def test_synthetic_v2_audit_line_parses_and_builds_on_the_source_token_axis(

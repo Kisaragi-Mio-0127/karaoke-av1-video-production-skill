@@ -1,4 +1,4 @@
 interface:
   display_name: "Karaoke AV1 Video Production"
-  short_description: "Validate multi-singer karaoke and AV1 releases."
-  default_prompt: "Use $karaoke-av1-video-production for the explicit Japanese/general route, SUG singer_id colour routing, top secondary overlays, cross-singer ruby rejection, and MP4-first AV1 4:2:0 release evidence with optional diagnostics."
+  short_description: "Run full-auto Japanese karaoke or rerender reviewed SUG files."
+  default_prompt: "Use $karaoke-av1-video-production to run the Japanese full-auto MSST, private timing, MMS, companion-SUG, automatic-layout, and AV1 workflow, or rerender an existing reviewed SUG."

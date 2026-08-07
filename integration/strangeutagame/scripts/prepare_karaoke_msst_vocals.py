@@ -27,14 +27,12 @@ import soundfile as sf
 
 try:
     from .karaoke_album import (
-        DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         load_album_manifest,
         project_relative,
     )
 except ImportError:  # pragma: no cover - direct script execution
     from karaoke_album import (  # type: ignore[no-redef]
-        DEFAULT_MANIFEST_PATH,
         AlbumManifest,
         load_album_manifest,
         project_relative,
@@ -47,9 +45,6 @@ MSST_OUTPUT_DIR = CACHE_ROOT / "msst-vocals"
 MSST_RUNTIME_DIR = CACHE_ROOT / "msst-runtime"
 
 EXTERNAL_SCRIPT = Path(os.environ.get("KARAOKE_MSST_PREPARATION_SCRIPT", ""))
-
-DEFAULT_ALBUM = load_album_manifest(DEFAULT_MANIFEST_PATH)
-DEFAULT_SOURCES = tuple(track.audio_path for track in DEFAULT_ALBUM.tracks)
 
 EXPECTED_SAMPLE_RATE = 44_100
 EXPECTED_CHANNELS = 2
@@ -164,6 +159,7 @@ def decode_to_wav(
     *,
     msst_module: ModuleType | None = None,
     ffmpeg: Path | None = None,
+    runtime_dir: Path | None = None,
 ) -> None:
     """Decode an MP3 to a project-local 44.1 kHz stereo FLOAT WAV."""
 
@@ -197,7 +193,9 @@ def decode_to_wav(
     ]
     print("$", subprocess.list2cmdline(command), flush=True)
     try:
-        environment = msst_module.runtime_environment(MSST_RUNTIME_DIR / "ffmpeg")
+        environment = msst_module.runtime_environment(
+            (runtime_dir or MSST_RUNTIME_DIR) / "ffmpeg"
+        )
         subprocess.run(command, cwd=ROOT, env=environment, check=True)
         _expected_wav_metadata(temporary_output)
         os.replace(temporary_output, output)
@@ -320,14 +318,17 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
 
 
 def _resolve_sources(
-    sources: Sequence[Path] | None,
-    album: AlbumManifest = DEFAULT_ALBUM,
+    sources: Path | Sequence[Path] | None,
+    album: AlbumManifest | None = None,
 ) -> tuple[Path, ...]:
-    selected = (
-        tuple(track.audio_path for track in album.tracks)
-        if sources is None
-        else tuple(sources)
-    )
+    if sources is None:
+        if album is None:
+            raise ValueError("sources or manifest is required")
+        selected = tuple(track.audio_path for track in album.tracks)
+    elif isinstance(sources, (str, Path)):
+        selected = (Path(sources),)
+    else:
+        selected = tuple(sources)
     resolved = tuple(path.expanduser().resolve() for path in selected)
     missing = [str(path) for path in resolved if not path.is_file()]
     if missing:
@@ -340,29 +341,34 @@ def _resolve_sources(
 
 
 def prepare(
-    sources: Sequence[Path] | None = None,
+    sources: Path | Sequence[Path] | None = None,
     *,
     force: bool = False,
     msst_module: ModuleType | None = None,
     manifest: AlbumManifest | None = None,
+    cache_root: Path | None = None,
 ) -> list[Path]:
-    """Prepare the manifest's five vocal stems in one external MSST batch."""
+    """Prepare one or more vocal stems without loading a manifest implicitly."""
 
-    album = manifest or DEFAULT_ALBUM
+    resolved_cache_root = (cache_root or CACHE_ROOT).expanduser().resolve()
+    input_dir = resolved_cache_root / "msst-input"
+    output_dir = resolved_cache_root / "msst-vocals"
+    runtime_dir = resolved_cache_root / "msst-runtime"
+    project_root = manifest.project_root if manifest is not None else ROOT
     if msst_module is None:
         msst_module = load_msst_module()
     dependencies = _dependency_paths(msst_module)
-    selected = _resolve_sources(sources, album)
-    MSST_INPUT_DIR.mkdir(parents=True, exist_ok=True)
-    MSST_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    MSST_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    selected = _resolve_sources(sources, manifest)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
 
     pending: list[tuple[Path, Path, Path, Path]] = []
     result_paths: list[Path] = []
     for source in selected:
-        output_dir = MSST_OUTPUT_DIR / source.stem
-        output = output_dir / "Vocals.wav"
-        report = output_dir / "separation_report.json"
+        source_output_dir = output_dir / source.stem
+        output = source_output_dir / "Vocals.wav"
+        report = source_output_dir / "separation_report.json"
         if not force and _is_valid_output(
             source=source,
             output=output,
@@ -370,20 +376,25 @@ def prepare(
             model=dependencies["model"],
             config=dependencies["config"],
             script=dependencies["script"],
-            project_root=album.project_root,
+            project_root=project_root,
         ):
             print(f"[{source.stem}] valid output exists; skipping MSST", flush=True)
             result_paths.append(output)
             continue
 
-        input_wav = MSST_INPUT_DIR / f"{source.stem}.wav"
-        decode_to_wav(source, input_wav, msst_module=msst_module)
+        input_wav = input_dir / f"{source.stem}.wav"
+        decode_to_wav(
+            source,
+            input_wav,
+            msst_module=msst_module,
+            runtime_dir=runtime_dir,
+        )
         pending.append((source, input_wav, output, report))
 
     if not pending:
         return result_paths
 
-    run_input_dir = MSST_INPUT_DIR / f".run-{uuid.uuid4().hex}"
+    run_input_dir = input_dir / f".run-{uuid.uuid4().hex}"
     run_input_dir.mkdir(parents=True, exist_ok=False)
     try:
         for _source, input_wav, _output, _report in pending:
@@ -396,8 +407,8 @@ def prepare(
             config=dependencies["config"],
             model=dependencies["model"],
             input_dir=run_input_dir,
-            output_dir=MSST_OUTPUT_DIR,
-            temp=MSST_RUNTIME_DIR,
+            output_dir=output_dir,
+            temp=runtime_dir,
         )
     finally:
         shutil.rmtree(run_input_dir, ignore_errors=True)
@@ -411,7 +422,7 @@ def prepare(
             script=dependencies["script"],
             stem=output,
             metadata=metadata,
-            project_root=album.project_root,
+            project_root=project_root,
         )
         _write_report(report, document)
         print(f"[{source.stem}] ready: {output}", flush=True)
@@ -436,7 +447,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=DEFAULT_MANIFEST_PATH,
+        required=True,
         help="album.json manifest that owns the default five inputs",
     )
     parser.add_argument(

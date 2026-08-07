@@ -3,7 +3,7 @@
 [简体中文](subtitle-timing-quality.zh-CN.md) | English
 
 Use these gates for semantic phrase segmentation, cue display, Japanese ruby,
-the explicit Japanese `run_karaoke_japanese_mms_workflow.py` contract, and
+the Japanese full-auto and staged MMS contracts, and
 adjacent-line highlight release. Do not infer an MMS interface for another
 language from this reference.
 
@@ -19,7 +19,7 @@ source lyrics -> candidate ruby fill -> canonical SUG
 ```
 
 Record a generation ID or equivalent evidence at every layer. For dedicated
-Japanese or zh/en MMS, any `*_sha256` value is report-only and never a check,
+Japanese MMS, any `*_sha256` value is report-only and never a check,
 gate, exception, or exit input. The canonical SUG is the editable source of
 truth: candidate generation fills missing ruby, review writes accepted
 corrections, and rendering reads the reviewed project. The reviewed phrases
@@ -50,16 +50,15 @@ Skip manual timing review when automatic evidence and release checks agree. When
 
 ## Explicit Japanese MMS workflow, editor, and independent ASR
 
-`run_karaoke_japanese_mms_workflow.py` is the only documented MMS entry. It is
-Japanese-only and separate from the default one-click and batch renderers. It
-requires `--manifest`, `--song-id`, and a new, non-existent `--output-dir`.
-The wrapper builds the current composition in `render/artwork-current`; an
-explicit `--composition` is an advanced gated override. The selected manifest
-track resolves the reviewed SUG and mix;
-the wrapper resolves frozen lyrics and matching MSST `Vocals.wav` from project
-defaults unless `--source` or `--vocals-root` overrides them. This entry has no
-separate SUG-path argument and must not create, refetch, or mutate its resolved
-inputs.
+`run_karaoke_japanese_full_auto.py` is the default first-run entry, while
+`run_karaoke_japanese_mms_workflow.py` is the staged MMS/recovery entry. It is
+Japanese-only and separate from batch rendering. Full-auto requires
+`--manifest`, `--song-id`, `--source`, and a new `--output-dir`; it prepares a
+private initial SUG before invoking the staged wrapper. The staged wrapper may
+instead receive a single explicit `--sug` for recovery or rerendering. Both
+routes build the current composition in `render/artwork-current`, while an
+explicit `--composition` remains an advanced gated override. Neither route
+may refetch lyrics or mutate its resolved inputs.
 
 The workflow uses the project-owned `models/mms/model.pt` checkpoint through
 `--mms-model-path`. `.cache` is reserved for derived runtime data and evidence;

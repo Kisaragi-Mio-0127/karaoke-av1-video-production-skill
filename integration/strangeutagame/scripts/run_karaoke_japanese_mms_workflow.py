@@ -135,8 +135,10 @@ def preflight(args: argparse.Namespace) -> Preflight:
         else (album.deliverable_dir / "sources" / "netease_lyrics.json").resolve()
     )
     sug = (
-        album.deliverable_dir / "timing" / f"{track.timing_stem}.sug"
-    ).resolve()
+        args.sug.expanduser().resolve()
+        if args.sug is not None
+        else (album.deliverable_dir / "timing" / f"{track.timing_stem}.sug").resolve()
+    )
     audio = track.audio_path.resolve()
     vocals_root = (
         args.vocals_root.expanduser().resolve()
@@ -435,6 +437,7 @@ def run_mms_workflow(
             allow_partial_manifest=True,
             model_path=pre.mms_model,
             allow_network=bool(args.allow_mms_network),
+            sug_path=pre.sug,
         )
         audit = _load_stage_document(audit_path, returned_audit, "MMS audit")
         audit_validation = _validate_audit(audit, pre)
@@ -455,6 +458,7 @@ def run_mms_workflow(
             manifest_path=pre.manifest,
             source_path=pre.source,
             audit_path=audit_path,
+            sug_path=pre.sug,
             output_path=overrides_path,
             allow_partial_manifest=True,
         )
@@ -641,6 +645,11 @@ def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--song-id", required=True)
+    parser.add_argument(
+        "--sug",
+        type=Path,
+        help="advanced canonical SUG override; default uses the manifest track",
+    )
     parser.add_argument("--source", type=Path)
     parser.add_argument("--vocals-root", type=Path)
     parser.add_argument(

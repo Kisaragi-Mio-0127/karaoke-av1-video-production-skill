@@ -19,6 +19,7 @@ The command resolves the selected Japanese manifest track and performs:
 ```text
 preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
 -> editable companion SUG -> automatic current layout -> AV1 MP4
+-> relocatable editable SUG snapshot
 ```
 
 The output root must not exist and must stay below the project's
@@ -30,6 +31,16 @@ explicit image; otherwise the standard deliverable `cover.jpg` is reused when
 present, followed by an embedded-cover lookup in the selected cover audio.
 `--background`, `--composition`, and `--cover-source-audio` are advanced
 explicit overrides.
+
+The source is frozen by default. To explicitly refresh the selected song from
+NetEase, add `--refresh-source --netease-song-id <numeric-id>`; `--source`
+becomes the destination for the refreshed JSON. Without the refresh flag, the
+full-auto route performs no lyric network request.
+
+Album display metadata is read from audio tags by default and falls back to
+the song title and artist. Use `--metadata-source-audio` for transformed or
+tagless delivery audio. Every successful render writes a media-path-verified
+SUG under `render/editable-project`.
 
 A first-run song does not need a `lyric_corrections.json`. When no corrections
 sidecar exists, the MMS audit records `lyric_corrections_status=not-provided`

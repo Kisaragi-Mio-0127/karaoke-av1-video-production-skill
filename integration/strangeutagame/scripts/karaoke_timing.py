@@ -502,6 +502,7 @@ def load_or_fetch_source(
     path: Path,
     refresh: bool,
     specs: Sequence[SongSpec],
+    source_ids: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, Any], str]:
     if path.exists() and not refresh:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -519,9 +520,11 @@ def load_or_fetch_source(
 
     song_records: dict[str, Any] = {}
     for spec in specs:
+        source_id = (source_ids or {}).get(spec.song_id, spec.song_id)
         song_records[spec.song_id] = _source_song_record(
-            spec, fetch_netease_song(spec.song_id)
+            spec, fetch_netease_song(source_id)
         )
+        song_records[spec.song_id]["netease_song_id"] = source_id
     data = {
         "schema_version": "netease-lyrics-source/v1",
         "endpoint": NETEASE_ENDPOINT,
@@ -3246,6 +3249,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source", type=Path, default=None)
     parser.add_argument("--refresh-source", action="store_true")
     parser.add_argument(
+        "--netease-song-id",
+        help="NetEase numeric song id for a selected single-song refresh",
+    )
+    parser.add_argument(
         "--alignment",
         choices=("auto", "forced", "deterministic"),
         default="auto",
@@ -3313,6 +3320,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit(
             f"manifest must contain exactly one selected song-id: {args.song_id}"
         )
+    if args.netease_song_id and not args.refresh_source:
+        raise SystemExit("--netease-song-id requires --refresh-source")
+    if args.netease_song_id and len(selected_tracks) != 1:
+        raise SystemExit("--netease-song-id requires exactly one selected song")
     output_root = album.deliverable_dir.resolve()
     if args.output_root is not None:
         output_root = args.output_root.expanduser().resolve()
@@ -3344,7 +3355,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.font_file = args.font_file or (
         album.deliverable_dir / "artwork" / "fonts" / "HarmonyOS_Sans_SC_Regular.ttf"
     )
-    source, source_mode = load_or_fetch_source(args.source, args.refresh_source, specs)
+    source_ids = (
+        {specs[0].song_id: args.netease_song_id}
+        if args.netease_song_id
+        else None
+    )
+    source, source_mode = load_or_fetch_source(
+        args.source,
+        args.refresh_source,
+        specs,
+        source_ids=source_ids,
+    )
     overrides_document = (
         json.loads(args.timing_overrides.read_text(encoding="utf-8"))
         if args.timing_overrides.is_file()

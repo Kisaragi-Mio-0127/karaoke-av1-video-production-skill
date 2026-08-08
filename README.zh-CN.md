@@ -11,9 +11,12 @@
 - 准备选中歌曲的MSST人声分轨；
 - 生成私有初始SUG；
 - 运行日文MMS并生成可编辑的companion SUG；
-- 准备当前布局并渲染AV1 MP4交付物。
+- 准备当前布局并渲染AV1 MP4交付物；
+- 导出一份媒体路径已经校验、移动后仍可继续调轴的SUG。
 
 默认质量策略是`auto-fallback`。流程采用可用的高置信度MMS时间，同时让低置信度或未解决单元保留规范时间，并在报告中保留证据。companion SUG生成后，人工或Agent校轴是可选后续，不是自动流程的前置条件。
+
+默认使用冻结歌词源。只有显式加入`--refresh-source --netease-song-id <数字ID>`时，才会从网易刷新所选歌曲并写入`--source`指定的新JSON；不带刷新参数时不会请求在线歌词。专辑显示信息默认读取音频标签，缺失时回退到歌曲名和歌手。变调或无标签的交付音频可用`--metadata-source-audio`指定原始带标签音频。
 
 现有的`scripts/run_karaoke_japanese_workflow.py`用途不同：它直接重新渲染已有的调整后或复核后的SUG，不运行MSST或MMS。底层的`scripts/run_karaoke_japanese_mms_workflow.py`用于分阶段审计、恢复和门禁检查。
 
@@ -112,9 +115,10 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
   --sug <adjusted-project.sug> --audio <post-mix-audio> `
   --output-dir <new-output-dir> `
   --title <title> --artist <artist> `
-  --album-title <album-title> --album-artist <album-artist> `
   --visual-style spectrum
 ```
+
+专辑名称和作者默认读取音频标签；`--album-title`和`--album-artist`只用于显式覆盖。
 
 从已复核时间轴批量渲染AV1 4:2:0：
 

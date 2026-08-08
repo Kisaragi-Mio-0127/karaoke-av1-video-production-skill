@@ -17,13 +17,20 @@ lyrics, and a new output directory, it:
 - prepares the selected MSST vocal stem;
 - builds a private initial SUG;
 - runs Japanese MMS and creates an editable companion SUG;
-- prepares the current layout and renders the AV1 MP4 delivery.
+- prepares the current layout and renders the AV1 MP4 delivery;
+- exports a relocatable editable SUG with a verified media path.
 
 The default quality policy is `auto-fallback`. Usable high-confidence MMS
 timing is applied, while low-confidence or unresolved units retain canonical
 timing and remain visible in the report. Manual or Agent timing adjustment is
 optional after the companion SUG exists; it is not a prerequisite for the
 automated run.
+
+The frozen lyric source remains the default. Add
+`--refresh-source --netease-song-id <numeric-id>` only to explicitly refresh
+one selected song from NetEase into the `--source` destination. Album display
+metadata defaults to audio tags and then the song title/artist; use
+`--metadata-source-audio` for transformed or tagless delivery audio.
 
 The existing `scripts/run_karaoke_japanese_workflow.py` has a different role:
 it directly rerenders an existing adjusted or reviewed SUG and does not run
@@ -173,9 +180,11 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
   --sug <adjusted-project.sug> --audio <post-mix-audio> `
   --output-dir <new-output-dir> `
   --title <title> --artist <artist> `
-  --album-title <album-title> --album-artist <album-artist> `
   --visual-style spectrum
 ```
+
+Album title and artist come from audio tags by default. Pass
+`--album-title` and `--album-artist` only as explicit overrides.
 
 Generic batch AV1 4:2:0 rendering from reviewed timing:
 

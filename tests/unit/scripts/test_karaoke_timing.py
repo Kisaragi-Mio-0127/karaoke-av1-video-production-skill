@@ -169,6 +169,30 @@ def test_missing_lyric_source_never_fetches_without_refresh_opt_in(
     assert called is False
 
 
+def test_refresh_can_map_manifest_song_id_to_netease_song_id(tmp_path, monkeypatch):
+    requested = []
+    monkeypatch.setattr(
+        karaoke_timing,
+        "fetch_netease_song",
+        lambda song_id: requested.append(song_id) or {
+            "code": 200,
+            "lrc": {"lyric": "[00:01.00]line", "version": 1},
+        },
+    )
+    destination = tmp_path / "lyrics.json"
+
+    document, mode = load_or_fetch_source(
+        destination,
+        True,
+        [TEST_SONG],
+        source_ids={TEST_SONG.song_id: "987654"},
+    )
+
+    assert requested == ["987654"]
+    assert mode == "netease-api"
+    assert document["songs"][TEST_SONG.song_id]["netease_song_id"] == "987654"
+
+
 def test_english_editable_source_uses_one_checkpoint_per_word():
     spec = SongSpec(
         song_id="english-word-axis",

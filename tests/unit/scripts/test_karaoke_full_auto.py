@@ -119,3 +119,18 @@ def test_models_cannot_be_selected_from_cache(tmp_path: Path, monkeypatch):
     env.args.mms_model_path = cached
     with pytest.raises(full_auto.FullAutoError, match="must be selected from"):
         full_auto.build_plan(env.args)
+
+
+def test_refresh_source_allows_missing_destination_and_forwards_netease_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    env = _environment(tmp_path, monkeypatch, "ja")
+    env.source.unlink()
+    env.args.refresh_source = True
+    env.args.netease_song_id = "123456"
+
+    plan = full_auto.build_plan(env.args, allowed_languages=frozenset({"ja"}))
+    timing_args = full_auto._timing_arguments(plan, env.args)
+
+    assert timing_args[timing_args.index("--netease-song-id") + 1] == "123456"
+    assert "--refresh-source" in timing_args

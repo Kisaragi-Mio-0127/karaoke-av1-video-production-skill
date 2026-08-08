@@ -57,14 +57,23 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
 The output directory must be new. The command prepares one MSST vocal stem,
 builds a private initial SUG, runs Japanese MMS, creates a separate editable
 companion SUG, generates the current layout, renders AV1 MP4, and writes stage
-reports. It defaults to `--quality-policy auto-fallback` and
+reports. Every successful render also exports a relocatable SUG under
+`render/editable-project` and verifies its media path. It defaults to
+`--quality-policy auto-fallback` and
 `--visual-style spectrum`.
+
+Keep the frozen source by default. To explicitly refresh one song from
+NetEase, add `--refresh-source --netease-song-id <numeric-id>` and use
+`--source` as the new JSON destination. Without the refresh flag, no lyric
+network request is made.
 
 The four command inputs above are required. Artwork options are optional:
 `--cover` selects an explicit image; otherwise the workflow reuses the standard
 deliverable `cover.jpg` when present, then checks the selected cover audio for
 an embedded image. Advanced overrides include `--background`, `--composition`,
-and `--cover-source-audio`.
+and `--cover-source-audio`. Album display metadata defaults to audio tags and
+then the song title/artist. Use `--metadata-source-audio` for transformed or
+tagless delivery audio.
 
 The MSST adapter is auto-discovered from supported local installations; an
 explicit `KARAOKE_MSST_PREPARATION_SCRIPT` path overrides discovery.
@@ -102,12 +111,12 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
   --sug <existing-or-adjusted.sug> --audio <post-mix-audio> `
   --output-dir <new-output-dir> `
   --title <title> --artist <artist> `
-  --album-title <album-title> --album-artist <album-artist> `
   --visual-style spectrum
 ```
 
 The wrapper generates the current composition inside the output directory.
 Choose `vinyl` when a new record asset is wanted; `spectrum` creates no vinyl.
+Use optional `--album-title` and `--album-artist` only as explicit overrides.
 
 ## Staged MMS and recovery
 

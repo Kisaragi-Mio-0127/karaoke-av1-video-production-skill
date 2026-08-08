@@ -23,9 +23,11 @@ try:
         parse_video_stream,
     )
     from scripts.karaoke_common.artwork import prepare_auto_artwork
+    from scripts.karaoke_common.editable_sug import export_editable_sug
     from scripts.karaoke_common.ffmpeg_tools import (
         resolve_ffmpeg as resolve_ffmpeg_tool,
     )
+    from scripts.karaoke_common.media_metadata import resolve_display_metadata
     from scripts.karaoke_language import language_identity
     from scripts.render_karaoke_direct_av1_420_album import (
         DirectAV1420RenderError,
@@ -40,9 +42,11 @@ except ImportError:  # pragma: no cover - direct script entry points
         parse_video_stream,
     )
     from karaoke_common.artwork import prepare_auto_artwork  # type: ignore[no-redef]
+    from karaoke_common.editable_sug import export_editable_sug  # type: ignore[no-redef]
     from karaoke_common.ffmpeg_tools import (  # type: ignore[no-redef]
         resolve_ffmpeg as resolve_ffmpeg_tool,
     )
+    from karaoke_common.media_metadata import resolve_display_metadata  # type: ignore[no-redef]
     from karaoke_language import language_identity  # type: ignore[no-redef]
     from render_karaoke_direct_av1_420_album import (  # type: ignore[no-redef]
         DirectAV1420RenderError,
@@ -88,11 +92,12 @@ class WorkflowConfig:
     layout: str
     title: str
     artist: str
-    album_title: str
-    album_artist: str
+    album_title: str | None
+    album_artist: str | None
     cover: Path | None = None
     background: Path | None = None
     cover_source_audio: Path | None = None
+    metadata_source_audio: Path | None = None
     fonts_dir: Path = SHARED_FONT_DIR
     font_file: Path = SHARED_FONT_FILE
     smoke_duration: float | None = None
@@ -767,6 +772,19 @@ def run_workflow(
     ass_validator: Callable[[Path, str], dict[str, Any]] = validate_ass_for_render,
 ) -> dict[str, Any]:
     validate_visual_contract(config)
+    display_metadata = resolve_display_metadata(
+        audio_path=config.audio,
+        metadata_source_audio=config.metadata_source_audio,
+        title=config.title,
+        artist=config.artist,
+        album_title=config.album_title,
+        album_artist=config.album_artist,
+    )
+    config = replace(
+        config,
+        album_title=display_metadata["album_title"],
+        album_artist=display_metadata["album_artist"],
+    )
     output_dir = validate_output_dir(config)
     is_vinyl = config.visual_style == "vinyl"
     input_paths = {
@@ -780,6 +798,7 @@ def run_workflow(
         ("cover", config.cover),
         ("background", config.background),
         ("cover_source_audio", config.cover_source_audio),
+        ("metadata_source_audio", config.metadata_source_audio),
     ):
         if path is not None:
             input_paths[name] = path
@@ -821,6 +840,7 @@ def run_workflow(
         "inputs": identities,
         "stages": [],
         "outputs": {},
+        "display_metadata": display_metadata,
     }
     if timing_override_identity is not None:
         report["timing_override"] = timing_override_identity
@@ -1159,12 +1179,17 @@ def run_workflow(
                     completed=lossless_decoded,
                 ),
             }
+        editable_sug = export_editable_sug(config.sug, config.audio, output_dir)
+        report["stages"].append(
+            {"name": "editable-sug", "status": "ok", **editable_sug}
+        )
         report["outputs"] = {
             "preflight_ass": _input_identity(preflight_ass_path),
             "ass": _input_identity(ass_path),
             "ass_report": _input_identity(ass_report_path),
             "render_report": _input_identity(render_report_path),
             "video": _input_identity(output_path),
+            "editable_sug": _input_identity(Path(editable_sug["path"])),
         }
         if generated_vinyl is not None:
             report["outputs"]["generated_vinyl"] = _input_identity(generated_vinyl)
@@ -1199,6 +1224,11 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "audio used only to extract artwork cover data; defaults to --audio"
         ),
+    )
+    parser.add_argument(
+        "--metadata-source-audio",
+        type=Path,
+        help="audio whose tags provide default album title and album artist",
     )
     parser.add_argument(
         "--composition",
@@ -1257,8 +1287,8 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--title", required=True)
     parser.add_argument("--artist", required=True)
-    parser.add_argument("--album-title", required=True)
-    parser.add_argument("--album-artist", required=True)
+    parser.add_argument("--album-title")
+    parser.add_argument("--album-artist")
     parser.add_argument("--fonts-dir", type=Path, default=SHARED_FONT_DIR)
     parser.add_argument("--font-file", type=Path, default=SHARED_FONT_FILE)
     duration = parser.add_mutually_exclusive_group()
@@ -1303,6 +1333,7 @@ def config_from_args(
         sug=args.sug,
         audio=args.audio,
         cover_source_audio=args.cover_source_audio,
+        metadata_source_audio=args.metadata_source_audio,
         composition=args.composition,
         canonical_vinyl=args.canonical_vinyl,
         output_dir=args.output_dir,

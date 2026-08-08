@@ -81,7 +81,7 @@ python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --acce
 
 ## 项目配置
 
-使用已授权的清单和冻结歌词源。选定歌曲、音频、字体、模型路径和新的私有输出目录都必须在生产开始前存在。保持规范SUG、冻结歌词、私有证据、companion SUG和交付媒体彼此分离。
+使用已授权的清单和冻结歌词源。选定歌曲、音频、字体、模型路径和新的私有输出位置必须在生产开始前有效。除非显式使用`--refresh-source --netease-song-id`授权单曲刷新，否则歌词源文件必须已经存在。保持规范SUG、冻结歌词、私有证据、companion SUG和交付媒体彼此分离。
 
 默认日文流程使用项目自有的MMS和Whisper路径。生产CLI可以显式覆盖路径，但覆盖不授权网络下载。注音验证仍是可选项。日文分阶段、直接渲染和批量CLI提供`--pronunciation-validation {off,optional,required}`，默认是`optional`；full-auto不要求这个sidecar。
 
@@ -93,6 +93,7 @@ python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --acce
 manifest + song-id + frozen lyric source + new output directory
 -> MSST -> private initial SUG -> Japanese MMS
 -> editable companion SUG -> current layout -> AV1 MP4
+-> relocatable editable SUG
 ```
 
 每次full-auto或分阶段运行都需要新的私有输出目录。以已安装命令的`--help`输出为最终参数依据。公开运行时约定使用`--device auto`；只有需要固定后端时才显式传入`--device cuda`或`--device cpu`。
@@ -106,6 +107,8 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py --manifest <ma
 ```
 
 该命令准备MSST人声，生成私有初始SUG，运行日文MMS，生成可编辑companion，准备当前布局并渲染AV1 MP4。默认质量策略是`auto-fallback`，默认视觉样式是`spectrum`。低置信度回退证据会保留在报告中；人工或Agent校轴是可选项。
+
+专辑显示信息默认读取音频标签，再回退到歌曲名和歌手；变调或无标签音频可用`--metadata-source-audio`指定原始带标签音频。
 
 ## 日文分阶段MMS入口
 
@@ -124,8 +127,10 @@ uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py --manifest 
 已有调整后或复核后的SUG使用直接重新渲染入口。它不运行MSST或MMS：
 
 ```powershell
-uv run --no-sync python scripts/run_karaoke_japanese_workflow.py --sug <adjusted-project.sug> --audio <post-mix-audio> --output-dir <new-output-dir> --title <title> --artist <artist> --album-title <album-title> --album-artist <album-artist> --visual-style spectrum
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py --sug <adjusted-project.sug> --audio <post-mix-audio> --output-dir <new-output-dir> --title <title> --artist <artist> --visual-style spectrum
 ```
+
+专辑参数只用于显式覆盖。每次成功的直接重渲染或full-auto都会包含`editable-project/<名称>.sug`，并校验其中的媒体路径。
 
 从已复核时间轴批量渲染：
 

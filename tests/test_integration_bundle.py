@@ -63,6 +63,8 @@ def test_dependency_manifest_exactly_covers_python_bundle() -> None:
     assert not any(path.startswith("karaoke_zh_en/") for path in declared)
     assert {
         "karaoke_common/artwork.py",
+        "karaoke_common/editable_sug.py",
+        "karaoke_common/media_metadata.py",
         "karaoke_common/visuals.py",
         "karaoke_full_auto.py",
         "karaoke_mms_editable.py",

@@ -129,8 +129,10 @@ drivers.
 ## Project configuration
 
 Use an authorized manifest and frozen lyric source. The selected track, audio,
-fonts, model paths, and new private output directory must exist before
-production starts. Keep canonical SUG, frozen lyrics, private evidence,
+fonts, model paths, and new private output location must be valid before
+production starts. The source file must already exist unless an explicit
+`--refresh-source --netease-song-id` pair authorizes a single-song refresh.
+Keep canonical SUG, frozen lyrics, private evidence,
 companion SUG, and delivery media separate.
 
 The default Japanese route uses project-owned MMS and Whisper paths. Explicit
@@ -148,6 +150,7 @@ The public Japanese production order is:
 manifest + song-id + frozen lyric source + new output directory
 -> MSST -> private initial SUG -> Japanese MMS
 -> editable companion SUG -> current layout -> AV1 MP4
+-> relocatable editable SUG
 ```
 
 Every full-auto or staged run needs a new private output directory. Follow the
@@ -168,6 +171,9 @@ MMS, creates an editable companion, prepares the current layout, and renders
 AV1 MP4. Its default quality policy is `auto-fallback` and its default visual
 style is `spectrum`. Low-confidence fallback evidence remains in the report;
 manual or Agent timing adjustment is optional.
+
+Album display metadata defaults to audio tags, then the track title and artist.
+Use `--metadata-source-audio` when the delivery file is transformed or tagless.
 
 ## Staged Japanese MMS entry
 
@@ -192,8 +198,12 @@ For an existing adjusted or reviewed SUG, use the direct rerender entry. It
 does not run MSST or MMS:
 
 ```powershell
-uv run --no-sync python scripts/run_karaoke_japanese_workflow.py --sug <adjusted-project.sug> --audio <post-mix-audio> --output-dir <new-output-dir> --title <title> --artist <artist> --album-title <album-title> --album-artist <album-artist> --visual-style spectrum
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py --sug <adjusted-project.sug> --audio <post-mix-audio> --output-dir <new-output-dir> --title <title> --artist <artist> --visual-style spectrum
 ```
+
+Pass album flags only as explicit overrides. Every successful direct or
+full-auto render includes `editable-project/<name>.sug` with a verified media
+path.
 
 For batch rendering from reviewed timing:
 

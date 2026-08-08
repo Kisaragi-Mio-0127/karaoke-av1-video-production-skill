@@ -79,6 +79,16 @@
       "reason": "Resolves FFmpeg and FFprobe consistently, preferring the project-owned tools directory while retaining explicit overrides."
     },
     {
+      "path": "karaoke_common/editable_sug.py",
+      "category": "package-file",
+      "reason": "Exports a relocatable editable SUG snapshot with a verified media path after each successful render."
+    },
+    {
+      "path": "karaoke_common/media_metadata.py",
+      "category": "package-file",
+      "reason": "Resolves album display metadata from explicit overrides, audio tags, or track fallback values."
+    },
+    {
       "path": "karaoke_common/visuals.py",
       "category": "package-file",
       "reason": "Owns the vinyl and spectrum FFmpeg filter graphs used by the single-track renderer."

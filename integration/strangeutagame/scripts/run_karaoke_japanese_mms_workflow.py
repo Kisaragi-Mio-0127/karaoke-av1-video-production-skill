@@ -569,6 +569,11 @@ def run_mms_workflow(
                 if args.cover_source_audio is not None
                 else None
             ),
+            metadata_source_audio=(
+                args.metadata_source_audio.expanduser().resolve()
+                if args.metadata_source_audio is not None
+                else None
+            ),
             composition=(
                 args.composition.expanduser().resolve()
                 if args.composition is not None
@@ -584,8 +589,8 @@ def run_mms_workflow(
             layout="wide",
             title=pre.track.title,
             artist=pre.track.artist,
-            album_title=pre.album.title,
-            album_artist=pre.album.artist,
+            album_title=None,
+            album_artist=None,
             cover=resolved_cover,
             background=(
                 args.background.expanduser().resolve()
@@ -694,6 +699,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--spectrum-color")
     parser.add_argument("--progress-color")
     parser.add_argument("--cover-source-audio", type=Path)
+    parser.add_argument("--metadata-source-audio", type=Path)
     parser.add_argument("--cover-url", default="")
     parser.add_argument("--allow-cover-network", action="store_true")
     parser.add_argument("--output-dir", type=Path, required=True)

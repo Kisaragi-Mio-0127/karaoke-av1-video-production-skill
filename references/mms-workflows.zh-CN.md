@@ -18,11 +18,16 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
 ```text
 preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
 -> editable companion SUG -> automatic current layout -> AV1 MP4
+-> relocatable editable SUG snapshot
 ```
 
 输出根目录必须不存在，且必须位于项目的`.render-work`目录下。运行绝不会覆盖清单、冻结歌词源、规范SUG、已接受媒体或模型文件。
 
 命令中展示的四项输入是必需项，美术参数是可选项。`--cover`可显式指定图片；否则流程会优先复用标准交付目录中的`cover.jpg`，不存在时再读取所选封面音频的内嵌图片。`--background`、`--composition`和`--cover-source-audio`是显式的高级覆盖项。
+
+默认沿用冻结歌词源。需要主动从网易刷新当前单曲时，显式加入`--refresh-source --netease-song-id <数字ID>`，此时`--source`是刷新后JSON的写入位置；不带刷新参数时不发起歌词网络请求。
+
+专辑显示信息默认读取音频标签，缺失时回退到歌曲名和歌手。变调或无标签的交付音频可用`--metadata-source-audio`指定原始带标签音频。每次成功渲染还会在`render/editable-project`下写出媒体路径已校验的可编辑SUG。
 
 首次运行的歌曲不要求提供`lyric_corrections.json`。未提供校正侧车文件时，MMS审核记录`lyric_corrections_status=not-provided`以及空路径和空哈希，并继续使用冻结歌词源；若提供该文件，其路径仍作为显式审核输入。
 

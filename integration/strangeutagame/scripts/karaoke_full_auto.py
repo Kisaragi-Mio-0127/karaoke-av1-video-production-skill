@@ -109,12 +109,14 @@ def build_plan(
     manifest = args.manifest.expanduser().resolve()
     source = args.source.expanduser().resolve()
     _require_file(manifest, "manifest")
-    _require_file(source, "frozen lyric source")
+    if not args.refresh_source:
+        _require_file(source, "frozen lyric source")
     for label, optional_path in (
         ("explicit composition", args.composition),
         ("explicit cover", args.cover),
         ("explicit background", args.background),
         ("explicit cover source audio", args.cover_source_audio),
+        ("explicit metadata source audio", args.metadata_source_audio),
     ):
         if optional_path is not None:
             _require_file(optional_path.expanduser().resolve(), label)
@@ -131,10 +133,17 @@ def build_plan(
             f"this entry supports only {expected}; {track.song_id} is {track.language}"
         )
     _require_file(track.audio_path.resolve(), "selected mix audio")
-    source_document = json.loads(source.read_text(encoding="utf-8"))
-    songs = source_document.get("songs") if isinstance(source_document, Mapping) else None
-    if not isinstance(songs, Mapping) or track.song_id not in songs:
-        raise FullAutoError("frozen lyric source must contain the selected song-id")
+    if source.is_file() and not args.refresh_source:
+        source_document = json.loads(source.read_text(encoding="utf-8"))
+        songs = (
+            source_document.get("songs")
+            if isinstance(source_document, Mapping)
+            else None
+        )
+        if not isinstance(songs, Mapping) or track.song_id not in songs:
+            raise FullAutoError("frozen lyric source must contain the selected song-id")
+    if args.netease_song_id and not args.refresh_source:
+        raise FullAutoError("--netease-song-id requires --refresh-source")
 
     project_root = album.project_root.resolve()
     private_root = (project_root / ".render-work").resolve()
@@ -216,6 +225,10 @@ def _timing_arguments(plan: FullAutoPlan, args: argparse.Namespace) -> list[str]
     ]
     if args.timing_alignment:
         values.extend(("--alignment", args.timing_alignment))
+    if args.refresh_source:
+        values.append("--refresh-source")
+    if args.netease_song_id:
+        values.extend(("--netease-song-id", args.netease_song_id))
     return values
 
 
@@ -245,6 +258,7 @@ def _wrapper_args(plan: FullAutoPlan, args: argparse.Namespace) -> argparse.Name
         ("--cover", args.cover),
         ("--background", args.background),
         ("--cover-source-audio", args.cover_source_audio),
+        ("--metadata-source-audio", args.metadata_source_audio),
     ):
         if value is not None:
             values.extend((option, str(value.expanduser().resolve())))
@@ -348,6 +362,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--song-id", required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument(
+        "--refresh-source",
+        action="store_true",
+        help="explicitly refresh the selected lyric source from NetEase",
+    )
+    parser.add_argument(
+        "--netease-song-id",
+        help="NetEase numeric song id when it differs from the manifest song-id",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--quality-policy",
@@ -370,6 +393,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cover", type=Path)
     parser.add_argument("--background", type=Path)
     parser.add_argument("--cover-source-audio", type=Path)
+    parser.add_argument("--metadata-source-audio", type=Path)
     return parser
 
 

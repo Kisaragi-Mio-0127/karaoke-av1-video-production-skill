@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import re
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -24,15 +23,13 @@ try:
         parse_video_stream,
     )
     from scripts.karaoke_common.artwork import prepare_auto_artwork
+    from scripts.karaoke_common.ffmpeg_tools import resolve_ffmpeg as resolve_ffmpeg_tool
     from scripts.karaoke_review_preview import SHARED_FONT_DIR, SHARED_FONT_FILE
     from scripts.render_karaoke_direct_av1_420_album import (
         DirectAV1420RenderError,
         validate_current_wide_compositions,
     )
-    from scripts.render_vinyl_karaoke import (
-        default_ffmpeg,
-        validate_ass_for_render,
-    )
+    from scripts.render_vinyl_karaoke import validate_ass_for_render
 except ImportError:  # pragma: no cover - direct script entry points
     from inspect_karaoke_media import (  # type: ignore[no-redef]
         parse_audio_stream,
@@ -40,6 +37,9 @@ except ImportError:  # pragma: no cover - direct script entry points
         parse_video_stream,
     )
     from karaoke_common.artwork import prepare_auto_artwork  # type: ignore[no-redef]
+    from karaoke_common.ffmpeg_tools import (  # type: ignore[no-redef]
+        resolve_ffmpeg as resolve_ffmpeg_tool,
+    )
     from karaoke_review_preview import (  # type: ignore[no-redef]
         SHARED_FONT_DIR,
         SHARED_FONT_FILE,
@@ -48,10 +48,7 @@ except ImportError:  # pragma: no cover - direct script entry points
         DirectAV1420RenderError,
         validate_current_wide_compositions,
     )
-    from render_vinyl_karaoke import (  # type: ignore[no-redef]
-        default_ffmpeg,
-        validate_ass_for_render,
-    )
+    from render_vinyl_karaoke import validate_ass_for_render  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PREVIEW_SCRIPT = REPO_ROOT / "scripts" / "karaoke_review_preview.py"
@@ -208,13 +205,10 @@ def _assert_output_path(path: Path, output_dir: Path) -> Path:
 
 
 def resolve_ffmpeg(explicit: Path | None) -> Path:
-    if explicit is not None:
-        resolved = explicit.expanduser().resolve()
-        if not resolved.is_file():
-            raise KaraokeWorkflowError(f"ffmpeg executable does not exist: {resolved}")
-        return resolved
-    discovered = shutil.which("ffmpeg")
-    return Path(discovered).resolve() if discovered else default_ffmpeg().resolve()
+    try:
+        return resolve_ffmpeg_tool(explicit, root=REPO_ROOT)
+    except RuntimeError as error:
+        raise KaraokeWorkflowError(str(error)) from error
 
 
 def build_probe_command(ffmpeg: Path, path: Path) -> list[str]:

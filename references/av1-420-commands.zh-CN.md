@@ -28,14 +28,20 @@ NVENC探测成功时，默认1920x1080、30fps、SDR发布档使用AV1 NVENC CQ3
   -vf "subtitles='$ass':fontsdir='$fonts',format=yuv420p" `
   -s 1920x1080 -r 30 -pix_fmt yuv420p `
   -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 38 -b:v 0 `
-  -multipass fullres -lookahead 32 -spatial-aq 1 -temporal-aq 1 `
+  -multipass fullres -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 `
   -aq-strength 8 -g 240 `
   -colorspace bt709 -color_primaries bt709 -color_trc bt709 `
   -c:a aac -profile:a aac_low -b:a 320k -movflags +faststart `
   $temporaryMp4
 ```
 
-用`ffprobe`验证CQ、multipass、lookahead、AQ、GOP、尺寸、帧率、像素格式和BT.709元数据。不确定目标设备是否支持AV1时，另产H.264兼容版本。默认兼容输出只有AAC-LC 320k的MP4，不生成MKV。MKV必须通过`--lossless-companion`或底层显式`--lossless-output`主动选择，并且只接受探测确认为FLAC或PCM WAV的源；MP3/AAC必须拒绝，不得把MP4 AAC转成无损音轨。
+用`ffprobe`验证编码、profile、尺寸、帧率、像素格式、BT.709元数据、音频流和时长。CQ、preset、multipass、lookahead、AQ和GOP等请求参数应从渲染报告验证，并非都能从最终容器反查。不确定目标设备是否支持AV1时，另产H.264兼容版本。默认兼容输出只有AAC-LC 320k的MP4，不生成MKV。MKV必须通过`--lossless-companion`或底层显式`--lossless-output`主动选择，并且只接受探测确认为FLAC或PCM WAV的源；MP3/AAC必须拒绝，不得把MP4 AAC转成无损音轨。
+
+```powershell
+& $ffprobe -v error -show_entries `
+  "format=format_name,start_time,duration:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,r_frame_rate,sample_rate,channels,channel_layout" `
+  -of json $media
+```
 
 ## ASS软字幕与FLAC-MKV配对
 

@@ -16,12 +16,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import imageio_ffmpeg
-
 try:
     from .karaoke_album import load_album_manifest
+    from .karaoke_common.ffmpeg_tools import resolve_ffmpeg
 except ImportError:  # pragma: no cover - direct script execution
     from karaoke_album import load_album_manifest  # type: ignore[no-redef]
+    from karaoke_common.ffmpeg_tools import resolve_ffmpeg  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("standard", "wide")
@@ -1659,7 +1659,7 @@ def main(argv: list[str] | None = None) -> int:
     album = load_album_manifest(args.manifest)
     tracks = tuple(track_record(track) for track in album.tracks)
     root = (args.root or album.deliverable_dir).resolve()
-    ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+    ffmpeg = resolve_ffmpeg(root=REPO_ROOT)
     tests = {"ok": True, "skipped": True} if args.skip_tests else run_tests(root)
     alignment_audit_path = root / "sources" / "mms_alignment_audit.json"
     timing_overrides_path = root / "sources" / "timing_overrides.json"

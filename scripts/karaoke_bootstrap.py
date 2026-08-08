@@ -331,8 +331,17 @@ def model_destination(target: Path, relative: str) -> Path:
     return destination
 
 
-def _command(name: str, args: list[str]) -> dict[str, Any]:
-    executable = shutil.which(name)
+def _command(
+    name: str,
+    args: list[str],
+    *,
+    preferred: Path | None = None,
+) -> dict[str, Any]:
+    executable = (
+        str(preferred.resolve())
+        if preferred and preferred.is_file()
+        else shutil.which(name)
+    )
     if executable is None:
         return {"ok": False, "path": None, "detail": "not found on PATH"}
     completed = subprocess.run(
@@ -461,11 +470,17 @@ def check(
         manifest_path, allow_custom_manifest=allow_custom_manifest
     )
     python = validate_target_venv(target, require_python=False)
+    suffix = ".exe" if os.name == "nt" else ""
+    ffmpeg_bin = target / "tools" / "ffmpeg" / "bin"
     commands = {
         "git": _command("git", ["--version"]),
         "uv": _command("uv", ["--version"]),
-        "ffmpeg": _command("ffmpeg", ["-version"]),
-        "ffprobe": _command("ffprobe", ["-version"]),
+        "ffmpeg": _command(
+            "ffmpeg", ["-version"], preferred=ffmpeg_bin / f"ffmpeg{suffix}"
+        ),
+        "ffprobe": _command(
+            "ffprobe", ["-version"], preferred=ffmpeg_bin / f"ffprobe{suffix}"
+        ),
         "nvidia_smi_optional": _command(
             "nvidia-smi", ["--query-gpu=name,compute_cap", "--format=csv,noheader"]
         ),

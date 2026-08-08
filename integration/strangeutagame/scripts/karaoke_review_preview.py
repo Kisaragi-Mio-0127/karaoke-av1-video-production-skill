@@ -16,7 +16,6 @@ from statistics import median
 from types import SimpleNamespace
 from typing import Any
 
-import imageio_ffmpeg
 from PIL import ImageFont
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +48,7 @@ from scripts.karaoke_common.layout import (  # noqa: E402
     Lane,
     SubtitleLayout,
 )
+from scripts.karaoke_common.ffmpeg_tools import resolve_ffmpeg  # noqa: E402
 from scripts.karaoke_common.pronunciation import (  # noqa: E402
     PRONUNCIATION_VALIDATION_MODES,
     validate_pronunciation,
@@ -3501,7 +3501,7 @@ def probe_lossless_audio_codec(audio_path: Path) -> str:
             f"{audio_path}"
         )
 
-    ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+    ffmpeg = resolve_ffmpeg(root=REPO_ROOT)
     completed = subprocess.run(
         [str(ffmpeg), "-hide_banner", "-i", str(audio_path)],
         cwd=str(REPO_ROOT),
@@ -3665,7 +3665,7 @@ def render_review_clip(
             raise ValueError("lossless output must be different from MP4 output")
         if lossless_audio_codec is None:
             lossless_audio_codec = probe_lossless_audio_codec(audio_path)
-    ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+    ffmpeg = resolve_ffmpeg(root=REPO_ROOT)
     subtitle = (
         f"ass=filename='{escape_filter_path(ass_path)}'"
         f":fontsdir='{escape_filter_path(fonts_dir)}'"
@@ -4232,7 +4232,7 @@ def ensure_spectrum_targets_are_new(
 
 
 def probe_audio_duration_seconds(audio_path: Path) -> float:
-    ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+    ffmpeg = resolve_ffmpeg(root=REPO_ROOT)
     completed = subprocess.run(
         [str(ffmpeg), "-hide_banner", "-i", str(audio_path)],
         cwd=str(REPO_ROOT),

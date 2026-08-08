@@ -74,6 +74,11 @@
       "reason": "Selects the runtime ML device for public Japanese/general workflows, defaulting to hardware-aware auto detection with explicit CUDA or CPU overrides."
     },
     {
+      "path": "karaoke_common/ffmpeg_tools.py",
+      "category": "package-file",
+      "reason": "Resolves FFmpeg and FFprobe consistently, preferring the project-owned tools directory while retaining explicit overrides."
+    },
+    {
       "path": "karaoke_japanese/__init__.py",
       "category": "package-file",
       "reason": "Japanese layout package initializer for the selectable wide-visual workflow."

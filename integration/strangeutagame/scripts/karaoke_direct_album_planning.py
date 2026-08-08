@@ -17,6 +17,11 @@ except ImportError:  # pragma: no cover - direct script execution
         load_album_manifest,
     )
 
+try:
+    from .karaoke_common.ffmpeg_tools import resolve_ffmpeg
+except ImportError:  # pragma: no cover - direct script execution
+    from karaoke_common.ffmpeg_tools import resolve_ffmpeg  # type: ignore[no-redef]
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("standard", "wide")
@@ -107,16 +112,9 @@ def resolve_path(value: Path | str, *, base: Path = REPO_ROOT) -> Path:
 
 
 def default_ffmpeg() -> Path:
-    """Resolve the project environment's bundled FFmpeg executable."""
+    """Resolve the preferred FFmpeg executable."""
 
-    try:
-        import imageio_ffmpeg
-    except ImportError as error:  # pragma: no cover - dependency failure
-        raise RuntimeError("imageio-ffmpeg is required for media validation") from error
-    ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
-    if not ffmpeg.is_file():
-        raise FileNotFoundError(f"ffmpeg executable does not exist: {ffmpeg}")
-    return ffmpeg
+    return resolve_ffmpeg(root=REPO_ROOT)
 
 
 def _validate_ass_file(path: Path, profile: str) -> dict[str, Any]:

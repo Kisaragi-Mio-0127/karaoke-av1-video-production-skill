@@ -34,6 +34,35 @@ Production commands use project-owned `models/mms/model.pt` and
 runtime inputs with the explicit bootstrap below; do not turn a production
 render into an installer.
 
+## FFmpeg and FFprobe
+
+Install a matched FFmpeg build containing both executables. On Windows, the
+recommended project-owned layout is:
+
+```text
+<StrangeUtaGame>/tools/ffmpeg/bin/ffmpeg.exe
+<StrangeUtaGame>/tools/ffmpeg/bin/ffprobe.exe
+```
+
+Download a current Essentials build from the
+[FFmpeg download page](https://ffmpeg.org/download.html) (the Windows link
+currently points to builds such as Gyan), extract it, and copy both files from
+the archive's `bin` directory into the layout above. Verify from the target
+checkout:
+
+```powershell
+tools\ffmpeg\bin\ffmpeg.exe -hide_banner -version
+tools\ffmpeg\bin\ffprobe.exe -hide_banner -version
+tools\ffmpeg\bin\ffmpeg.exe -hide_banner -filters | Select-String 'subtitles|ass'
+tools\ffmpeg\bin\ffmpeg.exe -hide_banner -encoders | Select-String 'av1_nvenc|libaom-av1|aac'
+```
+
+The shared resolver uses this order: explicit `--ffmpeg`/`--ffprobe`, the
+`FFMPEG`/`FFPROBE` environment variables, the project-owned pair, system
+`PATH`, then imageio-ffmpeg as an FFmpeg-only compatibility fallback.
+imageio-ffmpeg does not supply FFprobe. FFprobe reads container and stream
+metadata; it does not render, encode, or modify media.
+
 The public runtime is Japanese/general only. Use the separate local
 Chinese/English Skill for those language workflows.
 
@@ -225,11 +254,11 @@ assets are separate project-owned runtime files under `<target>/models/`.
 
 | Script/module | Upstream module, resource, or runtime dependency | Installed location | Independent of upstream? |
 |---|---|---|---|
-| `finalize_karaoke_release.py` | Imports no upstream code, but validates expected canonical/companion `.sug` artifacts and the integration release layout; uses imageio-ffmpeg. | `<target>/scripts/finalize_karaoke_release.py` | Conditional: independent of upstream code, not of existing SUG artifacts/layout. |
+| `finalize_karaoke_release.py` | Imports no upstream code, but validates expected canonical/companion `.sug` artifacts and the integration release layout; uses the shared FFmpeg resolver. | `<target>/scripts/finalize_karaoke_release.py` | Conditional: independent of upstream code, not of existing SUG artifacts/layout. |
 | `build_karaoke_wide_artwork.py`<br>`karaoke_cover_palette.py`<br>`karaoke_color_plan.py`<br>`karaoke_common/artwork.py` | No upstream import. These build deterministic artwork/palettes with Pillow and integration-owned inputs. | Corresponding paths under `<target>/scripts/` | Yes, with their declared images/fonts/metadata. |
 | `inspect_karaoke_media.py`<br>`transcode_karaoke_av1.py`<br>`render_vinyl_karaoke.py`<br>`pitch_shift_audio.py` | No upstream import. They use media/manifest metadata and external runtimes: FFmpeg (and FFprobe where selected); pitch shifting additionally requires Rubber Band 3.x. | Corresponding paths under `<target>/scripts/` | Yes, with the required media and external commands. |
 | `prepare_karaoke_msst_vocals.py` | No upstream import. It loads an external local `prepare_sovits41_msst_stems.py` adapter and its MSST runtime/model files, owned outside this integration. | `<target>/scripts/prepare_karaoke_msst_vocals.py` | Yes with respect to StrangeUtaGame; no with respect to the separate MSST adapter/runtime. |
-| `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | No upstream import. They operate on integration manifests, paths, snapshots, or release files; album planning resolves imageio-ffmpeg for media validation. | Corresponding paths under `<target>/scripts/` | Yes, with their declared integration inputs. |
+| `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | No upstream import. They operate on integration manifests, paths, snapshots, or release files; album planning uses the shared FFmpeg resolver for media validation. | Corresponding paths under `<target>/scripts/` | Yes, with their declared integration inputs. |
 | `karaoke_model_paths.py` | No upstream import; resolves only project-owned `models/mms/model.pt` and `models/whisper/` paths. | `<target>/scripts/karaoke_model_paths.py` | Yes with respect to upstream code; model files are still required by callers. |
 | `karaoke_common/layout.py`<br>`karaoke_japanese/layout.py`<br>`karaoke_zh_en/layout.py` | No upstream import; these are integration-owned layout definitions. The `karaoke_zh_en` package supplies generic preview layouts, not Chinese/English workflow entries. | Corresponding package paths under `<target>/scripts/` | Yes; modules, not standalone commands. |
 | `karaoke_common/device.py` | No upstream import; dynamically loads `torch` to select CPU/CUDA. | `<target>/scripts/karaoke_common/device.py` | Yes; module, not a standalone command. |

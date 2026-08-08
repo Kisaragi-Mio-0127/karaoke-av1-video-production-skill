@@ -97,7 +97,9 @@ def _manifest(
     return path
 
 
-def _commands_ok(name: str, _args: list[str]) -> dict[str, object]:
+def _commands_ok(
+    name: str, _args: list[str], **_kwargs: object
+) -> dict[str, object]:
     return {
         "ok": name != "nvidia-smi",
         "path": "tool" if name != "nvidia-smi" else None,

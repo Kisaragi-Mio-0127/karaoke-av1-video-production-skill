@@ -39,11 +39,6 @@ except ImportError:  # pragma: no cover - the media venv supplies mutagen
     MutagenFile = None  # type: ignore[assignment]
 
 try:
-    import imageio_ffmpeg
-except ImportError:  # pragma: no cover - the media venv supplies imageio-ffmpeg
-    imageio_ffmpeg = None  # type: ignore[assignment]
-
-try:
     from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 except ImportError:  # pragma: no cover - the media venv supplies Pillow
     Image = ImageDraw = ImageEnhance = ImageFilter = ImageFont = ImageOps = None  # type: ignore[assignment]
@@ -58,6 +53,11 @@ except ImportError:  # pragma: no cover - direct script execution
         load_album_manifest,
         project_relative,
     )
+
+try:
+    from .karaoke_common.ffmpeg_tools import resolve_ffmpeg
+except ImportError:  # pragma: no cover - direct script execution
+    from karaoke_common.ffmpeg_tools import resolve_ffmpeg  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
@@ -116,9 +116,7 @@ def run_capture(executable: Path | str, args: Iterable[str]) -> CommandResult:
 
 
 def default_ffmpeg() -> Path:
-    if imageio_ffmpeg is None:
-        raise RuntimeError("imageio-ffmpeg is not importable in the active Python environment")
-    return Path(imageio_ffmpeg.get_ffmpeg_exe())
+    return resolve_ffmpeg(root=REPO_ROOT)
 
 
 def _has_named_filter(output: str, name: str) -> bool:
@@ -1761,7 +1759,7 @@ def _video_codec_args(encoder: str) -> list[str]:
             "0",
             "-multipass",
             "fullres",
-            "-lookahead",
+            "-rc-lookahead",
             "32",
             "-spatial-aq",
             "1",
@@ -2002,7 +2000,7 @@ def make_parser() -> argparse.ArgumentParser:
         help="explicit network fallback URL; embedded cover remains preferred",
     )
     parser.add_argument("--no-network", action="store_true", help="fail instead of fetching a missing cover")
-    parser.add_argument("--ffmpeg", type=Path, help="override imageio-ffmpeg binary")
+    parser.add_argument("--ffmpeg", type=Path, help="override the resolved FFmpeg binary")
     parser.add_argument("--rotation-period", type=float, default=8.0, help="seconds per vinyl revolution")
     parser.add_argument(
         "--vinyl-motion",

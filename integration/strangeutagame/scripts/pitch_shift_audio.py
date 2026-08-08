@@ -23,18 +23,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from .karaoke_common.ffmpeg_tools import resolve_ffmpeg, resolve_ffprobe
+except ImportError:  # pragma: no cover - direct script execution
+    from karaoke_common.ffmpeg_tools import (  # type: ignore[no-redef]
+        resolve_ffmpeg,
+        resolve_ffprobe,
+    )
+
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def executable(explicit: Path | None, env_name: str, command: str) -> Path:
-    """Resolve a tool from CLI, environment, then PATH in that order."""
-    candidates = [
-        explicit,
-        Path(os.environ[env_name]) if os.environ.get(env_name) else None,
-        Path(found) if (found := shutil.which(command)) else None,
-    ]
-    for candidate in candidates:
-        if candidate and candidate.is_file():
-            return candidate.resolve()
-    raise SystemExit(f"Cannot find {command}; pass --{command} or set {env_name}")
+    """Resolve the requested member of the project FFmpeg tool pair."""
+
+    try:
+        if command == "ffmpeg":
+            return resolve_ffmpeg(explicit, root=ROOT)
+        if command == "ffprobe":
+            return resolve_ffprobe(explicit, root=ROOT)
+    except RuntimeError as error:
+        raise SystemExit(str(error)) from error
+    raise SystemExit(f"Unsupported executable: {command} ({env_name})")
 
 
 def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:

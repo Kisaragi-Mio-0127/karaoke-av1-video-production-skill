@@ -28,14 +28,20 @@ The default delivery is MP4 with AAC-LC audio at 320 kb/s and explicit stream ma
   -vf "subtitles='$ass':fontsdir='$fonts',format=yuv420p" `
   -s 1920x1080 -r 30 -pix_fmt yuv420p `
   -c:v av1_nvenc -preset p7 -tune hq -rc vbr -cq 38 -b:v 0 `
-  -multipass fullres -lookahead 32 -spatial-aq 1 -temporal-aq 1 `
+  -multipass fullres -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 `
   -aq-strength 8 -g 240 `
   -colorspace bt709 -color_primaries bt709 -color_trc bt709 `
   -c:a aac -profile:a aac_low -b:a 320k -movflags +faststart `
   $temporaryMp4
 ```
 
-Verify the profile, dimensions, frame rate, pixel format, and BT.709 metadata with `ffprobe`. Produce an H.264 fallback when the target device has uncertain AV1 support. MKV is a separate explicit selection and accepts only a probed FLAC or PCM WAV source; reject MP3 and AAC sources. Do not create MKV or run a full decode unless explicitly selected.
+Verify the codec, profile, dimensions, frame rate, pixel format, BT.709 metadata, audio streams, and duration with `ffprobe`. Verify requested CQ, preset, multipass, lookahead, AQ, and GOP settings from the render report; they are not all recoverable from the final container. Produce an H.264 fallback when the target device has uncertain AV1 support. MKV is a separate explicit selection and accepts only a probed FLAC or PCM WAV source; reject MP3 and AAC sources. Do not create MKV or run a full decode unless explicitly selected.
+
+```powershell
+& $ffprobe -v error -show_entries `
+  "format=format_name,start_time,duration:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,r_frame_rate,sample_rate,channels,channel_layout" `
+  -of json $media
+```
 
 ## Soft ASS and FLAC-in-MKV
 

@@ -38,6 +38,11 @@ except ImportError:  # pragma: no cover - direct script execution
         project_relative,
     )
 
+try:
+    from .karaoke_common.ffmpeg_tools import resolve_ffmpeg
+except ImportError:  # pragma: no cover - direct script execution
+    from karaoke_common.ffmpeg_tools import resolve_ffmpeg  # type: ignore[no-redef]
+
 ROOT = Path(__file__).resolve().parents[1]
 CACHE_ROOT = ROOT / ".cache"
 MSST_INPUT_DIR = CACHE_ROOT / "msst-input"
@@ -168,19 +173,9 @@ def _temporary_wav_path(output: Path) -> Path:
 
 
 def default_ffmpeg() -> Path:
-    """Return the project environment's bundled ffmpeg executable."""
+    """Return the preferred FFmpeg executable."""
 
-    try:
-        import imageio_ffmpeg
-    except ImportError as error:  # pragma: no cover - environment packaging error
-        raise RuntimeError(
-            "imageio-ffmpeg is required; run this script through the karaoke uv environment"
-        ) from error
-
-    ffmpeg = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
-    if not ffmpeg.is_file():
-        raise FileNotFoundError(f"ffmpeg executable does not exist: {ffmpeg}")
-    return ffmpeg
+    return resolve_ffmpeg(root=ROOT)
 
 
 def decode_to_wav(

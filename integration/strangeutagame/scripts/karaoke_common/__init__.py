@@ -9,6 +9,12 @@ from .device import (
     normalize_device,
     resolve_device,
 )
+from .ffmpeg_tools import (
+    FFmpegToolError,
+    prepend_ffmpeg_to_path,
+    resolve_ffmpeg,
+    resolve_ffprobe,
+)
 from .layout import STANDARD_LAYOUT, WIDE_BASE_LAYOUT, Lane, SubtitleLayout
 from .pronunciation import (
     PRONUNCIATION_VALIDATION_MODES,
@@ -21,6 +27,7 @@ __all__ = [
     "DEVICE_CHOICES",
     "DeviceResolutionError",
     "DeviceSelection",
+    "FFmpegToolError",
     "Lane",
     "PRONUNCIATION_VALIDATION_MODES",
     "PronunciationValidationResult",
@@ -29,6 +36,9 @@ __all__ = [
     "WIDE_BASE_LAYOUT",
     "add_device_argument",
     "normalize_device",
+    "prepend_ffmpeg_to_path",
+    "resolve_ffmpeg",
+    "resolve_ffprobe",
     "resolve_device",
     "validate_pronunciation",
 ]

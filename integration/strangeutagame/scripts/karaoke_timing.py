@@ -26,7 +26,6 @@ import json
 import math
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -52,6 +51,7 @@ try:
         normalize_device,
         resolve_device,
     )
+    from .karaoke_common.ffmpeg_tools import prepend_ffmpeg_to_path
     from .karaoke_language import (
         DEFAULT_LANGUAGE,
         english_word_spans,
@@ -75,6 +75,9 @@ except ImportError:  # pragma: no cover - direct script execution
         add_device_argument,
         normalize_device,
         resolve_device,
+    )
+    from karaoke_common.ffmpeg_tools import (  # type: ignore[no-redef]
+        prepend_ffmpeg_to_path,
     )
     from karaoke_language import (  # type: ignore[no-redef]
         DEFAULT_LANGUAGE,
@@ -1172,57 +1175,12 @@ def derive_line_timing(
     return result, diagnostics
 
 
-def _ensure_named_ffmpeg(source: Path) -> Path | None:
-    """Expose imageio-ffmpeg under the name expected by Whisper.
-
-    The bundled executable is named ``ffmpeg-win-...exe``.  Whisper invokes
-    the literal command ``ffmpeg``, so merely adding that directory to PATH
-    is insufficient on Windows.  Keep a project-local hard link (copy
-    fallback) instead of writing to a user/global tools directory.
-    """
-
-    if source.name.casefold() == "ffmpeg.exe":
-        return source
-    alias = ROOT / ".cache" / "bin" / "ffmpeg.exe"
-    try:
-        alias.parent.mkdir(parents=True, exist_ok=True)
-        if alias.exists():
-            source_stat = source.stat()
-            alias_stat = alias.stat()
-            if (
-                source_stat.st_size == alias_stat.st_size
-                and source_stat.st_mtime_ns == alias_stat.st_mtime_ns
-            ):
-                return alias
-            alias.unlink()
-        try:
-            os.link(source, alias)
-        except OSError:
-            shutil.copy2(source, alias)
-        return alias
-    except OSError:
-        return None
-
-
 def _ffmpeg_environment() -> tuple[dict[str, str], str | None]:
-    env = os.environ.copy()
-    candidates: list[Path] = [
-        Path(sys.executable).resolve().parent / "ffmpeg.exe",
-    ]
     try:
-        import imageio_ffmpeg
-
-        bundled = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
-        named = _ensure_named_ffmpeg(bundled)
-        if named is not None:
-            candidates.append(named)
-    except Exception:
-        pass
-    for candidate in candidates:
-        if candidate.exists():
-            env["PATH"] = str(candidate.parent) + os.pathsep + env.get("PATH", "")
-            return env, str(candidate)
-    return env, None
+        env, ffmpeg = prepend_ffmpeg_to_path(root=ROOT)
+        return env, str(ffmpeg)
+    except RuntimeError:
+        return os.environ.copy(), None
 
 
 def model_cache_path(model_name: str, model_cache: Path) -> Path:

@@ -64,7 +64,10 @@ The public environment tools have distinct boundaries:
    non-commercial use. A managed Python download requires
    `--allow-python-download`.
 3. Bootstrap does not manage `git`, `uv`, `ffmpeg`, `ffprobe`, or GPU drivers.
-   Install and maintain those separately. `--dry-run` deep-verifies and plans
+   Install FFmpeg and FFprobe as a matched pair under
+   `<StrangeUtaGame>/tools/ffmpeg/bin`; see the
+   [integration guide](references/strangeutagame-integration.md#ffmpeg-and-ffprobe).
+   `--dry-run` deep-verifies and plans
    without writing or actively initiating network requests; `--offline` blocks
    model and Python downloads and passes uv offline mode.
 

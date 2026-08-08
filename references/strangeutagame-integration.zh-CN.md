@@ -22,6 +22,26 @@ python "$skillRoot/scripts/install_strangeutagame_integration.py" --target <Stra
 
 生产命令使用项目自有的`models/mms/model.pt`和`models/whisper`，不会隐式下载模型文件。缺少运行时输入时，请先执行下方的显式Bootstrap，不要让生产渲染兼任安装器。
 
+## FFmpeg与FFprobe
+
+请安装同一套构建中的FFmpeg与FFprobe。Windows推荐放在项目专用目录：
+
+```text
+<StrangeUtaGame>/tools/ffmpeg/bin/ffmpeg.exe
+<StrangeUtaGame>/tools/ffmpeg/bin/ffprobe.exe
+```
+
+从[FFmpeg下载页](https://ffmpeg.org/download.html)选择当前Windows构建（该页面会链接到Gyan等构建），解压后把压缩包`bin`目录中的两个文件复制到上述位置。然后在目标项目根目录验证：
+
+```powershell
+tools\ffmpeg\bin\ffmpeg.exe -hide_banner -version
+tools\ffmpeg\bin\ffprobe.exe -hide_banner -version
+tools\ffmpeg\bin\ffmpeg.exe -hide_banner -filters | Select-String 'subtitles|ass'
+tools\ffmpeg\bin\ffmpeg.exe -hide_banner -encoders | Select-String 'av1_nvenc|libaom-av1|aac'
+```
+
+统一解析顺序为：显式`--ffmpeg`/`--ffprobe`、`FFMPEG`/`FFPROBE`环境变量、项目专用工具、系统`PATH`，最后才把imageio-ffmpeg作为仅FFmpeg的兼容回退。imageio-ffmpeg不提供FFprobe。FFprobe只读取容器与媒体流信息，不负责渲染、编码或修改文件。
+
 公开运行时仅包含日文和通用流程。中文或英文工作流请使用独立的本地Skill。
 
 ## 不主动发起网络请求的检查
@@ -150,11 +170,11 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py --manifes
 
 | 脚本/模块 | 依赖的上游模块、资源或运行时 | 安装位置 | 可脱离上游独立运行？ |
 |---|---|---|---|
-| `finalize_karaoke_release.py` | 不导入上游代码，但会验证预期的规范/companion `.sug`工件和集成发布布局；使用imageio-ffmpeg。 | `<target>/scripts/finalize_karaoke_release.py` | 有条件可以：不依赖上游代码，但依赖已有SUG工件/布局。 |
+| `finalize_karaoke_release.py` | 不导入上游代码，但会验证预期的规范/companion `.sug`工件和集成发布布局；使用统一FFmpeg解析器。 | `<target>/scripts/finalize_karaoke_release.py` | 有条件可以：不依赖上游代码，但依赖已有SUG工件/布局。 |
 | `build_karaoke_wide_artwork.py`<br>`karaoke_cover_palette.py`<br>`karaoke_color_plan.py`<br>`karaoke_common/artwork.py` | 不导入上游代码，使用Pillow和本集成输入生成确定性图稿/调色板。 | `<target>/scripts/`下对应路径 | 可以，但需要声明的图片、字体和元数据。 |
 | `inspect_karaoke_media.py`<br>`transcode_karaoke_av1.py`<br>`render_vinyl_karaoke.py`<br>`pitch_shift_audio.py` | 不导入上游代码，使用媒体/清单元数据和外部运行时：FFmpeg，以及所选路径中的FFprobe；移调还需要Rubber Band 3.x。 | `<target>/scripts/`下对应路径 | 可以，但需要相应媒体和外部命令。 |
 | `prepare_karaoke_msst_vocals.py` | 不导入上游代码；加载外部本地`prepare_sovits41_msst_stems.py`适配器及其MSST运行时/模型文件，这些内容由本集成之外的组件拥有。 | `<target>/scripts/prepare_karaoke_msst_vocals.py` | 相对于StrangeUtaGame可以；相对于独立MSST适配器/运行时不可以。 |
-| `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | 不导入上游代码，处理集成清单、路径、快照或发布文件；专辑规划通过imageio-ffmpeg解析媒体。 | `<target>/scripts/`下对应路径 | 可以，但需要声明的集成输入。 |
+| `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | 不导入上游代码，处理集成清单、路径、快照或发布文件；专辑规划通过统一FFmpeg解析器检查媒体。 | `<target>/scripts/`下对应路径 | 可以，但需要声明的集成输入。 |
 | `karaoke_model_paths.py` | 不导入上游代码，只解析项目自有`models/mms/model.pt`和`models/whisper/`路径。 | `<target>/scripts/karaoke_model_paths.py` | 相对于上游代码可以；调用方仍需要模型文件。 |
 | `karaoke_common/layout.py`<br>`karaoke_japanese/layout.py`<br>`karaoke_zh_en/layout.py` | 不导入上游代码，是本集成自有布局定义。`karaoke_zh_en`包提供通用预览布局，不提供中文/英文工作流入口。 | `<target>/scripts/`下对应包路径 | 可以；这些是模块，不是独立命令。 |
 | `karaoke_common/device.py` | 不导入上游代码，动态加载`torch`选择CPU/CUDA。 | `<target>/scripts/karaoke_common/device.py` | 可以；这是模块，不是独立命令。 |

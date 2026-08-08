@@ -263,17 +263,18 @@ def test_lyric_corrections_preserve_frozen_source_and_require_exact_match():
     assert applied[0]["evidence"] == ["isolated vocal"]
 
 
-def test_named_ffmpeg_alias_is_project_local(tmp_path: Path, monkeypatch):
-    source = tmp_path / "package" / "ffmpeg-win-bundled.exe"
-    source.parent.mkdir()
-    source.write_bytes(b"local ffmpeg probe")
-    repository = tmp_path / "repository"
-    monkeypatch.setattr(karaoke_timing, "ROOT", repository)
+def test_ffmpeg_environment_uses_shared_project_tool(monkeypatch):
+    expected = Path("C:/project/tools/ffmpeg/bin/ffmpeg.exe")
+    monkeypatch.setattr(
+        karaoke_timing,
+        "prepend_ffmpeg_to_path",
+        lambda **_kwargs: ({"PATH": str(expected.parent)}, expected),
+    )
 
-    alias = karaoke_timing._ensure_named_ffmpeg(source)
+    environment, executable = karaoke_timing._ffmpeg_environment()
 
-    assert alias == repository / ".cache" / "bin" / "ffmpeg.exe"
-    assert alias.read_bytes() == source.read_bytes()
+    assert environment["PATH"] == str(expected.parent)
+    assert executable == str(expected)
 
 
 def test_duration_probe_accepts_non_mp3_audio(monkeypatch):

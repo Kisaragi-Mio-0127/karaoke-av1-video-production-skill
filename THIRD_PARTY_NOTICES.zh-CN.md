@@ -10,6 +10,10 @@ TorchAudio说明该模型来自论文*Scaling Speech Technology to 1,000+ Langua
 
 只有用户显式传入`--accept-mms-cc-by-nc-4-0`，确认接受署名要求和非商业用途限制后，Bootstrap才会下载这些权重。Bootstrap会在下载的权重旁写入来源和许可证sidecar文件。
 
+## 可选NextFire MMS日文-Latn模型
+
+`NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn`是实验性、仅限日文的可选对齐模型。其模型卡采用AGPL-3.0-only；基础模型`facebook/mms-300m`采用CC BY-NC 4.0。可选安装器下载缺失文件前必须同时传入`--accept-nextfire-agpl-3-0`和`--accept-mms-cc-by-nc-4-0`。本仓库不分发也不提交这些权重。
+
 ## OpenAI Whisper模型权重
 
 可选的识别流程可以使用OpenAI Whisper的`base.pt`。本仓库不分发该模型权重。OpenAI以[MIT许可证](https://github.com/openai/whisper/blob/main/LICENSE)发布Whisper代码和模型权重。Bootstrap会在下载的Whisper检查点旁记录来源URL、校验值和许可证元数据。

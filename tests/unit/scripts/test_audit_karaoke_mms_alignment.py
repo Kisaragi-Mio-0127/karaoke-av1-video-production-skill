@@ -1,3 +1,6 @@
+import sys
+import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -7,7 +10,9 @@ from scripts.audit_karaoke_mms_alignment import (
     ALIGNMENT_EVIDENCE_CONTRACT,
     SCHEMA_VERSION_V2,
     UNIT_OVERRIDES_SCHEMA_VERSION,
+    _alignment_timebase_ms,
     _report_gate_ok,
+    _validate_dual_audio_durations,
     _validate_mms_model_access,
     build_alignment_input_units,
     build_comparisons,
@@ -40,6 +45,148 @@ def test_mms_model_access_is_offline_and_fail_closed_by_default(tmp_path):
     model = tmp_path / "model.pt"
     model.write_bytes(b"local MMS checkpoint")
     assert _validate_mms_model_access(model, allow_network=False) == model.resolve()
+
+
+def test_nextfire_latn_tokenizer_preserves_existing_romaji_unit_groups():
+    from scripts.audit_karaoke_mms_alignment import _LatnCharacterTokenizer
+
+    vocabulary = {
+        "|": 0,
+        **{char: index for index, char in enumerate("abcdefghijklmnopqrstuvwxyz'", 1)},
+    }
+    tokenizer = _LatnCharacterTokenizer(vocabulary)
+
+    assert tokenizer(["kyo", "n'a"])[0] == [vocabulary[c] for c in "kyo"]
+    assert tokenizer(["kyo", "n'a"])[1] == [vocabulary[c] for c in "n'a"]
+    with pytest.raises(ValueError, match="does not support"):
+        tokenizer(["Kyo"])
+
+
+def test_nextfire_runtime_load_is_local_only_and_disables_remote_code(
+    monkeypatch, tmp_path
+):
+    import scripts.audit_karaoke_mms_alignment as audit_module
+
+    checkpoint = tmp_path / "models" / "hf" / "nextfire" / "model.safetensors"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"weights")
+    vocabulary = {
+        "|": 0,
+        **{
+            char: index
+            for index, char in enumerate("abcdefghijklmnopqrstuvwxyz'", 1)
+        },
+        "[UNK]": 28,
+        "[PAD]": 29,
+    }
+    calls: dict[str, object] = {}
+
+    class FakeModel:
+        config = SimpleNamespace(pad_token_id=29, vocab_size=30)
+
+        def to(self, device):
+            calls["device"] = str(device)
+            return self
+
+        def eval(self):
+            return self
+
+    processor = SimpleNamespace(
+        tokenizer=SimpleNamespace(get_vocab=lambda: vocabulary, pad_token_id=29),
+        feature_extractor=SimpleNamespace(sampling_rate=16_000),
+    )
+
+    class AutoProcessor:
+        @staticmethod
+        def from_pretrained(path, **kwargs):
+            calls["processor"] = (Path(path), kwargs)
+            return processor
+
+    class AutoModelForCTC:
+        @staticmethod
+        def from_pretrained(path, **kwargs):
+            calls["model"] = (Path(path), kwargs)
+            return FakeModel()
+
+    transformers = types.ModuleType("transformers")
+    transformers.AutoProcessor = AutoProcessor
+    transformers.AutoModelForCTC = AutoModelForCTC
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    monkeypatch.setattr(
+        audit_module,
+        "_validate_mms_model_access",
+        lambda *_args, **_kwargs: checkpoint,
+    )
+
+    runtime = audit_module.load_mms_runtime(
+        backend=audit_module.MMS_BACKEND_NEXTFIRE_JA_LATN,
+        device="cpu",
+    )
+
+    assert calls["processor"] == (
+        checkpoint.parent,
+        {"local_files_only": True, "trust_remote_code": False},
+    )
+    assert calls["model"] == calls["processor"]
+    assert runtime.model_path == checkpoint
+    assert runtime.emission_log_softmax is True
+    assert runtime.aligner.blank == 29
+    assert runtime.tokenizer(["kya"])[0] == [vocabulary[c] for c in "kya"]
+
+
+def test_ctc_aligner_uses_nonzero_model_blank_and_preserves_groups():
+    import torch
+    import torchaudio
+
+    from scripts.audit_karaoke_mms_alignment import _CtcForcedAligner
+
+    # Targets are a,b (IDs 1,2); class 29 is the model's CTC blank. Class 0 is
+    # the word delimiter and must not be treated as blank.
+    emission = torch.full((5, 30), -20.0)
+    emission[0, 29] = 0.0
+    emission[1, 1] = 0.0
+    emission[2, 29] = 0.0
+    emission[3, 2] = 0.0
+    emission[4, 29] = 0.0
+    aligner = _CtcForcedAligner(torch, torchaudio, blank=29)
+
+    grouped = aligner(emission.log_softmax(dim=-1), [[1], [2]])
+
+    assert [[span.token for span in group] for group in grouped] == [[1], [2]]
+    assert grouped[0][0].start == 1
+    assert grouped[1][0].start == 3
+    assert 0.99 <= grouped[0][0].score <= 1.0
+
+
+class _SizedAudio:
+    def __init__(self, frames: int, samplerate: int) -> None:
+        self.frames = frames
+        self.samplerate = samplerate
+
+    def __len__(self) -> int:
+        return self.frames
+
+
+def test_dual_audio_duration_allows_one_sample_and_rejects_two():
+    vocals = _SizedAudio(44_100, 44_100)
+
+    _validate_dual_audio_durations(vocals, _SizedAudio(44_101, 44_100))
+    with pytest.raises(RuntimeError, match="more than one source sample"):
+        _validate_dual_audio_durations(vocals, _SizedAudio(44_102, 44_100))
+
+
+def test_alignment_timebase_uses_actual_processed_samples_not_requested_crop():
+    start_ms, frame_ms = _alignment_timebase_ms(
+        frame_offset=22_050,
+        source_sample_rate=44_100,
+        processed_sample_count=12_800,
+        model_sample_rate=16_000,
+        emission_frame_count=40,
+    )
+
+    assert start_ms == 500.0
+    assert frame_ms == 20.0
+    assert start_ms + 40 * frame_ms == 1_300.0
 
 
 def test_empty_audit_collection_cannot_pass_gate():

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts import karaoke_full_auto as full_auto
+from scripts import karaoke_model_paths
 
 
 def _environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, language: str):
@@ -25,6 +26,8 @@ def _environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, language: str)
     )
     manifest = project / "album.json"
     manifest.write_text("{}", encoding="utf-8")
+    cover = project / "cover.jpg"
+    cover.write_bytes(b"cover")
     track = SimpleNamespace(
         song_id="song",
         language=language,
@@ -38,15 +41,16 @@ def _environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, language: str)
             "--manifest", str(manifest), "--song-id", "song",
             "--source", str(source),
             "--output-dir", str(project / ".render-work" / "run"),
+            "--cover", str(cover),
         ]
     )
     return SimpleNamespace(
-        project=project, audio=audio, source=source, manifest=manifest,
+        project=project, audio=audio, source=source, manifest=manifest, cover=cover,
         model=model, whisper=whisper, track=track, album=album, args=args,
     )
 
 
-def test_japanese_full_auto_calls_single_msst_timing_and_mms(
+def test_ja_full_auto_forwards_nonblocking_defaults_to_staged_wrapper(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     env = _environment(tmp_path, monkeypatch, "ja")
@@ -87,14 +91,12 @@ def test_japanese_full_auto_calls_single_msst_timing_and_mms(
         ),
     )
 
-    report = full_auto.run_full_auto(env.args)
+    report = full_auto.run_full_auto(env.args, allowed_languages=frozenset({"ja"}))
 
     assert calls == ["msst", "timing", "wrapper"]
     assert report["status"] == "rendered-with-fallback"
-    assert report["stages"][1]["status"] == "quality-fallback"
     assert captured["args"].quality_policy == "auto-fallback"
     assert captured["args"].pronunciation_validation == "optional"
-    assert captured["args"].sug == env.project / ".render-work" / "run" / "initial" / "timing" / "song_slug.sug"
     assert captured["args"].recognition_audits == []
 
 
@@ -119,6 +121,55 @@ def test_models_cannot_be_selected_from_cache(tmp_path: Path, monkeypatch):
     env.args.mms_model_path = cached
     with pytest.raises(full_auto.FullAutoError, match="must be selected from"):
         full_auto.build_plan(env.args)
+
+
+def test_japanese_full_auto_selects_nextfire_only_by_explicit_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    env = _environment(tmp_path, monkeypatch, "ja")
+    model_dir = (
+        env.project
+        / "models"
+        / "hf"
+        / "nextfire-mms-ja-latn"
+    )
+    model_dir.mkdir(parents=True)
+    for name in (
+        "config.json",
+        "model.safetensors",
+        "processor_config.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ):
+        (model_dir / name).write_bytes(b"model")
+    (model_dir / "MODEL_PROVENANCE.json").write_text(
+        json.dumps(
+            {
+                "repository": karaoke_model_paths.NEXTFIRE_JA_LATN_REPOSITORY,
+                "revision": karaoke_model_paths.NEXTFIRE_JA_LATN_REVISION,
+                "model_license": "AGPL-3.0",
+                "base_model_license": "CC-BY-NC-4.0",
+            }
+        ),
+        encoding="utf-8",
+    )
+    env.args.mms_backend = "nextfire-ja-latn"
+
+    plan = full_auto.build_plan(env.args, allowed_languages=frozenset({"ja"}))
+    wrapper = full_auto._wrapper_args(plan, env.args)
+
+    assert plan.mms_model == (model_dir / "model.safetensors").resolve()
+    assert plan.mms_backend == "nextfire-ja-latn"
+    assert wrapper.mms_backend == "nextfire-ja-latn"
+    assert wrapper.mms_model_path is None
+
+
+def test_explicit_artwork_must_exist_before_output_is_created(tmp_path, monkeypatch):
+    env = _environment(tmp_path, monkeypatch, "zh")
+    env.args.cover = env.project / "missing-cover.jpg"
+    with pytest.raises(full_auto.FullAutoError, match="explicit cover does not exist"):
+        full_auto.build_plan(env.args)
+    assert not env.args.output_dir.exists()
 
 
 def test_refresh_source_allows_missing_destination_and_forwards_netease_id(

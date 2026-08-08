@@ -45,5 +45,66 @@
         "requires_acceptance": false
       }
     }
-  ]
+  ],
+  "optional_model_sets": {
+    "nextfire-mms-ja-latn": {
+      "repository": "NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn",
+      "revision": "a5bc320991c4b97a887a0b7784a5652d4a22fd2a",
+      "destination": "models/hf/nextfire-mms-ja-latn",
+      "provenance": "MODEL_PROVENANCE.json",
+      "trust_remote_code": false,
+      "licenses": {
+        "model_card": {
+          "spdx": "AGPL-3.0-only",
+          "url": "https://huggingface.co/NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn/blob/a5bc320991c4b97a887a0b7784a5652d4a22fd2a/README.md",
+          "notice": "The NextFire fine-tuned model card declares AGPL-3.0.",
+          "requires_acceptance": true
+        },
+        "base_model": {
+          "name": "facebook/mms-300m",
+          "spdx": "CC-BY-NC-4.0",
+          "url": "https://huggingface.co/facebook/mms-300m/blob/main/README.md",
+          "notice": "The base MMS model requires attribution and permits non-commercial use only under CC BY-NC 4.0.",
+          "requires_acceptance": true
+        }
+      },
+      "files": [
+        {
+          "name": "nextfire-mms-ja-latn/config.json",
+          "destination": "models/hf/nextfire-mms-ja-latn/config.json",
+          "url": "https://huggingface.co/NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn/resolve/a5bc320991c4b97a887a0b7784a5652d4a22fd2a/config.json",
+          "sha256": "665dbd5be3a170d0b53f86e702a4f65f755471a2d81c1e0cf35ba566a72bf382",
+          "size": 2034
+        },
+        {
+          "name": "nextfire-mms-ja-latn/model.safetensors",
+          "destination": "models/hf/nextfire-mms-ja-latn/model.safetensors",
+          "url": "https://huggingface.co/NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn/resolve/a5bc320991c4b97a887a0b7784a5652d4a22fd2a/model.safetensors",
+          "sha256": "4d1d6fbb543534ab32bcceac5f5a42052c7fde3d16a83cbbce858473d5735042",
+          "size": 1261938632
+        },
+        {
+          "name": "nextfire-mms-ja-latn/processor_config.json",
+          "destination": "models/hf/nextfire-mms-ja-latn/processor_config.json",
+          "url": "https://huggingface.co/NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn/resolve/a5bc320991c4b97a887a0b7784a5652d4a22fd2a/processor_config.json",
+          "sha256": "8bc3c8d6d97ea61524d5c15d8554b4baf072d2264c0bda1839bc7a822c200d66",
+          "size": 299
+        },
+        {
+          "name": "nextfire-mms-ja-latn/tokenizer_config.json",
+          "destination": "models/hf/nextfire-mms-ja-latn/tokenizer_config.json",
+          "url": "https://huggingface.co/NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn/resolve/a5bc320991c4b97a887a0b7784a5652d4a22fd2a/tokenizer_config.json",
+          "sha256": "b96525cd12d87182b9edd1613b47bc691f64184ad9d37c8a2f8b44a5fb3b8043",
+          "size": 1364
+        },
+        {
+          "name": "nextfire-mms-ja-latn/vocab.json",
+          "destination": "models/hf/nextfire-mms-ja-latn/vocab.json",
+          "url": "https://huggingface.co/NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn/resolve/a5bc320991c4b97a887a0b7784a5652d4a22fd2a/vocab.json",
+          "sha256": "26dc928520b2bde28e1c9e7fd425aae6b4eb40cd992bcb0bcc16ca6fada46491",
+          "size": 331
+        }
+      ]
+    }
+  }
 }

@@ -34,6 +34,12 @@ Production commands use project-owned `models/mms/model.pt` and
 runtime inputs with the explicit bootstrap below; do not turn a production
 render into an installer.
 
+`local-mms-fa` is the default alignment backend. The experimental
+Japanese-only NextFire backend is available only through
+`--mms-backend nextfire-ja-latn`, is not claimed to be better, and resolves
+only `models/hf/nextfire-mms-ja-latn`. It never downloads at runtime, uses no
+general Hugging Face cache, and executes no remote code.
+
 ## FFmpeg and FFprobe
 
 The default supported baseline is a matched FFmpeg/FFprobe 8.x build. The
@@ -81,6 +87,7 @@ Run it from the public Skill repository:
 ```powershell
 python scripts/check_karaoke_environment.py --target <StrangeUtaGame>
 python scripts/check_karaoke_environment.py --target <StrangeUtaGame> --deep-verify
+python scripts/check_karaoke_environment.py --target <StrangeUtaGame> --nextfire-mms-ja-latn
 ```
 
 The built-in bootstrap manifest is used by default. A non-built-in
@@ -113,6 +120,16 @@ or actively initiate network requests. When setup is approved, run:
 ```powershell
 python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --accept-mms-cc-by-nc-4-0
 ```
+
+For the optional NextFire snapshot, review its separate plan, then install it
+only with both confirmations:
+
+```powershell
+python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --nextfire-mms-ja-latn --dry-run
+python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --nextfire-mms-ja-latn --accept-nextfire-agpl-3-0 --accept-mms-cc-by-nc-4-0
+```
+
+The weights remain local and are never committed to this repository.
 
 The MMS flag is mandatory before a missing MMS checkpoint may be downloaded. It
 acknowledges CC BY-NC 4.0 attribution and non-commercial-use requirements; the
@@ -166,6 +183,10 @@ Run the normal first command from the StrangeUtaGame project root:
 uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --output-dir .render-work/<new-run-dir> --device auto
 ```
 
+To select the experimental Japanese-only backend, add
+`--mms-backend nextfire-ja-latn`. The normal dual-audio audit and
+`auto-fallback`/`strict` policy remain in force.
+
 The command prepares MSST vocals, creates a private initial SUG, runs Japanese
 MMS, creates an editable companion, prepares the current layout, and renders
 AV1 MP4. Its default quality policy is `auto-fallback` and its default visual
@@ -182,6 +203,10 @@ Use the staged wrapper for audit, recovery, or stage inspection:
 ```powershell
 uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --mms-model-path models/mms/model.pt --quality-policy auto-fallback --output-dir <new-private-output-dir> --visual-style spectrum --device auto
 ```
+
+Use `--mms-backend nextfire-ja-latn` instead of `--mms-model-path` when the
+explicit experimental backend is intended. Its dual-audio audit and quality
+policies are unchanged.
 
 The required options are `--manifest`, `--song-id`, and a new
 `--output-dir`. `--source`, `--sug`, and `--vocals-root` are optional overrides;

@@ -25,6 +25,11 @@ def main() -> int:
         help="Read each complete model and verify SHA-256 (default checks exact size only)",
     )
     parser.add_argument(
+        "--nextfire-mms-ja-latn",
+        action="store_true",
+        help="Explicitly include the experimental pinned NextFire Japanese Latn model check",
+    )
+    parser.add_argument(
         "--redact-paths",
         action="store_true",
         help="Replace absolute local paths in the JSON report",
@@ -35,6 +40,7 @@ def main() -> int:
         args.manifest,
         deep_verify=args.deep_verify,
         allow_custom_manifest=args.allow_custom_manifest,
+        include_nextfire_mms_ja_latn=args.nextfire_mms_ja_latn,
     )
     if args.redact_paths:
         report = redact_report_paths(report)

@@ -28,6 +28,11 @@ Read these references when needed:
   `--device cpu` when the target policy requires a fixed backend.
 - Production commands use project-owned `models/mms/model.pt` and
   `models/whisper` and do not implicitly download models.
+- `local-mms-fa` is the default alignment backend. The experimental,
+  Japanese-only NextFire option is selected only with
+  `--mms-backend nextfire-ja-latn`; it uses the fixed local
+  `models/hf/nextfire-mms-ja-latn` snapshot, never a shared HF cache, remote
+  code, or runtime download. It is not represented as better than the default.
 - Use the matched FFmpeg 8.x project tools under `tools/ffmpeg/bin`; install
   and verify them with the StrangeUtaGame integration reference. Treat 9.x as
   an explicit compatibility migration, not the default.
@@ -139,6 +144,8 @@ the exact contract.
   project-owned `models/whisper`. Do not treat `.cache` as model storage.
 - Keep decoded MSST inputs, vocal stems, runtime files, and derived evidence in
   task-owned `.cache` locations.
+- For a requested key change, `pitch_shift_audio.py` preserves safe descriptive
+  tags; FLAC also keeps attached cover art and WAV receives equivalent labels.
 - Preserve reviewed Japanese ruby. Pure katakana receives no separate ruby;
   stale pure-katakana ruby is ignored without mutating the source SUG.
 - Pronunciation validation remains optional. The staged/direct CLIs expose

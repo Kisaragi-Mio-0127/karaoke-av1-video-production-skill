@@ -50,7 +50,15 @@ try:
         normalize_language,
         pinyin_for_character,
     )
-    from scripts.karaoke_model_paths import resolve_mms_model_path
+    from scripts.karaoke_model_paths import (
+        MMS_BACKEND_LOCAL,
+        MMS_BACKEND_NEXTFIRE_JA_LATN,
+        MMS_BACKENDS,
+        NEXTFIRE_JA_LATN_REPOSITORY,
+        NEXTFIRE_JA_LATN_REVISION,
+        resolve_alignment_model_path,
+        resolve_nextfire_ja_latn_model_path,
+    )
     from scripts.sug_ruby import iter_sug_ruby_spans
 except ImportError:  # pragma: no cover - direct execution fallback
     import karaoke_timing  # type: ignore[no-redef]
@@ -76,7 +84,15 @@ except ImportError:  # pragma: no cover - direct execution fallback
         normalize_language,
         pinyin_for_character,
     )
-    from karaoke_model_paths import resolve_mms_model_path  # type: ignore[no-redef]
+    from karaoke_model_paths import (  # type: ignore[no-redef]
+        MMS_BACKEND_LOCAL,
+        MMS_BACKEND_NEXTFIRE_JA_LATN,
+        MMS_BACKENDS,
+        NEXTFIRE_JA_LATN_REPOSITORY,
+        NEXTFIRE_JA_LATN_REVISION,
+        resolve_alignment_model_path,
+        resolve_nextfire_ja_latn_model_path,
+    )
     from sug_ruby import iter_sug_ruby_spans  # type: ignore[no-redef]
 
 
@@ -84,6 +100,7 @@ SCHEMA_VERSION = "karaoke-mms-dual-audio-audit/v1"
 SCHEMA_VERSION_V2 = "karaoke-mms-dual-audio-audit/v2"
 UNIT_OVERRIDES_SCHEMA_VERSION = "karaoke-mms-unit-overrides/v1"
 MODEL_NAME = "torchaudio.pipelines.MMS_FA"
+NEXTFIRE_MODEL_NAME = NEXTFIRE_JA_LATN_REPOSITORY
 DEFAULT_VOCALS_ROOT = ROOT / ".cache" / "msst-vocals"
 _MORA_JOINING_SMALL_KANA = karaoke_timing._MORA_JOINING_SMALL_KANA
 _DEFAULT_ALLOWED_UNITS = frozenset("abcdefghijklmnopqrstuvwxyz'")
@@ -955,6 +972,10 @@ class MmsRuntime:
     allowed_units: frozenset[str]
     sample_rate: int
     model_path: Path
+    backend: str = MMS_BACKEND_LOCAL
+    model_name: str = MODEL_NAME
+    waveform_processor: Any = None
+    emission_log_softmax: bool = False
     device: Any = "cpu"
     requested_device: str = "cpu"
     resolved_device: str = "cpu"
@@ -964,25 +985,96 @@ def _validate_mms_model_access(
     model_path: Path | None,
     *,
     allow_network: bool,
+    backend: str = MMS_BACKEND_LOCAL,
 ) -> Path:
     """Resolve only a local MMS checkpoint; network fallback is unsupported."""
 
+    if backend == MMS_BACKEND_NEXTFIRE_JA_LATN:
+        if allow_network:
+            raise ValueError(
+                "nextfire-ja-latn is local-only; --allow-network is unsupported"
+            )
+        return resolve_nextfire_ja_latn_model_path(model_path)
     del allow_network
-    return resolve_mms_model_path(model_path)
+    return resolve_alignment_model_path(
+        backend,
+        explicit_mms_model=model_path,
+    )
 
 
+class _LatnCharacterTokenizer:
+    """Map existing romaji units onto the fine-tuned model's CTC vocabulary."""
+
+    def __init__(self, vocabulary: Mapping[str, int]) -> None:
+        self._vocabulary = dict(vocabulary)
+
+    def __call__(self, tokens: Sequence[str]) -> list[list[int]]:
+        encoded: list[list[int]] = []
+        for token in tokens:
+            missing = sorted(set(token) - set(self._vocabulary))
+            if missing:
+                raise ValueError(
+                    f"NextFire Latn tokenizer does not support symbols: {missing}"
+                )
+            encoded.append([self._vocabulary[character] for character in token])
+        return encoded
+
+
+class _CtcForcedAligner:
+    """Align flattened token groups with the model's actual CTC blank ID."""
+
+    def __init__(self, torch_module: Any, torchaudio_module: Any, *, blank: int) -> None:
+        self._torch = torch_module
+        self._forced_align = torchaudio_module.functional.forced_align
+        self._merge_tokens = torchaudio_module.functional.merge_tokens
+        self.blank = int(blank)
+
+    def __call__(
+        self,
+        emission: Any,
+        token_groups: Sequence[Sequence[int]],
+    ) -> list[list[Any]]:
+        lengths = [len(group) for group in token_groups]
+        flattened = [token for group in token_groups for token in group]
+        if not flattened:
+            return [[] for _ in token_groups]
+        targets = emission.new_tensor([flattened], dtype=self._torch.long)
+        aligned, scores = self._forced_align(
+            emission.unsqueeze(0),
+            targets,
+            blank=self.blank,
+        )
+        scores = scores.exp()
+        spans = self._merge_tokens(
+            aligned[0],
+            scores[0],
+            blank=self.blank,
+        )
+        if len(spans) != len(flattened):
+            raise RuntimeError(
+                "CTC forced alignment returned a different number of token "
+                f"spans ({len(spans)}) than target tokens ({len(flattened)})"
+            )
+        grouped: list[list[Any]] = []
+        offset = 0
+        for length in lengths:
+            grouped.append(spans[offset : offset + length])
+            offset += length
+        return grouped
 def load_mms_runtime(
     project_root: Path = ROOT,
     *,
     model_path: Path | None = None,
     allow_network: bool = False,
     device: str | None = None,
+    backend: str = MMS_BACKEND_LOCAL,
 ) -> MmsRuntime:
     """Load one explicitly authorized or canonical repository-local MMS model."""
 
     local_model_path = _validate_mms_model_access(
         model_path,
         allow_network=allow_network,
+        backend=backend,
     )
 
     del project_root
@@ -993,6 +1085,65 @@ def load_mms_runtime(
     from torchaudio.pipelines import MMS_FA
 
     torch_device = torch.device(selection.resolved)
+
+    if backend == MMS_BACKEND_NEXTFIRE_JA_LATN:
+        try:
+            from transformers import AutoModelForCTC, AutoProcessor
+        except ImportError as error:
+            raise RuntimeError(
+                "the nextfire-ja-latn backend requires the optional transformers "
+                "runtime in the existing project environment"
+            ) from error
+        model_dir = local_model_path.parent
+        processor = AutoProcessor.from_pretrained(
+            model_dir,
+            local_files_only=True,
+            trust_remote_code=False,
+        )
+        model = AutoModelForCTC.from_pretrained(
+            model_dir,
+            local_files_only=True,
+            trust_remote_code=False,
+        ).to(torch_device).eval()
+        if model.config.pad_token_id is None:
+            raise RuntimeError("NextFire model has no CTC pad/blank token ID")
+        blank_id = int(model.config.pad_token_id)
+        vocabulary = processor.tokenizer.get_vocab()
+        tokenizer_blank_id = processor.tokenizer.pad_token_id
+        allowed_units = frozenset(
+            token
+            for token in vocabulary
+            if len(token) == 1 and token not in {"|"}
+        )
+        if (
+            vocabulary.get("|") != 0
+            or vocabulary.get("[PAD]") != blank_id
+            or tokenizer_blank_id != blank_id
+            or blank_id == vocabulary.get("|")
+            or not 0 <= blank_id < int(model.config.vocab_size)
+            or not allowed_units >= _DEFAULT_ALLOWED_UNITS
+        ):
+            raise RuntimeError(
+                "NextFire Latn tokenizer contract changed: expected delimiter ID 0, "
+                "a distinct [PAD] CTC blank, and the lowercase romanization alphabet"
+            )
+        return MmsRuntime(
+            torch=torch,
+            torchaudio=torchaudio,
+            model=model,
+            device=torch_device,
+            requested_device=selection.requested,
+            resolved_device=selection.resolved,
+            tokenizer=_LatnCharacterTokenizer(vocabulary),
+            aligner=_CtcForcedAligner(torch, torchaudio, blank=blank_id),
+            allowed_units=allowed_units,
+            sample_rate=int(processor.feature_extractor.sampling_rate),
+            model_path=local_model_path,
+            backend=backend,
+            model_name=NEXTFIRE_MODEL_NAME,
+            waveform_processor=processor,
+            emission_log_softmax=True,
+        )
 
     download_options = {
         "model_dir": str(local_model_path.parent),
@@ -1011,6 +1162,8 @@ def load_mms_runtime(
         allowed_units=frozenset(str(unit) for unit in MMS_FA.get_dict()),
         sample_rate=int(MMS_FA.sample_rate),
         model_path=local_model_path,
+        backend=backend,
+        model_name=MODEL_NAME,
     )
 
 
@@ -1048,6 +1201,16 @@ def align_audio_units(
         sample_rate,
         runtime.sample_rate,
     )
+    if runtime.waveform_processor is not None:
+        processed = runtime.waveform_processor(
+            tensor.squeeze(0).numpy(),
+            sampling_rate=runtime.sample_rate,
+            return_tensors="pt",
+        )
+        tensor = processed.input_values
+    processed_sample_count = int(tensor.size(-1))
+    if processed_sample_count <= 0:
+        raise RuntimeError("alignment processor returned an empty waveform")
     runtime_device = getattr(
         runtime,
         "device",
@@ -1056,6 +1219,8 @@ def align_audio_units(
     tensor = tensor.to(runtime_device)
     with runtime.torch.inference_mode():
         emission = runtime.model(tensor)[0][0]
+    if runtime.emission_log_softmax:
+        emission = emission.log_softmax(dim=-1)
     if hasattr(emission, "detach"):
         emission = emission.detach()
     if hasattr(emission, "cpu"):
@@ -1063,6 +1228,12 @@ def align_audio_units(
     frame_total = int(emission.size(0))
     if frame_total <= 0:
         raise RuntimeError("MMS returned an empty emission")
+    blank_id = getattr(runtime.aligner, "blank", None)
+    if blank_id is not None and not 0 <= int(blank_id) < int(emission.size(-1)):
+        raise RuntimeError(
+            f"CTC blank ID {blank_id} is outside emission vocabulary "
+            f"size {int(emission.size(-1))}"
+        )
 
     spans = runtime.aligner(
         emission,
@@ -1072,7 +1243,13 @@ def align_audio_units(
         raise RuntimeError(
             f"MMS returned {len(spans)} token spans for {len(units)} units"
         )
-    ratio_ms = (crop_end_ms - crop_start_ms) / frame_total
+    actual_crop_start_ms, ratio_ms = _alignment_timebase_ms(
+        frame_offset=frame_offset,
+        source_sample_rate=sample_rate,
+        processed_sample_count=processed_sample_count,
+        model_sample_rate=runtime.sample_rate,
+        emission_frame_count=frame_total,
+    )
     results: list[dict[str, Any]] = []
     for source, unit_spans in zip(units, spans):
         if not unit_spans:
@@ -1090,12 +1267,29 @@ def align_audio_units(
             {
                 "unit": str(source["unit"]),
                 index_field: int(source[index_field]),
-                "start_ms": round(crop_start_ms + start_frame * ratio_ms),
-                "end_ms": round(crop_start_ms + end_frame * ratio_ms),
+                "start_ms": round(actual_crop_start_ms + start_frame * ratio_ms),
+                "end_ms": round(actual_crop_start_ms + end_frame * ratio_ms),
                 "score": round(score, 6),
             }
         )
     return results
+
+
+def _alignment_timebase_ms(
+    *,
+    frame_offset: int,
+    source_sample_rate: int,
+    processed_sample_count: int,
+    model_sample_rate: int,
+    emission_frame_count: int,
+) -> tuple[float, float]:
+    """Map model frames to the actual samples read, not the requested crop."""
+
+    if min(source_sample_rate, processed_sample_count, model_sample_rate, emission_frame_count) <= 0:
+        raise ValueError("alignment timebase values must be positive")
+    start_ms = frame_offset * 1000.0 / source_sample_rate
+    frame_ms = processed_sample_count * 1000.0 / model_sample_rate / emission_frame_count
+    return start_ms, frame_ms
 
 
 def _report_path(path: Path, project_root: Path) -> str:
@@ -1115,6 +1309,22 @@ def _load_sug(path: Path) -> dict[str, Any]:
     return document
 
 
+def _validate_dual_audio_durations(vocals_audio: Any, mix_audio: Any) -> None:
+    """Reject dual-audio evidence whose timelines differ by over one sample."""
+
+    vocals_rate = int(vocals_audio.samplerate)
+    mix_rate = int(mix_audio.samplerate)
+    vocals_duration = len(vocals_audio) / vocals_rate
+    mix_duration = len(mix_audio) / mix_rate
+    tolerance = max(1.0 / vocals_rate, 1.0 / mix_rate)
+    difference = abs(vocals_duration - mix_duration)
+    if difference > tolerance + 1e-12:
+        raise RuntimeError(
+            "MSST vocals and original mix durations differ by more than one "
+            f"source sample: {difference:.9f}s > {tolerance:.9f}s"
+        )
+
+
 def audit_track(
     track: AlbumTrack,
     album: AlbumManifest,
@@ -1126,7 +1336,7 @@ def audit_track(
     unit_overrides: Mapping[OverrideKey, str] | None = None,
     matched_override_keys: set[OverrideKey] | None = None,
 ) -> dict[str, Any]:
-    """Audit one manifest track against its MSST vocal and original MP3."""
+    """Audit one manifest track against its MSST vocal and original mix."""
 
     import soundfile as sf
 
@@ -1141,7 +1351,7 @@ def audit_track(
     for path, label in (
         (sug_path, "SUG timing project"),
         (vocals_path, "MSST vocals"),
-        (mix_path, "original MP3"),
+        (mix_path, "original mix"),
     ):
         if not path.is_file():
             raise FileNotFoundError(f"missing {label}: {path}")
@@ -1150,6 +1360,12 @@ def audit_track(
     metadata = project.get("metadata")
     metadata_language = metadata.get("language") if isinstance(metadata, dict) else None
     language = normalize_language(metadata_language, default=track.language)
+    if (
+        getattr(runtime, "backend", MMS_BACKEND_LOCAL)
+        == MMS_BACKEND_NEXTFIRE_JA_LATN
+        and language != "ja"
+    ):
+        raise ValueError("nextfire-ja-latn supports only Japanese SUG projects")
     structured_axis = schema_version == SCHEMA_VERSION_V2
     if structured_axis and language not in {"zh", "en"}:
         raise ValueError("audit v2 supports only zh/en tracks")
@@ -1171,6 +1387,7 @@ def audit_track(
         sf.SoundFile(str(vocals_path)) as vocals_audio,
         sf.SoundFile(str(mix_path)) as mix_audio,
     ):
+        _validate_dual_audio_durations(vocals_audio, mix_audio)
         vocal_duration_ms = int(
             round(len(vocals_audio) * 1000 / vocals_audio.samplerate)
         )
@@ -1447,6 +1664,7 @@ def run_audit(
     model_path: Path | None = None,
     allow_network: bool = False,
     device: str | None = None,
+    backend: str = MMS_BACKEND_LOCAL,
 ) -> dict[str, Any]:
     """Load the manifest, audit selected tracks, and write the report."""
 
@@ -1479,6 +1697,8 @@ def run_audit(
         "model_path": model_path,
         "allow_network": allow_network,
     }
+    if backend != MMS_BACKEND_LOCAL:
+        runtime_kwargs["backend"] = backend
     if device is not None:
         runtime_kwargs["device"] = device
     runtime = load_mms_runtime(project_root, **runtime_kwargs)
@@ -1527,7 +1747,19 @@ def run_audit(
         "lyric_corrections_sha256": (
             sha256_file(lyric_corrections) if lyric_corrections_provided else None
         ),
-        "model": MODEL_NAME,
+        "model": getattr(runtime, "model_name", MODEL_NAME),
+        "mms_backend": getattr(runtime, "backend", backend),
+        **(
+            {
+                "model_revision": NEXTFIRE_JA_LATN_REVISION,
+                "model_license": "AGPL-3.0",
+                "base_model_license": "CC-BY-NC-4.0",
+                "experimental_backend": True,
+            }
+            if getattr(runtime, "backend", backend)
+            == MMS_BACKEND_NEXTFIRE_JA_LATN
+            else {}
+        ),
         "model_path": _report_path(runtime.model_path, project_root),
         "requested_device": getattr(runtime, "requested_device", device or DEFAULT_DEVICE),
         "resolved_device": getattr(runtime, "resolved_device", None),
@@ -1646,6 +1878,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="MSST vocal cache root (default: .cache/msst-vocals)",
     )
     parser.add_argument(
+        "--mms-backend",
+        choices=MMS_BACKENDS,
+        default=MMS_BACKEND_LOCAL,
+        help=(
+            "alignment backend; local-mms-fa remains the default and "
+            "nextfire-ja-latn must be selected explicitly"
+        ),
+    )
+    parser.add_argument(
         "--model-path",
         type=Path,
         help="existing local MMS checkpoint; validated before model loading",
@@ -1662,6 +1903,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if (
+        args.mms_backend == MMS_BACKEND_NEXTFIRE_JA_LATN
+        and args.model_path is not None
+    ):
+        parser.error(
+            "--model-path applies only to local-mms-fa; nextfire-ja-latn uses "
+            "models/hf/nextfire-mms-ja-latn"
+        )
+    if args.mms_backend == MMS_BACKEND_NEXTFIRE_JA_LATN and args.allow_network:
+        parser.error("nextfire-ja-latn is local-only; --allow-network is unsupported")
     flattened_song_ids = (
         [song_id for group in args.song_ids for song_id in group]
         if args.song_ids
@@ -1685,6 +1936,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_path=args.model_path,
         allow_network=args.allow_network,
         device=args.device,
+        backend=args.mms_backend,
     )
     return 0
 

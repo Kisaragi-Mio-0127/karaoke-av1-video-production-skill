@@ -324,6 +324,60 @@ def test_explicit_mms_model_takes_priority_is_passed_and_recorded(
     }
 
 
+def test_nextfire_backend_is_explicit_and_forwards_pinned_local_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    env = _environment(tmp_path, monkeypatch)
+    model = env.project / "models" / "hf" / "nextfire-mms-ja-latn" / "model.safetensors"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"nextfire-model")
+    env.args.mms_backend = "nextfire-ja-latn"
+    env.args.mms_model_path = None
+    monkeypatch.setattr(
+        mms_workflow,
+        "resolve_alignment_model_path",
+        lambda backend, *, explicit_mms_model: (
+            model.resolve()
+            if backend == "nextfire-ja-latn" and explicit_mms_model is None
+            else pytest.fail("unexpected backend resolution")
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    def stop_after_capture(**kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("stop-after-nextfire-capture")
+
+    with pytest.raises(RuntimeError, match="stop-after-nextfire-capture"):
+        mms_workflow.run_mms_workflow(
+            env.args,
+            audit_runner=stop_after_capture,
+            build_runner=lambda **_kwargs: {},
+        )
+
+    assert captured["backend"] == "nextfire-ja-latn"
+    assert captured["model_path"] == model.resolve()
+    report = json.loads(
+        (env.args.output_dir / mms_workflow.REPORT_NAME).read_text(encoding="utf-8")
+    )
+    assert report["mms_backend"] == "nextfire-ja-latn"
+    assert report["mms_model"]["selection"] == "project-models:nextfire-ja-latn"
+
+
+def test_nextfire_backend_rejects_network_flag_before_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    env = _environment(tmp_path, monkeypatch)
+    env.args.mms_backend = "nextfire-ja-latn"
+    env.args.mms_model_path = None
+    env.args.allow_mms_network = True
+
+    with pytest.raises(KaraokeWorkflowError, match="local-only"):
+        mms_workflow.run_mms_workflow(env.args)
+
+    assert not env.args.output_dir.exists()
+
+
 def test_fully_empty_sidecar_creates_copy_companion_and_allows_render(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -704,6 +758,7 @@ def test_parser_requires_manifest_and_exactly_one_song_id():
     parser = mms_workflow.make_parser()
     help_text = parser.format_help()
     assert "--mms-model-path" in help_text
+    assert "--mms-backend" in help_text
     assert "--quality-policy" in help_text
     assert "--sug" in help_text
     assert "models/mms/model.pt" in help_text
@@ -729,6 +784,7 @@ def test_parser_requires_manifest_and_exactly_one_song_id():
     assert parsed.quality_policy == "strict"
     assert parsed.allow_mms_network is True
     assert parsed.allow_cover_network is True
+    assert parsed.mms_backend == "local-mms-fa"
 
 
 def test_advanced_sug_override_replaces_manifest_canonical(

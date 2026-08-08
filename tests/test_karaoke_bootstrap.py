@@ -171,6 +171,74 @@ def test_builtin_manifest_has_license_metadata_and_version_pinned_source() -> No
     assert manifest["requirements"].endswith("requirements-karaoke.pinned.txt")
 
 
+def test_builtin_nextfire_profile_is_fixed_explicit_and_dual_licensed() -> None:
+    manifest = bootstrap_module.load_manifest()
+    selected_default, default_set = bootstrap_module._select_optional_models(
+        manifest, include_nextfire_mms_ja_latn=False
+    )
+    selected, model_set = bootstrap_module._select_optional_models(
+        manifest, include_nextfire_mms_ja_latn=True
+    )
+
+    assert default_set is None
+    assert [record["name"] for record in selected_default["models"]] == [
+        "mms-forced-alignment",
+        "whisper-base",
+    ]
+    assert model_set["repository"] == bootstrap_module.NEXTFIRE_REPOSITORY
+    assert model_set["revision"] == bootstrap_module.NEXTFIRE_REVISION
+    assert model_set["destination"] == "models/hf/nextfire-mms-ja-latn"
+    assert model_set["trust_remote_code"] is False
+    assert model_set["licenses"]["model_card"]["spdx"] == "AGPL-3.0-only"
+    assert model_set["licenses"]["base_model"]["spdx"] == "CC-BY-NC-4.0"
+    assert {
+        Path(record["destination"]).name for record in model_set["files"]
+    } == bootstrap_module.NEXTFIRE_REQUIRED_FILES
+    assert len(selected["models"]) == len(selected_default["models"]) + 5
+
+
+def test_nextfire_download_plan_requires_both_license_confirmations(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = _target(tmp_path)
+    nextfire_name = "nextfire-mms-ja-latn/config.json"
+    before = _report(
+        target,
+        models=[
+            {
+                "name": nextfire_name,
+                "path": str(target / "models/hf/nextfire-mms-ja-latn/config.json"),
+                "ok": False,
+            }
+        ],
+        environment_ok=True,
+    )
+    monkeypatch.setattr(bootstrap_module, "check", lambda *_args, **_kwargs: before)
+
+    blocked = bootstrap_module.bootstrap(
+        target,
+        include_nextfire_mms_ja_latn=True,
+        accept_nextfire_agpl_3_0=True,
+        dry_run=True,
+    )
+    gate = blocked["blocked_actions"][0]
+    assert gate["name"] == bootstrap_module.NEXTFIRE_MODEL_SET
+    assert gate["required_flags"] == ["--accept-mms-cc-by-nc-4-0"]
+
+    allowed = bootstrap_module.bootstrap(
+        target,
+        include_nextfire_mms_ja_latn=True,
+        accept_nextfire_agpl_3_0=True,
+        accept_mms_cc_by_nc_4_0=True,
+        dry_run=True,
+    )
+    assert not allowed["blocked_actions"]
+    assert any(
+        action["kind"] == "download-model" and action["name"] == nextfire_name
+        for action in allowed["actions"]
+    )
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -240,6 +308,7 @@ def test_check_makes_no_active_network_request_and_defaults_to_size(
     assert report["network_policy"] == "no-active-network-requests"
     assert report["model_verification"] == "size"
     assert report["models"][0]["checksum_verified"] is None
+    assert "optional_models" not in report
     assert report["core_ok"] is True
     assert report["dependency_install"]["effective_local_source"] == str(target)
     assert "may execute" in report["dependency_install"]["behavior"]
@@ -761,6 +830,94 @@ def test_download_checksum_failure_preserves_existing_file(
         )
     assert destination.read_bytes() == b"existing"
     assert not destination.with_name("base.pt.source-license.json").exists()
+
+
+def test_nextfire_download_uses_target_cache_then_publishes_without_file_sidecar(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    payload = b"pinned-nextfire-file"
+    target = tmp_path / "StrangeUtaGame"
+    destination = target / "models/hf/nextfire-mms-ja-latn/config.json"
+    cache = target / ".cache/karaoke-bootstrap/nextfire-mms-ja-latn/cache-key"
+    record = {
+        "name": "nextfire-mms-ja-latn/config.json",
+        "url": (
+            "https://huggingface.co/NextFire/"
+            "mms-300m-ForcedAligner-karaoke-ja-Latn/resolve/"
+            f"{bootstrap_module.NEXTFIRE_REVISION}/config.json"
+        ),
+        "size": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+    class Response:
+        remaining = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _size: int) -> bytes:
+            result, self.remaining = self.remaining, b""
+            return result
+
+    monkeypatch.setattr(
+        bootstrap_module,
+        "_open_download",
+        lambda _request, *, allow_redirects: Response(),
+    )
+    result = bootstrap_module._download(
+        record,
+        destination,
+        license_accepted=True,
+        cache_path=cache,
+        allow_redirects=True,
+        write_sidecar=False,
+    )
+
+    assert result is None
+    assert cache.read_bytes() == payload
+    assert destination.read_bytes() == payload
+    assert not destination.with_name("config.json.source-license.json").exists()
+    assert not list(cache.parent.glob("*.partial"))
+
+
+def test_nextfire_provenance_is_written_and_checked_without_remote_code(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "StrangeUtaGame"
+    target.mkdir()
+    manifest = bootstrap_module.load_manifest()
+    _, model_set = bootstrap_module._select_optional_models(
+        manifest, include_nextfire_mms_ja_latn=True
+    )
+
+    path = bootstrap_module._write_nextfire_provenance(
+        target,
+        model_set,
+        agpl_accepted=True,
+        base_license_accepted=True,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    report = bootstrap_module._nextfire_provenance_report(target, model_set)
+
+    assert path == target / "models/hf/nextfire-mms-ja-latn/MODEL_PROVENANCE.json"
+    assert payload["revision"] == bootstrap_module.NEXTFIRE_REVISION
+    assert payload["trust_remote_code"] is False
+    assert payload["license_acceptance_for_download"] == {
+        "nextfire_agpl_3_0": True,
+        "facebook_mms_300m_cc_by_nc_4_0": True,
+    }
+    assert report["ok"] is True
+
+
+def test_nextfire_redirect_host_allowlist_is_exact() -> None:
+    with pytest.raises(ValueError, match="exact HTTPS host allowlist"):
+        bootstrap_module._validate_network_endpoint(
+            "https://us.aws.cdn.hf.co.evil.test/model", allow_redirect_host=True
+        )
 
 
 def test_redact_paths_removes_absolute_values(tmp_path: Path) -> None:

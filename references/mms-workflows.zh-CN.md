@@ -41,6 +41,12 @@ preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
 
 `auto-fallback`会应用可用的MMS时间，并为低置信度或未解析单元保留初始时间。它保留原始证据并报告`rendered-with-fallback`；这不代表质量通过。结构性SUG、字幕、模型和媒体失败仍会停止运行。当不确定性应保留伴侣文件并在渲染前停止时，传入`--quality-policy strict`。
 
+## 实验性NextFire日文后端
+
+`local-mms-fa`是默认值。仅在full-auto或分阶段命令中通过`--mms-backend nextfire-ja-latn`显式选择实验性、仅限日文的NextFire后端；不将其表述为优于默认后端。不要将该选项与`--mms-model-path`组合使用。
+
+该后端只加载完整的本地快照`models/hf/nextfire-mms-ja-latn`。它没有运行时下载或回退，不使用通用Hugging Face缓存，也不执行远程代码。同一套原始音频/MSST人声双音轨审核以及`auto-fallback`或`strict`质量策略仍然适用。
+
 ## 分阶段MMS路径
 
 需要恢复或检查时使用较低层的包装器：
@@ -71,6 +77,7 @@ audit -> timing override build -> companion SUG -> release decision -> render
 ## 模型与缓存边界
 
 - 将模型权重放在`models`下，绝不放在`.cache`中。
+- 可选NextFire权重只能位于`models/hf/nextfire-mms-ja-latn`，不要提交到仓库。
 - 将MSST解码输入、分离人声、运行时文件及识别/对齐缓存记录放在`.cache`下。
 - 不要隐式下载缺失的模型。
 - 在报告中记录模型和产物身份，不要使用媒体哈希作为质量或流程门禁。

@@ -22,6 +22,8 @@ python "$skillRoot/scripts/install_strangeutagame_integration.py" --target <Stra
 
 生产命令使用项目自有的`models/mms/model.pt`和`models/whisper`，不会隐式下载模型文件。缺少运行时输入时，请先执行下方的显式Bootstrap，不要让生产渲染兼任安装器。
 
+`local-mms-fa`是默认对齐后端。实验性、仅限日文的NextFire后端只能通过`--mms-backend nextfire-ja-latn`选择，不宣称优于默认后端，且只解析`models/hf/nextfire-mms-ja-latn`。运行时不会下载、不使用通用Hugging Face缓存，也不执行远程代码。
+
 ## FFmpeg与FFprobe
 
 默认支持基线是同一套构建中的FFmpeg/FFprobe 8.x；当前验证包为Gyan FFmpeg 8.0.1 Essentials。Windows放在项目专用目录：
@@ -53,6 +55,7 @@ tools\ffmpeg\bin\ffmpeg.exe -hide_banner -encoders | Select-String 'av1_nvenc|li
 ```powershell
 python scripts/check_karaoke_environment.py --target <StrangeUtaGame>
 python scripts/check_karaoke_environment.py --target <StrangeUtaGame> --deep-verify
+python scripts/check_karaoke_environment.py --target <StrangeUtaGame> --nextfire-mms-ja-latn
 ```
 
 默认使用内置Bootstrap清单。非内置的`--manifest <custom-manifest>`必须同时使用`--allow-custom-manifest`；自定义模型URL仍受内置HTTPS主机允许列表限制。普通检查默认只验证配置模型的文件大小，不会读取每个大模型的完整内容；`--deep-verify`才会读取每个完整模型并校验SHA-256。需要在机器外分享JSON报告时可使用`--redact-paths`隐藏绝对本地路径。
@@ -74,6 +77,15 @@ python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --dry-
 ```powershell
 python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --accept-mms-cc-by-nc-4-0
 ```
+
+可选NextFire快照先单独检查计划，再只在同时确认两项许可后安装：
+
+```powershell
+python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --nextfire-mms-ja-latn --dry-run
+python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --nextfire-mms-ja-latn --accept-nextfire-agpl-3-0 --accept-mms-cc-by-nc-4-0
+```
+
+权重只保存在本地，不提交到本仓库。
 
 缺失MMS检查点开始下载前必须提供MMS选项。它确认CC BY-NC 4.0的署名和非商业用途要求；下载会在检查点旁写入来源/许可证sidecar。使用自定义清单时还必须加`--allow-custom-manifest`。没有合适的本地Python时，只有追加`--allow-python-download`才允许uv下载托管解释器；默认会拒绝这类Python下载。
 
@@ -106,6 +118,8 @@ manifest + song-id + frozen lyric source + new output directory
 uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --output-dir .render-work/<new-run-dir> --device auto
 ```
 
+需要选择实验性、仅限日文的后端时，加入`--mms-backend nextfire-ja-latn`。常规双音轨审核以及`auto-fallback`/`strict`策略仍然生效。
+
 该命令准备MSST人声，生成私有初始SUG，运行日文MMS，生成可编辑companion，准备当前布局并渲染AV1 MP4。默认质量策略是`auto-fallback`，默认视觉样式是`spectrum`。低置信度回退证据会保留在报告中；人工或Agent校轴是可选项。
 
 专辑显示信息默认读取音频标签，再回退到歌曲名和歌手；变调或无标签音频可用`--metadata-source-audio`指定原始带标签音频。
@@ -117,6 +131,8 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py --manifest <ma
 ```powershell
 uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --mms-model-path models/mms/model.pt --quality-policy auto-fallback --output-dir <new-private-output-dir> --visual-style spectrum --device auto
 ```
+
+需要显式使用实验性后端时，以`--mms-backend nextfire-ja-latn`代替`--mms-model-path`。双音轨审核和质量策略不变。
 
 必需参数是`--manifest`、`--song-id`和新的`--output-dir`。`--source`、`--sug`和`--vocals-root`是可选覆盖项；省略时由项目清单默认值解析选定输入。包装器分离保存审计、构建、companion和渲染产物，不替换规范SUG，也不会静默下载缺失的MMS检查点。
 

@@ -19,6 +19,15 @@ passes `--accept-mms-cc-by-nc-4-0`, acknowledging the attribution requirement
 and non-commercial restriction. A source-and-license sidecar is written beside
 weights downloaded by the bootstrap.
 
+## Optional NextFire MMS Japanese-Latn model
+
+`NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn` is an experimental,
+Japanese-only optional alignment model. Its model card is AGPL-3.0-only; its
+base model, `facebook/mms-300m`, is CC BY-NC 4.0. The optional installer
+requires both `--accept-nextfire-agpl-3-0` and
+`--accept-mms-cc-by-nc-4-0` before downloading missing files. The weights are
+not distributed or committed by this repository.
+
 ## OpenAI Whisper model weights
 
 The optional recognition workflow can use OpenAI Whisper `base.pt`. The model

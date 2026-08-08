@@ -33,6 +33,32 @@ except ImportError:  # pragma: no cover - direct script execution
 
 ROOT = Path(__file__).resolve().parents[1]
 
+SAFE_METADATA_ALIASES = {
+    "title": ("title",),
+    "artist": ("artist",),
+    "album": ("album",),
+    "album_artist": ("album_artist", "albumartist", "album artist"),
+    "date": ("date", "year"),
+    "track": ("track", "tracknumber", "track_number"),
+    "disc": ("disc", "discnumber", "disc_number"),
+    "comment": ("comment", "comments"),
+    "genre": ("genre",),
+    "composer": ("composer",),
+    "copyright": ("copyright",),
+}
+ID3_TEXT_FRAMES = {
+    "title": "TIT2",
+    "artist": "TPE1",
+    "album": "TALB",
+    "album_artist": "TPE2",
+    "date": "TDRC",
+    "track": "TRCK",
+    "disc": "TPOS",
+    "genre": "TCON",
+    "composer": "TCOM",
+    "copyright": "TCOP",
+}
+
 
 def executable(explicit: Path | None, env_name: str, command: str) -> Path:
     """Resolve the requested member of the project FFmpeg tool pair."""
@@ -100,6 +126,129 @@ def probe(ffprobe: Path, path: Path) -> dict[str, Any]:
     if len(streams) != 1:
         raise RuntimeError(f"Expected exactly one selected audio stream in {path}")
     return streams[0]
+
+
+def probe_container(ffprobe: Path, path: Path) -> dict[str, Any]:
+    """Return container tags and stream dispositions used for safe inheritance."""
+
+    result = checked(
+        [
+            str(ffprobe),
+            "-v",
+            "error",
+            "-show_entries",
+            "format_tags:stream=index,codec_type,codec_name:stream_disposition=attached_pic",
+            "-of",
+            "json",
+            str(path),
+        ],
+        capture=True,
+    )
+    return json.loads(result.stdout or "{}")
+
+
+def inherited_metadata(container_probe: dict[str, Any]) -> dict[str, str]:
+    """Select descriptive tags without copying encoder or technical metadata."""
+
+    raw_tags = (container_probe.get("format") or {}).get("tags") or {}
+    tags = {str(key).casefold(): str(value) for key, value in raw_tags.items()}
+    inherited: dict[str, str] = {}
+    for output_key, aliases in SAFE_METADATA_ALIASES.items():
+        value = next((tags[alias] for alias in aliases if tags.get(alias)), None)
+        if value is not None:
+            inherited[output_key] = value
+    return inherited
+
+
+def attached_picture_indices(container_probe: dict[str, Any]) -> list[int]:
+    """Select only explicitly attached pictures, never source audio/video content."""
+
+    return [
+        int(stream["index"])
+        for stream in container_probe.get("streams") or []
+        if stream.get("codec_type") == "video"
+        and (stream.get("disposition") or {}).get("attached_pic") == 1
+    ]
+
+
+def build_encode_command(
+    ffmpeg: Path,
+    shifted_audio: Path,
+    source: Path,
+    candidate: Path,
+    target: Path,
+    post_gain: float,
+    source_container_probe: dict[str, Any],
+) -> tuple[list[str], dict[str, str], list[int]]:
+    """Build an encode that maps shifted audio plus safe descriptive metadata."""
+
+    metadata = inherited_metadata(source_container_probe)
+    pictures = (
+        attached_picture_indices(source_container_probe)
+        if target.suffix.lower() == ".flac"
+        else []
+    )
+    command = [
+        str(ffmpeg), "-nostdin", "-y", "-v", "warning", "-i", str(shifted_audio),
+    ]
+    if pictures:
+        command += ["-i", str(source)]
+    command += ["-map", "0:a:0"]
+    for picture_index in pictures:
+        command += ["-map", f"1:{picture_index}"]
+    command += ["-map_metadata", "-1"]
+    for key, value in metadata.items():
+        command += ["-metadata", f"{key}={value}"]
+    command += ["-af", f"volume={post_gain:.6f}dB", *output_codec(target)]
+    if pictures:
+        command += ["-c:v", "copy"]
+        for output_index in range(len(pictures)):
+            command += [f"-disposition:v:{output_index}", "attached_pic"]
+    command.append(str(candidate))
+    return command, metadata, pictures
+
+
+def _syncsafe(value: int) -> bytes:
+    if not 0 <= value < (1 << 28):
+        raise RuntimeError("ID3 metadata is too large")
+    return bytes(
+        ((value >> 21) & 0x7F, (value >> 14) & 0x7F, (value >> 7) & 0x7F, value & 0x7F)
+    )
+
+
+def write_wav_id3_metadata(path: Path, metadata: dict[str, str]) -> None:
+    """Append an ID3v2.4 RIFF chunk for WAV tags absent from LIST/INFO."""
+
+    if not metadata:
+        return
+    with path.open("rb") as stream:
+        if stream.read(4) != b"RIFF" or stream.read(4) == b"":
+            raise RuntimeError(f"Cannot add WAV metadata to a non-RIFF file: {path}")
+        if stream.read(4) != b"WAVE":
+            raise RuntimeError(f"Cannot add WAV metadata to a non-WAVE file: {path}")
+    frames: list[bytes] = []
+    for key, frame_id in ID3_TEXT_FRAMES.items():
+        if value := metadata.get(key):
+            payload = b"\x03" + value.encode("utf-8")
+            frames.append(frame_id.encode("ascii") + _syncsafe(len(payload)) + b"\0\0" + payload)
+    if value := metadata.get("comment"):
+        payload = b"\x03eng\0" + value.encode("utf-8")
+        frames.append(b"COMM" + _syncsafe(len(payload)) + b"\0\0" + payload)
+    if not frames:
+        return
+    body = b"".join(frames)
+    tag = b"ID3\x04\0\0" + _syncsafe(len(body)) + body
+    chunk = b"id3 " + len(tag).to_bytes(4, "little") + tag
+    if len(tag) % 2:
+        chunk += b"\0"
+    with path.open("ab") as stream:
+        stream.write(chunk)
+    riff_size = path.stat().st_size - 8
+    if riff_size > 0xFFFFFFFF:
+        raise RuntimeError("WAV metadata would exceed the RIFF size limit")
+    with path.open("r+b") as stream:
+        stream.seek(4)
+        stream.write(riff_size.to_bytes(4, "little"))
 
 
 def max_volume_dbfs(ffmpeg: Path, path: Path) -> float:
@@ -272,6 +421,7 @@ def main() -> None:
     ffprobe = executable(args.ffprobe, "FFPROBE", "ffprobe")
     rubberband = executable(args.rubberband, "RUBBERBAND", "rubberband")
     source_probe = probe(ffprobe, source)
+    source_container_probe = probe_container(ffprobe, source)
     if not is_formal_lossless_source(source_probe):
         codec = str(source_probe.get("codec_name") or "unknown")
         raise SystemExit(
@@ -339,14 +489,31 @@ def main() -> None:
         # needed to meet the requested peak ceiling.
         shifted_peak, shifted_sample_values = scan_finite_pcm(ffmpeg, shifted_float)
         post_gain = float(args.target_peak_dbfs) - shifted_peak
-        encode_command = [
-            str(ffmpeg), "-nostdin", "-y", "-v", "warning", "-i", str(shifted_float),
-            "-map", "0:a:0", "-af", f"volume={post_gain:.6f}dB", *output_codec(target), str(candidate),
-        ]
+        encode_command, metadata, inherited_pictures = build_encode_command(
+            ffmpeg,
+            shifted_float,
+            source,
+            candidate,
+            target,
+            post_gain,
+            source_container_probe,
+        )
         checked(encode_command)
+        if target.suffix.lower() == ".wav":
+            write_wav_id3_metadata(candidate, metadata)
 
         # Validate the encoded candidate before any accepted output is moved.
         output_probe = probe(ffprobe, candidate)
+        output_container_probe = probe_container(ffprobe, candidate)
+        actual_metadata = inherited_metadata(output_container_probe)
+        missing_metadata = {
+            key: value for key, value in metadata.items() if actual_metadata.get(key) != value
+        }
+        if missing_metadata:
+            raise RuntimeError(f"Output did not preserve metadata: {missing_metadata}")
+        output_pictures = attached_picture_indices(output_container_probe)
+        if len(output_pictures) != len(inherited_pictures):
+            raise RuntimeError("Output did not preserve all attached FLAC pictures")
         if source_probe.get("sample_rate") != output_probe.get("sample_rate"):
             raise RuntimeError("Sample rate changed")
         if source_probe.get("channels") != output_probe.get("channels"):
@@ -385,6 +552,9 @@ def main() -> None:
                 "peak_dbfs": final_peak,
                 "decoded_sample_values": final_sample_values,
                 "nonfinite_sample_values": 0,
+                "inherited_metadata": metadata,
+                "inherited_attached_picture_streams": inherited_pictures,
+                "output_attached_picture_streams": output_pictures,
             },
             "transform": {
                 "semitones": args.semitones,

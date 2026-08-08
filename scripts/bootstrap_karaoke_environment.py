@@ -28,6 +28,16 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--nextfire-mms-ja-latn",
+        action="store_true",
+        help="Explicitly install/check the experimental pinned NextFire Japanese Latn model",
+    )
+    parser.add_argument(
+        "--accept-nextfire-agpl-3-0",
+        action="store_true",
+        help="Confirm the selected NextFire model card's AGPL-3.0 terms before download",
+    )
+    parser.add_argument(
         "--allow-python-download",
         action="store_true",
         help="Allow uv to download a managed Python when no suitable local interpreter exists",
@@ -55,6 +65,8 @@ def main() -> int:
         offline=args.offline,
         allow_custom_manifest=args.allow_custom_manifest,
         accept_mms_cc_by_nc_4_0=args.accept_mms_cc_by_nc_4_0,
+        include_nextfire_mms_ja_latn=args.nextfire_mms_ja_latn,
+        accept_nextfire_agpl_3_0=args.accept_nextfire_agpl_3_0,
         allow_python_download=args.allow_python_download,
     )
     if args.redact_paths:

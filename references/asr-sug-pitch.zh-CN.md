@@ -26,3 +26,4 @@
 - 使用带符号的半音数、Rubber Band R3 Finer（`-3`），默认对人声材料启用共振峰保留（`-F`），速度比为1.0。
 - 要求探测到的源编码为FLAC或PCM；拒绝MP3、AAC和其他有损输入，防止有损源被重新标记为无损。解码为float WAV，削波时使用额外余量重试，编码经过验证的FLAC/WAV，并将音频与JSON报告一起发布。
 - 使用经过验证的变调FLAC作为对齐、预览和默认MP4 AAC-LC 320 kb/s的选定混音后源。只有显式选择`--lossless-companion`/`--lossless-output`并通过FLAC/PCM源探测后，才添加MKV FLAC伴侣文件；绝不从MP4 AAC流制作FLAC，并拒绝MP3/AAC请求。
+- 变调输出只继承安全的描述性标签。FLAC保留内嵌封面，WAV写入对应的描述性标签，不复制技术元数据。

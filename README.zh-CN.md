@@ -31,6 +31,8 @@ uv run --no-sync python --version
 
 公开运行时跟随Bootstrap的硬件探测，默认使用`--device auto`。需要固定后端时显式覆盖为`--device cuda`或`--device cpu`。生产命令使用项目自有的`models/mms/model.pt`和`models/whisper`，不会隐式下载模型。缺少输入时会直接失败，请单独准备环境。
 
+`local-mms-fa`仍是默认对齐后端。实验性、仅限日文的`NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn`只能通过`--mms-backend nextfire-ja-latn`显式选择，不宣称优于默认后端。它只读取固定本地快照`models/hf/nextfire-mms-ja-latn`，运行时不下载、不使用通用Hugging Face缓存，也不执行远程代码。
+
 公开环境工具的边界不同：
 
 1. `check_karaoke_environment.py`不会主动发起网络请求。它探测本地命令、目标`.venv`、选定的CUDA/CPU后端和项目自有模型文件。默认只检查模型精确大小；`--deep-verify`才会读取完整模型文件并做SHA-256校验。自定义清单必须加`--allow-custom-manifest`；需要隐藏绝对本地路径时可加`--redact-paths`。
@@ -42,6 +44,7 @@ uv run --no-sync python --version
 ```powershell
 python scripts/check_karaoke_environment.py --target <StrangeUtaGame>
 python scripts/check_karaoke_environment.py --target <StrangeUtaGame> --deep-verify
+python scripts/check_karaoke_environment.py --target <StrangeUtaGame> --nextfire-mms-ja-latn
 ```
 
 需要设置环境时，先查看计划，再显式执行Bootstrap：
@@ -50,7 +53,14 @@ python scripts/check_karaoke_environment.py --target <StrangeUtaGame> --deep-ver
 python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --dry-run
 python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> `
   --accept-mms-cc-by-nc-4-0
+python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> `
+  --nextfire-mms-ja-latn --dry-run
+python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> `
+  --nextfire-mms-ja-latn --accept-nextfire-agpl-3-0 `
+  --accept-mms-cc-by-nc-4-0
 ```
+
+可选NextFire安装必须同时传入两项许可确认。权重只保存在本地，不提交到本仓库；许可摘要见MMS工作流和第三方组件说明。
 
 当所需包和模型都已在本地时，可在显式Bootstrap命令上使用`--offline`。使用自定义清单时追加`--allow-custom-manifest`；需要下载托管Python时追加`--allow-python-download`。当`nvidia-smi`探测到NVIDIA硬件时，Bootstrap清单选择CUDA取向的Torch包，否则选择官方CPU索引。这种选择不会安装驱动。公开生产运行时仍默认使用`--device auto`，需要固定时显式写`--device cuda`或`--device cpu`。
 
@@ -96,6 +106,8 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
   --quality-policy auto-fallback
 ```
 
+需要显式试用实验性日文后端时，加入`--mms-backend nextfire-ja-latn`。同一套双音轨审核以及`auto-fallback`/`strict`质量策略仍然适用。
+
 执行日文分阶段MMS/恢复：
 
 ```powershell
@@ -105,6 +117,8 @@ uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
   --quality-policy auto-fallback --output-dir <new-private-output-dir> `
   --visual-style spectrum
 ```
+
+需要该实验性选项时，此处同样加入`--mms-backend nextfire-ja-latn`；不要与`--mms-model-path`一起使用。
 
 分阶段入口还接受可选的`--source`、`--sug`和`--vocals-root`覆盖参数。生产过程中不会下载缺失的MMS检查点。
 

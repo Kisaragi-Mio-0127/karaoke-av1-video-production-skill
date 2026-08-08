@@ -24,8 +24,9 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = SKILL_ROOT / "integration" / "strangeutagame"
 DEFAULT_MANIFEST = BUNDLE_ROOT / "bootstrap-assets.json"
 MODEL_HOST_ALLOWLIST = frozenset(
-    {"dl.fbaipublicfiles.com", "openaipublic.azureedge.net"}
+    {"dl.fbaipublicfiles.com", "huggingface.co", "openaipublic.azureedge.net"}
 )
+MODEL_REDIRECT_HOST_ALLOWLIST = frozenset({"us.aws.cdn.hf.co"})
 MMS_MODEL_NAME = "mms-forced-alignment"
 MMS_MODEL_DESTINATION = "models/mms/model.pt"
 MMS_MODEL_URL = (
@@ -33,6 +34,19 @@ MMS_MODEL_URL = (
     "ctc_alignment_mling_uroman/model.pt"
 )
 MMS_MODEL_LICENSE = "CC-BY-NC-4.0"
+NEXTFIRE_MODEL_SET = "nextfire-mms-ja-latn"
+NEXTFIRE_REPOSITORY = "NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn"
+NEXTFIRE_REVISION = "a5bc320991c4b97a887a0b7784a5652d4a22fd2a"
+NEXTFIRE_DESTINATION = "models/hf/nextfire-mms-ja-latn"
+NEXTFIRE_REQUIRED_FILES = frozenset(
+    {
+        "config.json",
+        "model.safetensors",
+        "processor_config.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    }
+)
 PYPI_INDEX = "https://pypi.org/simple"
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -222,6 +236,103 @@ def _validate_mms_license_identity(
         )
 
 
+def _validate_nextfire_model_set(manifest: dict[str, Any]) -> None:
+    optional_sets = manifest.get("optional_model_sets", {})
+    if not isinstance(optional_sets, dict):
+        raise ValueError("Bootstrap optional_model_sets must be an object")
+    model_set = optional_sets.get(NEXTFIRE_MODEL_SET)
+    if model_set is None:
+        return
+    if not isinstance(model_set, dict):
+        raise ValueError("NextFire optional model set must be an object")
+    if (
+        model_set.get("repository") != NEXTFIRE_REPOSITORY
+        or model_set.get("revision") != NEXTFIRE_REVISION
+        or model_set.get("destination") != NEXTFIRE_DESTINATION
+        or model_set.get("provenance") != "MODEL_PROVENANCE.json"
+        or model_set.get("trust_remote_code") is not False
+    ):
+        raise ValueError("NextFire model identity, revision, destination, or trust policy changed")
+    licenses = model_set.get("licenses")
+    if not isinstance(licenses, dict):
+        raise ValueError("NextFire model set has no license metadata")
+    model_card = licenses.get("model_card", {})
+    base_model = licenses.get("base_model", {})
+    if (
+        model_card.get("spdx") != "AGPL-3.0-only"
+        or model_card.get("requires_acceptance") is not True
+        or base_model.get("name") != "facebook/mms-300m"
+        or base_model.get("spdx") != "CC-BY-NC-4.0"
+        or base_model.get("requires_acceptance") is not True
+    ):
+        raise ValueError("NextFire AGPL-3.0 and base MMS CC-BY-NC-4.0 gates are mandatory")
+    for license_data in (model_card, base_model):
+        if not all(
+            isinstance(license_data.get(key), str) and license_data[key].strip()
+            for key in ("url", "notice")
+        ):
+            raise ValueError("NextFire license metadata is incomplete")
+        parsed = urlparse(license_data["url"])
+        if parsed.scheme != "https" or parsed.hostname != "huggingface.co":
+            raise ValueError("NextFire license evidence must use huggingface.co HTTPS")
+
+    files = model_set.get("files")
+    if not isinstance(files, list) or len(files) != len(NEXTFIRE_REQUIRED_FILES):
+        raise ValueError("NextFire model set must contain exactly the required five files")
+    seen: set[str] = set()
+    expected_url_prefix = f"https://huggingface.co/{NEXTFIRE_REPOSITORY}/resolve/{NEXTFIRE_REVISION}/"
+    for record in files:
+        if not isinstance(record, dict):
+            raise ValueError("NextFire model file record is not an object")
+        destination = _safe_posix_relative(record.get("destination", ""), "model destination")
+        destination_text = destination.as_posix()
+        prefix = f"{NEXTFIRE_DESTINATION}/"
+        if not destination_text.startswith(prefix):
+            raise ValueError("NextFire file escapes its fixed model directory")
+        basename = destination_text.removeprefix(prefix)
+        if basename not in NEXTFIRE_REQUIRED_FILES or "/" in basename or basename in seen:
+            raise ValueError(f"Unexpected or duplicate NextFire model file: {basename}")
+        url = _validate_model_url(record.get("url"), str(record.get("name")))
+        if url != expected_url_prefix + basename:
+            raise ValueError("NextFire model file URL is not pinned to the fixed revision")
+        checksum = str(record.get("sha256", "")).lower()
+        if not _SHA256_RE.fullmatch(checksum):
+            raise ValueError(f"Invalid SHA-256 for NextFire model file: {basename}")
+        if not isinstance(record.get("size"), int) or record["size"] <= 0:
+            raise ValueError(f"Invalid size for NextFire model file: {basename}")
+        record["sha256"] = checksum
+        seen.add(basename)
+    if seen != NEXTFIRE_REQUIRED_FILES:
+        raise ValueError("NextFire model set is missing required files")
+
+
+def _select_optional_models(
+    manifest: dict[str, Any], *, include_nextfire_mms_ja_latn: bool
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    if not include_nextfire_mms_ja_latn:
+        return manifest, None
+    model_set = manifest.get("optional_model_sets", {}).get(NEXTFIRE_MODEL_SET)
+    if model_set is None:
+        raise ValueError("Selected NextFire model set is absent from the bootstrap manifest")
+    combined_license = {
+        "spdx": "AGPL-3.0-only AND CC-BY-NC-4.0",
+        "url": model_set["licenses"]["model_card"]["url"],
+        "notice": (
+            model_set["licenses"]["model_card"]["notice"]
+            + " "
+            + model_set["licenses"]["base_model"]["notice"]
+        ),
+        "source_url": model_set["licenses"]["model_card"]["url"],
+        "requires_acceptance": True,
+    }
+    selected = dict(manifest)
+    selected["models"] = list(manifest["models"]) + [
+        {**record, "license": combined_license, "optional_model_set": NEXTFIRE_MODEL_SET}
+        for record in model_set["files"]
+    ]
+    return selected, model_set
+
+
 def load_manifest(
     path: Path = DEFAULT_MANIFEST, *, allow_custom_manifest: bool = False
 ) -> dict[str, Any]:
@@ -238,6 +349,7 @@ def load_manifest(
     python = manifest.get("python")
     if not isinstance(python, dict) or not isinstance(python.get("required_modules"), list):
         raise ValueError("Bootstrap manifest has no required Python modules")
+    _validate_nextfire_model_set(manifest)
 
     requirements_relative = _safe_posix_relative(
         manifest.get("requirements", ""), "requirements path"
@@ -456,18 +568,123 @@ def _model_report(
     return result
 
 
+def _nextfire_provenance_payload(
+    model_set: dict[str, Any], *, agpl_accepted: bool, base_license_accepted: bool
+) -> dict[str, Any]:
+    return {
+        "schema_version": "karaoke-model-provenance/v1",
+        "repository": model_set["repository"],
+        "revision": model_set["revision"],
+        "trust_remote_code": False,
+        "licenses": model_set["licenses"],
+        "license_acceptance_for_download": {
+            "nextfire_agpl_3_0": agpl_accepted,
+            "facebook_mms_300m_cc_by_nc_4_0": base_license_accepted,
+        },
+        "files": [
+            {
+                "name": PurePosixPath(record["destination"]).name,
+                "sha256": record["sha256"],
+                "size": record["size"],
+                "source_url": record["url"],
+            }
+            for record in model_set["files"]
+        ],
+        "download_cache": f".cache/karaoke-bootstrap/{NEXTFIRE_MODEL_SET}",
+    }
+
+
+def _nextfire_provenance_report(
+    target: Path, model_set: dict[str, Any]
+) -> dict[str, Any]:
+    path = model_destination(
+        target, f"{model_set['destination']}/{model_set['provenance']}"
+    )
+    report: dict[str, Any] = {"path": str(path), "exists": path.is_file(), "ok": False}
+    if not path.is_file():
+        report["detail"] = "missing"
+        return report
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        report["detail"] = f"unreadable: {error}"
+        return report
+    expected = _nextfire_provenance_payload(
+        model_set, agpl_accepted=False, base_license_accepted=False
+    )
+    acceptance = payload.get("license_acceptance_for_download")
+    static_keys_ok = all(
+        payload.get(key) == expected[key]
+        for key in (
+            "schema_version",
+            "repository",
+            "revision",
+            "trust_remote_code",
+            "licenses",
+            "files",
+            "download_cache",
+        )
+    )
+    acceptance_ok = isinstance(acceptance, dict) and all(
+        isinstance(acceptance.get(key), bool)
+        for key in ("nextfire_agpl_3_0", "facebook_mms_300m_cc_by_nc_4_0")
+    )
+    report["ok"] = bool(static_keys_ok and acceptance_ok)
+    report["detail"] = "valid" if report["ok"] else "metadata mismatch"
+    report["repository"] = payload.get("repository")
+    report["revision"] = payload.get("revision")
+    report["trust_remote_code"] = payload.get("trust_remote_code")
+    return report
+
+
+def _write_nextfire_provenance(
+    target: Path,
+    model_set: dict[str, Any],
+    *,
+    agpl_accepted: bool,
+    base_license_accepted: bool,
+) -> Path:
+    path = model_destination(
+        target, f"{model_set['destination']}/{model_set['provenance']}"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _nextfire_provenance_payload(
+        model_set,
+        agpl_accepted=agpl_accepted,
+        base_license_accepted=base_license_accepted,
+    )
+    payload["installed_at_utc"] = datetime.now(timezone.utc).isoformat()
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".partial", dir=path.parent
+    )
+    os.close(fd)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path
+
+
 def check(
     target: Path,
     manifest_path: Path = DEFAULT_MANIFEST,
     *,
     deep_verify: bool = False,
     allow_custom_manifest: bool = False,
+    include_nextfire_mms_ja_latn: bool = False,
 ) -> dict[str, Any]:
     """Check local state without actively initiating any network request."""
 
     target = validate_target(target)
     manifest = load_manifest(
         manifest_path, allow_custom_manifest=allow_custom_manifest
+    )
+    manifest, nextfire_model_set = _select_optional_models(
+        manifest, include_nextfire_mms_ja_latn=include_nextfire_mms_ja_latn
     )
     python = validate_target_venv(target, require_python=False)
     suffix = ".exe" if os.name == "nt" else ""
@@ -499,7 +716,14 @@ def check(
     )
     runtime["selected_backend_matches"] = runtime_backend_matches
     environment_ok = bool(runtime["ok"] and runtime_backend_matches)
-    models_ok = all(model["ok"] for model in models)
+    nextfire_provenance = (
+        _nextfire_provenance_report(target, nextfire_model_set)
+        if nextfire_model_set is not None
+        else None
+    )
+    models_ok = all(model["ok"] for model in models) and (
+        nextfire_provenance is None or nextfire_provenance["ok"]
+    )
     external_tools_ok = all(
         commands[name]["ok"] for name in ("git", "uv", "ffmpeg", "ffprobe")
     )
@@ -516,6 +740,21 @@ def check(
         "backend_selection": backend_selection,
         "runtime": runtime,
         "models": models,
+        **(
+            {
+                "optional_models": {
+                    NEXTFIRE_MODEL_SET: {
+                        "selected": True,
+                        "repository": NEXTFIRE_REPOSITORY,
+                        "revision": NEXTFIRE_REVISION,
+                        "trust_remote_code": False,
+                        "provenance": nextfire_provenance,
+                    }
+                }
+            }
+            if nextfire_model_set is not None
+            else {}
+        ),
         "dependency_install": {
             **manifest["requirements_validation"],
             "requirements": manifest["requirements_resolved"],
@@ -565,10 +804,28 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _validate_network_endpoint(url: str) -> None:
+class _AllowlistedRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow only HTTPS redirects to the exact model/CDN host allowlists."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201
+        _validate_network_endpoint(newurl, allow_redirect_host=True)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _validate_network_endpoint(url: str, *, allow_redirect_host: bool = False) -> None:
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").lower()
-    _validate_model_url(url, "download")
+    if allow_redirect_host and hostname in MODEL_REDIRECT_HOST_ALLOWLIST:
+        if (
+            parsed.scheme != "https"
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+            or parsed.fragment
+        ):
+            raise ValueError("Model redirect is outside the exact HTTPS host allowlist")
+    else:
+        _validate_model_url(url, "download")
     try:
         addresses = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
     except OSError as error:
@@ -588,13 +845,20 @@ def _validate_network_endpoint(url: str) -> None:
             raise RuntimeError(f"Model host resolved to a forbidden address class: {hostname}")
 
 
-def _open_download(request: urllib.request.Request):  # noqa: ANN201
+def _open_download(
+    request: urllib.request.Request, *, allow_redirects: bool = False
+):  # noqa: ANN201
     _validate_network_endpoint(request.full_url)
-    opener = urllib.request.build_opener(_NoRedirect())
+    opener = urllib.request.build_opener(
+        _AllowlistedRedirect() if allow_redirects else _NoRedirect()
+    )
     response = opener.open(request, timeout=60)
-    if response.geturl() != request.full_url:
+    final_url = response.geturl()
+    if not allow_redirects and final_url != request.full_url:
         response.close()
         raise RuntimeError("Model download redirect was rejected")
+    if allow_redirects:
+        _validate_network_endpoint(final_url, allow_redirect_host=True)
     return response
 
 
@@ -626,12 +890,52 @@ def _write_sidecar(
 
 
 def _download(
-    record: dict[str, Any], destination: Path, *, license_accepted: bool
-) -> Path:
+    record: dict[str, Any],
+    destination: Path,
+    *,
+    license_accepted: bool,
+    cache_path: Path | None = None,
+    allow_redirects: bool = False,
+    write_sidecar: bool = True,
+) -> Path | None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    _assert_no_reparse_chain(destination.parents[2], destination, "Model download destination")
+    try:
+        models_root = next(parent for parent in destination.parents if parent.name == "models")
+    except StopIteration as error:
+        raise ValueError("Model download destination has no models root") from error
+    target_root = models_root.parent
+    _assert_no_reparse_chain(models_root, destination, "Model download destination")
+    if cache_path is not None:
+        cache_root = target_root / ".cache"
+        try:
+            cache_path.resolve().relative_to(cache_root.resolve())
+        except ValueError as error:
+            raise ValueError("Model download cache escapes target .cache") from error
+        _assert_no_reparse_chain(target_root, cache_path, "Model download cache")
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        if (
+            cache_path.is_file()
+            and cache_path.stat().st_size == record["size"]
+            and sha256(cache_path) == record["sha256"]
+        ):
+            fd, publish_name = tempfile.mkstemp(
+                prefix=f".{destination.name}.", suffix=".partial", dir=destination.parent
+            )
+            os.close(fd)
+            publish = Path(publish_name)
+            try:
+                shutil.copyfile(cache_path, publish)
+                os.replace(publish, destination)
+            finally:
+                publish.unlink(missing_ok=True)
+            return (
+                _write_sidecar(destination, record, license_accepted=license_accepted)
+                if write_sidecar
+                else None
+            )
+    download_parent = cache_path.parent if cache_path is not None else destination.parent
     fd, temporary_name = tempfile.mkstemp(
-        prefix=f".{destination.name}.", suffix=".partial", dir=destination.parent
+        prefix=f".{destination.name}.", suffix=".partial", dir=download_parent
     )
     os.close(fd)
     temporary = Path(temporary_name)
@@ -641,7 +945,12 @@ def _download(
         request = urllib.request.Request(
             record["url"], headers={"User-Agent": "karaoke-bootstrap/1"}
         )
-        with _open_download(request) as response, temporary.open("wb") as output:
+        response_context = (
+            _open_download(request, allow_redirects=True)
+            if allow_redirects
+            else _open_download(request)
+        )
+        with response_context as response, temporary.open("wb") as output:
             for chunk in iter(lambda: response.read(1024 * 1024), b""):
                 total += len(chunk)
                 if total > record["size"]:
@@ -652,9 +961,24 @@ def _download(
             raise ValueError(
                 f"Downloaded model failed size or SHA-256 verification: {record['name']}"
             )
-        os.replace(temporary, destination)
-        return _write_sidecar(
-            destination, record, license_accepted=license_accepted
+        if cache_path is not None:
+            os.replace(temporary, cache_path)
+            fd, publish_name = tempfile.mkstemp(
+                prefix=f".{destination.name}.", suffix=".partial", dir=destination.parent
+            )
+            os.close(fd)
+            publish = Path(publish_name)
+            try:
+                shutil.copyfile(cache_path, publish)
+                os.replace(publish, destination)
+            finally:
+                publish.unlink(missing_ok=True)
+        else:
+            os.replace(temporary, destination)
+        return (
+            _write_sidecar(destination, record, license_accepted=license_accepted)
+            if write_sidecar
+            else None
         )
     finally:
         temporary.unlink(missing_ok=True)
@@ -680,6 +1004,8 @@ def bootstrap(
     offline: bool = False,
     allow_custom_manifest: bool = False,
     accept_mms_cc_by_nc_4_0: bool = False,
+    include_nextfire_mms_ja_latn: bool = False,
+    accept_nextfire_agpl_3_0: bool = False,
     allow_python_download: bool = False,
 ) -> dict[str, Any]:
     """Explicitly bootstrap the one permitted target environment and models."""
@@ -688,12 +1014,16 @@ def bootstrap(
     manifest = load_manifest(
         manifest_path, allow_custom_manifest=allow_custom_manifest
     )
+    manifest, nextfire_model_set = _select_optional_models(
+        manifest, include_nextfire_mms_ja_latn=include_nextfire_mms_ja_latn
+    )
     # Explicit bootstrap deep-verifies existing models before deciding to skip them.
     before = check(
         target,
         manifest_path,
         deep_verify=True,
         allow_custom_manifest=allow_custom_manifest,
+        include_nextfire_mms_ja_latn=include_nextfire_mms_ja_latn,
     )
     python = validate_target_venv(target, require_python=False)
     requirements = Path(manifest["requirements_resolved"])
@@ -726,11 +1056,33 @@ def bootstrap(
         )
 
     records = {record["name"]: record for record in manifest["models"]}
+    nextfire_license_gate_added = False
     for model in before["models"]:
         if model["ok"]:
             continue
         record = records[model["name"]]
         license_data = record["license"]
+        if record.get("optional_model_set") == NEXTFIRE_MODEL_SET and not (
+            accept_nextfire_agpl_3_0 and accept_mms_cc_by_nc_4_0
+        ):
+            if not nextfire_license_gate_added:
+                required_flags = []
+                if not accept_nextfire_agpl_3_0:
+                    required_flags.append("--accept-nextfire-agpl-3-0")
+                if not accept_mms_cc_by_nc_4_0:
+                    required_flags.append("--accept-mms-cc-by-nc-4-0")
+                actions.append(
+                    {
+                        "kind": "license-acceptance-required",
+                        "name": NEXTFIRE_MODEL_SET,
+                        "status": "blocked",
+                        "license": license_data["spdx"],
+                        "notice": license_data["notice"],
+                        "required_flags": required_flags,
+                    }
+                )
+                nextfire_license_gate_added = True
+            continue
         if license_data["requires_acceptance"] and not accept_mms_cc_by_nc_4_0:
             actions.append(
                 {
@@ -751,8 +1103,33 @@ def bootstrap(
                 "url": record["url"],
                 "license": license_data["spdx"],
                 "license_accepted": bool(license_data["requires_acceptance"]),
+                "optional_model_set": record.get("optional_model_set"),
             }
         )
+
+    if nextfire_model_set is not None:
+        provenance_before = (
+            before.get("optional_models", {})
+            .get(NEXTFIRE_MODEL_SET, {})
+            .get("provenance")
+        )
+        if not isinstance(provenance_before, dict) or not provenance_before.get("ok"):
+            actions.append(
+                {
+                    "kind": "write-model-provenance",
+                    "name": NEXTFIRE_MODEL_SET,
+                    "path": str(
+                        model_destination(
+                            target,
+                            f"{nextfire_model_set['destination']}/"
+                            f"{nextfire_model_set['provenance']}",
+                        )
+                    ),
+                    "repository": NEXTFIRE_REPOSITORY,
+                    "revision": NEXTFIRE_REVISION,
+                    "trust_remote_code": False,
+                }
+            )
 
     blocked_actions: list[dict[str, Any]] = [
         action for action in actions if action["kind"] == "license-acceptance-required"
@@ -813,14 +1190,52 @@ def bootstrap(
                 continue
             destination = Path(action["path"])
             record = records[action["name"]]
-            sidecar = _download(
-                record,
-                destination,
-                license_accepted=bool(record["license"]["requires_acceptance"]),
-            )
+            if record.get("optional_model_set") == NEXTFIRE_MODEL_SET:
+                cache_path = (
+                    target
+                    / ".cache"
+                    / "karaoke-bootstrap"
+                    / NEXTFIRE_MODEL_SET
+                    / record["sha256"]
+                )
+                sidecar = _download(
+                    record,
+                    destination,
+                    license_accepted=True,
+                    cache_path=cache_path,
+                    allow_redirects=True,
+                    write_sidecar=False,
+                )
+            else:
+                sidecar = _download(
+                    record,
+                    destination,
+                    license_accepted=bool(record["license"]["requires_acceptance"]),
+                )
             downloaded.append(
-                {"name": action["name"], "path": str(destination), "sidecar": str(sidecar)}
+                {
+                    "name": action["name"],
+                    "path": str(destination),
+                    "sidecar": str(sidecar) if sidecar is not None else None,
+                }
             )
+
+        if nextfire_model_set is not None:
+            nextfire_names = {record["name"] for record in nextfire_model_set["files"]}
+            ready_before = {
+                model["name"] for model in before["models"] if model["ok"]
+            }
+            ready_downloaded = {item["name"] for item in downloaded}
+            nextfire_blocked = any(
+                action.get("name") in nextfire_names for action in blocked_actions
+            )
+            if nextfire_names.issubset(ready_before | ready_downloaded) and not nextfire_blocked:
+                _write_nextfire_provenance(
+                    target,
+                    nextfire_model_set,
+                    agpl_accepted=accept_nextfire_agpl_3_0,
+                    base_license_accepted=accept_mms_cc_by_nc_4_0,
+                )
 
     after = (
         before
@@ -830,6 +1245,7 @@ def bootstrap(
             manifest_path,
             deep_verify=True,
             allow_custom_manifest=allow_custom_manifest,
+            include_nextfire_mms_ja_latn=include_nextfire_mms_ja_latn,
         )
     )
     return {

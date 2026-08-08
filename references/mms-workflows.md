@@ -62,6 +62,19 @@ SUG, subtitle, model, and media failures still stop the run. Pass
 `--quality-policy strict` when uncertainty should retain the companion and
 stop before rendering.
 
+## Experimental NextFire Japanese backend
+
+`local-mms-fa` is the default. Select the experimental Japanese-only NextFire
+backend only with `--mms-backend nextfire-ja-latn` on either the full-auto or
+staged command; it is not presented as better than the default. Do not combine
+that option with `--mms-model-path`.
+
+The backend loads only the complete local snapshot at
+`models/hf/nextfire-mms-ja-latn`. It has no runtime download or fallback,
+does not use a general Hugging Face cache, and does not execute remote code.
+The same original/MSST-vocal dual-audio audit and `auto-fallback` or `strict`
+quality policy apply.
+
 ## Staged MMS route
 
 Use the lower-level wrapper for recovery or inspection:
@@ -98,6 +111,8 @@ but does not prepare MSST, build initial timing, or invoke MMS.
 ## Model and cache boundary
 
 - Keep model weights below `models`, never `.cache`.
+- The optional NextFire weights live only at
+  `models/hf/nextfire-mms-ja-latn`; do not commit them to the repository.
 - Keep MSST decoded input, stems, runtime files, and recognition/alignment
   cache records below `.cache`.
 - Do not download a missing model implicitly.

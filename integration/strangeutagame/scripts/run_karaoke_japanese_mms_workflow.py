@@ -18,7 +18,13 @@ try:
     from scripts.karaoke_album import AlbumManifest, AlbumTrack, load_album_manifest
     from scripts.karaoke_common.device import DEFAULT_DEVICE, add_device_argument
     from scripts.karaoke_mms_editable import create_mms_editable_companion
-    from scripts.karaoke_model_paths import resolve_mms_model_path
+    from scripts.karaoke_model_paths import (
+        MMS_BACKEND_LOCAL,
+        MMS_BACKEND_NEXTFIRE_JA_LATN,
+        MMS_BACKENDS,
+        resolve_alignment_model_path,
+        resolve_mms_model_path,
+    )
     from scripts.karaoke_workflow import (
         KaraokeWorkflowError,
         WorkflowConfig,
@@ -42,7 +48,13 @@ except ImportError:  # pragma: no cover - direct script execution
     from karaoke_mms_editable import (
         create_mms_editable_companion,  # type: ignore[no-redef]
     )
-    from karaoke_model_paths import resolve_mms_model_path  # type: ignore[no-redef]
+    from karaoke_model_paths import (  # type: ignore[no-redef]
+        MMS_BACKEND_LOCAL,
+        MMS_BACKEND_NEXTFIRE_JA_LATN,
+        MMS_BACKENDS,
+        resolve_alignment_model_path,
+        resolve_mms_model_path,
+    )
     from karaoke_workflow import (  # type: ignore[no-redef]
         KaraokeWorkflowError,
         WorkflowConfig,
@@ -74,6 +86,7 @@ class Preflight:
     output_dir: Path
     mms_model: Path | None
     mms_model_selection: str
+    mms_backend: str
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
@@ -102,6 +115,14 @@ def _resolve_report_path(value: Any, project_root: Path) -> Path:
 
 def preflight(args: argparse.Namespace) -> Preflight:
     """Validate every local/input contract without creating the output tree."""
+
+    if (
+        args.mms_backend == MMS_BACKEND_NEXTFIRE_JA_LATN
+        and args.allow_mms_network
+    ):
+        raise KaraokeWorkflowError(
+            "nextfire-ja-latn is local-only; --allow-mms-network is unsupported"
+        )
 
     manifest = args.manifest.expanduser().resolve()
     album = load_album_manifest(manifest, require_five_tracks=False)
@@ -169,11 +190,26 @@ def preflight(args: argparse.Namespace) -> Preflight:
     _identity(args.font_file)
 
     try:
-        model = resolve_mms_model_path(args.mms_model_path)
+        model = (
+            resolve_mms_model_path(args.mms_model_path)
+            if args.mms_backend == MMS_BACKEND_LOCAL
+            else resolve_alignment_model_path(
+                args.mms_backend,
+                explicit_mms_model=args.mms_model_path,
+            )
+        )
     except (FileNotFoundError, ValueError) as error:
         raise KaraokeWorkflowError(str(error)) from error
     _identity(model)
-    model_selection = "explicit" if args.mms_model_path is not None else "project-models"
+    model_selection = (
+        "explicit"
+        if args.mms_model_path is not None
+        else (
+            "project-models"
+            if args.mms_backend == MMS_BACKEND_LOCAL
+            else f"project-models:{args.mms_backend}"
+        )
+    )
     return Preflight(
         album=album,
         track=track,
@@ -186,6 +222,7 @@ def preflight(args: argparse.Namespace) -> Preflight:
         output_dir=output_dir,
         mms_model=model,
         mms_model_selection=model_selection,
+        mms_backend=args.mms_backend,
     )
 
 
@@ -302,6 +339,9 @@ def _validate_audit(document: dict[str, Any], pre: Preflight) -> dict[str, Any]:
     )
     model_path = _resolve_report_path(document.get("model_path"), pre.album.project_root)
     checks["model_path"] = model_path == pre.mms_model and model_path.is_file()
+    checks["mms_backend"] = (
+        document.get("mms_backend", MMS_BACKEND_LOCAL) == pre.mms_backend
+    )
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
         raise KaraokeWorkflowError("MMS audit structure failed: " + ", ".join(failed))
@@ -423,6 +463,7 @@ def run_mms_workflow(
             "mms_allowed": bool(args.allow_mms_network),
             "cover_allowed": bool(args.allow_cover_network),
         },
+        "mms_backend": pre.mms_backend,
         "mms_model": {
             "selection": pre.mms_model_selection,
             **(_identity(pre.mms_model) if pre.mms_model is not None else {}),
@@ -446,6 +487,7 @@ def run_mms_workflow(
             allow_network=bool(args.allow_mms_network),
             sug_path=pre.sug,
             device=getattr(args, "device", DEFAULT_DEVICE),
+            backend=pre.mms_backend,
         )
         audit = _load_stage_document(audit_path, returned_audit, "MMS audit")
         report["resolved_device"] = audit.get("resolved_device")
@@ -667,6 +709,15 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source", type=Path)
     parser.add_argument("--vocals-root", type=Path)
     add_device_argument(parser)
+    parser.add_argument(
+        "--mms-backend",
+        choices=MMS_BACKENDS,
+        default=MMS_BACKEND_LOCAL,
+        help=(
+            "explicit alignment backend selection; local-mms-fa remains the "
+            "default and never falls through to another model"
+        ),
+    )
     parser.add_argument(
         "--mms-model-path",
         type=Path,

@@ -1497,6 +1497,10 @@ def run_audit(
         if source_path is not None
         else (album.deliverable_dir / "sources" / "netease_lyrics.json").resolve()
     )
+    lyric_corrections = (
+        album.deliverable_dir / "sources" / "lyric_corrections.json"
+    ).resolve()
+    lyric_corrections_provided = lyric_corrections.is_file()
     report: dict[str, Any] = {
         "schema_version": requested_schema,
         "evidence_contract": ALIGNMENT_EVIDENCE_CONTRACT,
@@ -1512,12 +1516,16 @@ def run_audit(
             if requested_schema == SCHEMA_VERSION
             else {}
         ),
-        "lyric_corrections_path": _report_path(
-            album.deliverable_dir / "sources" / "lyric_corrections.json",
-            project_root,
+        "lyric_corrections_status": (
+            "provided" if lyric_corrections_provided else "not-provided"
         ),
-        "lyric_corrections_sha256": sha256_file(
-            album.deliverable_dir / "sources" / "lyric_corrections.json"
+        "lyric_corrections_path": (
+            _report_path(lyric_corrections, project_root)
+            if lyric_corrections_provided
+            else None
+        ),
+        "lyric_corrections_sha256": (
+            sha256_file(lyric_corrections) if lyric_corrections_provided else None
         ),
         "model": MODEL_NAME,
         "model_path": _report_path(runtime.model_path, project_root),

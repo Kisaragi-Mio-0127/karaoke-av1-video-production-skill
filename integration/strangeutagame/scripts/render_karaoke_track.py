@@ -1473,6 +1473,11 @@ def _split_character_run(
     best_position: int | None = None
     best_score = float("-inf")
     for position in range(minimum, maximum + 1):
+        # A reviewed multi-character ruby span is one canonical display unit.
+        # Splitting after a linked character would place part of that ruby in
+        # each display phrase and make the renderer reject its own layout.
+        if bool(getattr(characters[position - 1], "linked_to_next", False)):
+            continue
         # A continuous katakana run is one visible lexical unit.  Splitting
         # inside it produces misleading preloaded lines even when every glyph
         # is technically still present.
@@ -1513,6 +1518,14 @@ def _split_character_run(
                     key=lambda candidate: (abs(candidate - target), candidate),
                 )
                 if not (
+                    bool(
+                        getattr(
+                            characters[position - 1],
+                            "linked_to_next",
+                            False,
+                        )
+                    )
+                    or
                     is_pure_katakana(characters[position - 1].char)
                     and is_pure_katakana(characters[position].char)
                 )
@@ -1568,13 +1581,25 @@ def _join_short_display_runs(
             continue
 
         needed = min_chars - len(current)
-        if index + 1 < len(result) and len(result[index + 1]) - needed >= min_chars:
+        if (
+            index + 1 < len(result)
+            and len(result[index + 1]) - needed >= min_chars
+            and not bool(
+                getattr(result[index + 1][needed - 1], "linked_to_next", False)
+            )
+        ):
             donor = result[index + 1]
             result[index].extend(donor[:needed])
             result[index + 1] = donor[needed:]
             index += 1
             continue
-        if index > 0 and len(result[index - 1]) - needed >= min_chars:
+        if (
+            index > 0
+            and len(result[index - 1]) - needed >= min_chars
+            and not bool(
+                getattr(result[index - 1][-needed - 1], "linked_to_next", False)
+            )
+        ):
             donor = result[index - 1]
             result[index] = donor[-needed:] + current
             result[index - 1] = donor[:-needed]

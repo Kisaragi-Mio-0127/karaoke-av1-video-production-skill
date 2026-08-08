@@ -987,6 +987,59 @@ def test_mms_audit_paths_bind_model_sug_mix_and_vocals_while_hashes_are_record_o
     validate_audit_source_hashes(audit, album, manifest, ("song",), source)
 
 
+def test_mms_audit_accepts_explicitly_missing_lyric_corrections(tmp_path):
+    project_root = tmp_path
+    deliverable_dir = project_root / "deliverables" / "new-song"
+    source_dir = deliverable_dir / "sources"
+    files = {
+        "manifest": project_root / "album.json",
+        "source": source_dir / "lyrics.json",
+        "sug": project_root / "private" / "initial.sug",
+        "mix": project_root / "audio" / "mix.flac",
+        "vocals": project_root / "evidence" / "Vocals.wav",
+        "model": project_root / "models" / "mms.pt",
+    }
+    for path in files.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"non-empty")
+    album = SimpleNamespace(
+        project_root=project_root,
+        deliverable_dir=deliverable_dir,
+        tracks=[
+            SimpleNamespace(
+                song_id="new-song",
+                timing_stem="new-song",
+                audio_path=files["mix"],
+            )
+        ],
+    )
+    audit = {
+        "manifest_path": str(files["manifest"]),
+        "lyric_source_path": str(files["source"]),
+        "lyric_corrections_status": "not-provided",
+        "lyric_corrections_path": None,
+        "lyric_corrections_sha256": None,
+        "model_path": str(files["model"]),
+        "songs": [
+            {
+                "song_id": "new-song",
+                "sug_path": str(files["sug"]),
+                "mix_path": str(files["mix"]),
+                "vocals_path": str(files["vocals"]),
+            }
+        ],
+    }
+
+    validate_audit_source_hashes(
+        audit,
+        album,
+        files["manifest"],
+        ("new-song",),
+        files["source"],
+        files["sug"],
+    )
+
+
 def test_mms_audit_path_mismatch_still_blocks(tmp_path):
     project_root = tmp_path
     deliverable_dir = project_root / "deliverables" / "album"

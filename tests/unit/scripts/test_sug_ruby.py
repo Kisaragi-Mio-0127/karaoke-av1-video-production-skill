@@ -186,6 +186,46 @@ def test_whole_sentence_fill_preserves_words_existing_ruby_and_timing():
     assert timing_fingerprint(project) == before_timing
 
 
+def test_whole_sentence_fill_restores_repeated_source_spaces():
+    sentence = Sentence(
+        id="sentence-1",
+        singer_id="singer-1",
+        characters=[
+            Character(
+                char=char,
+                check_count=0 if char.isspace() else 1,
+                timestamps=[] if char.isspace() else [1_000 + index * 100],
+            )
+            for index, char in enumerate("今日  明日")
+        ],
+    )
+    project = Project(
+        id="project-1",
+        sentences=[sentence],
+        metadata=ProjectMetadata(language="ja"),
+    )
+    before_timing = timing_fingerprint(project)
+
+    class CollapsingSentenceService:
+        def apply_to_sentence(self, analyzed, **kwargs):
+            assert kwargs["keep_existing_timetags"] is True
+            analyzed.characters.pop(3)
+            assert analyzed.text == "今日 明日"
+            start = analyzed.text.index("明")
+            analyzed.characters[start].ruby = Ruby(parts=[RubyPart(text="あ")])
+            analyzed.characters[start].linked_to_next = True
+            analyzed.characters[start + 1].ruby = Ruby(parts=[RubyPart(text="した")])
+
+    records = fill_missing_project_ruby(project, CollapsingSentenceService())
+
+    assert sentence.text == "今日  明日"
+    assert sentence.characters[4].ruby.text == "あ"
+    assert sentence.characters[4].linked_to_next is True
+    assert sentence.characters[5].ruby.text == "した"
+    assert [record["surface"] for record in records] == ["明日"]
+    assert timing_fingerprint(project) == before_timing
+
+
 def test_existing_pure_katakana_ruby_is_ignored_without_mutating_source():
     document = _raw_document("カ・ナ", {0: "か", 2: "な"})
     before = sug_hash(document)

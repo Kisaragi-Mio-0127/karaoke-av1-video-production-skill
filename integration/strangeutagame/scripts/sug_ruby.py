@@ -1077,6 +1077,60 @@ def apply_review_patches(
     }
 
 
+def _restore_analyzed_whitespace_axis(
+    original_chars: Sequence[Any],
+    analyzed_chars: Sequence[Any],
+) -> list[Any]:
+    """Reinsert source whitespace collapsed by a sentence analyzer.
+
+    Some analyzers normalize repeated spaces even though frozen lyrics treat
+    every source character as canonical. Ruby is aligned by the visible
+    character sequence, while original whitespace objects keep their timing
+    and remain outside every linked ruby span.
+    """
+
+    original_text = [str(_value(character, "char", "") or "") for character in original_chars]
+    analyzed_text = [str(_value(character, "char", "") or "") for character in analyzed_chars]
+    if original_text == analyzed_text:
+        return list(analyzed_chars)
+
+    original_visible = [
+        character
+        for character, text in zip(original_chars, original_text, strict=True)
+        if not text.isspace()
+    ]
+    analyzed_visible = [
+        character
+        for character, text in zip(analyzed_chars, analyzed_text, strict=True)
+        if not text.isspace()
+    ]
+    if [str(_value(character, "char", "") or "") for character in original_visible] != [
+        str(_value(character, "char", "") or "") for character in analyzed_visible
+    ]:
+        raise RubyValidationError(
+            "whole-sentence ruby analysis changed the visible character axis"
+        )
+
+    restored: list[Any] = []
+    visible_index = 0
+    for original, text in zip(original_chars, original_text, strict=True):
+        if text.isspace():
+            placeholder = deepcopy(original)
+            _set_value(placeholder, "linked_to_next", False)
+            restored.append(placeholder)
+        else:
+            restored.append(analyzed_visible[visible_index])
+            visible_index += 1
+    for index, character in enumerate(restored):
+        text = str(_value(character, "char", "") or "")
+        next_is_space = index + 1 < len(restored) and str(
+            _value(restored[index + 1], "char", "") or ""
+        ).isspace()
+        if text.isspace() or next_is_space:
+            _set_value(character, "linked_to_next", False)
+    return restored
+
+
 def fill_missing_project_ruby(project: Any, helper: Any) -> list[dict[str, Any]]:
     """Use a generator only for missing Japanese Ruby on a Project object."""
 
@@ -1096,11 +1150,12 @@ def fill_missing_project_ruby(project: Any, helper: Any) -> list[dict[str, Any]]
                 only_noruby=True,
                 apply_user_dict=True,
             )
-            analyzed_chars = _characters(analyzed_sentence)
+            analyzed_chars = _restore_analyzed_whitespace_axis(
+                original_chars,
+                _characters(analyzed_sentence),
+            )
             if len(analyzed_chars) != len(original_chars):
-                raise RubyValidationError(
-                    "whole-sentence ruby analysis changed the character axis"
-                )
+                raise RubyValidationError("whole-sentence ruby alignment failed")
 
             start = 0
             while start < len(analyzed_chars):

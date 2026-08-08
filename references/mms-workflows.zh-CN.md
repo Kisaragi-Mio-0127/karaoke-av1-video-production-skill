@@ -24,6 +24,8 @@ preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
 
 命令中展示的四项输入是必需项，美术参数是可选项。`--cover`可显式指定图片；否则流程会优先复用标准交付目录中的`cover.jpg`，不存在时再读取所选封面音频的内嵌图片。`--background`、`--composition`和`--cover-source-audio`是显式的高级覆盖项。
 
+首次运行的歌曲不要求提供`lyric_corrections.json`。未提供校正侧车文件时，MMS审核记录`lyric_corrections_status=not-provided`以及空路径和空哈希，并继续使用冻结歌词源；若提供该文件，其路径仍作为显式审核输入。
+
 默认值：
 
 - `--quality-policy auto-fallback`

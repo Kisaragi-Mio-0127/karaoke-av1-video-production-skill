@@ -246,6 +246,20 @@ def test_required_split_never_cuts_a_continuous_katakana_run():
         )
 
 
+def test_required_split_never_cuts_a_canonical_ruby_span():
+    sentence = _sentence("帰り道の長い線路沿いを歩いて確認事項追加")
+    start = sentence.text.index("線路")
+    sentence.characters[start].linked_to_next = True
+
+    runs = renderer._split_character_run(sentence.characters, max_chars=8)
+
+    cursor = 0
+    for run in runs[:-1]:
+        cursor += len(run)
+        assert cursor != start + 1
+        assert not sentence.characters[cursor - 1].linked_to_next
+
+
 def test_long_pure_katakana_without_lexical_boundary_stays_intact():
     sentence = _sentence("アイウエオカキクケコサシスセソタチツテト")
 

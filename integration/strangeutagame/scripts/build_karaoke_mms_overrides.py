@@ -1180,6 +1180,12 @@ def build_overrides(
             "manifest_sha256": audit.get("manifest_sha256"),
             "lyric_corrections_path": audit.get("lyric_corrections_path"),
             "lyric_corrections_sha256": audit.get("lyric_corrections_sha256"),
+            "lyric_corrections_status": audit.get(
+                "lyric_corrections_status",
+                "provided"
+                if audit.get("lyric_corrections_path") is not None
+                else "not-provided",
+            ),
             "song_inputs": {
                 song_id: {
                     "sug_path": all_report_songs[song_id].get("sug_path"),
@@ -1388,13 +1394,6 @@ def validate_audit_source_hashes(
             audit.get("lyric_source_path", audit.get("netease_lyrics_path")),
             _require_nonempty_file(resolved_source, label="lyric source"),
         ),
-        (
-            "MMS audit lyric corrections",
-            audit.get("lyric_corrections_path"),
-            _require_nonempty_file(
-                source_dir / "lyric_corrections.json", label="lyric corrections"
-            ),
-        ),
     )
     for label, reported_value, expected_path in expected_inputs:
         reported_path = _reported_file(
@@ -1403,6 +1402,42 @@ def validate_audit_source_hashes(
             label=label,
         )
         _require_same_path(reported_path, expected_path, label=label)
+
+    corrections_status = audit.get("lyric_corrections_status")
+    if corrections_status is None:
+        corrections_status = (
+            "provided"
+            if audit.get("lyric_corrections_path") is not None
+            or audit.get("lyric_corrections_sha256") is not None
+            else "not-provided"
+        )
+    if corrections_status == "provided":
+        expected_corrections = _require_nonempty_file(
+            source_dir / "lyric_corrections.json",
+            label="lyric corrections",
+        )
+        reported_corrections = _reported_file(
+            audit.get("lyric_corrections_path"),
+            project_root=project_root,
+            label="MMS audit lyric corrections",
+        )
+        _require_same_path(
+            reported_corrections,
+            expected_corrections,
+            label="MMS audit lyric corrections",
+        )
+    elif corrections_status == "not-provided":
+        if (
+            audit.get("lyric_corrections_path") is not None
+            or audit.get("lyric_corrections_sha256") is not None
+        ):
+            raise ValueError(
+                "not-provided lyric corrections must not report a path or hash"
+            )
+    else:
+        raise ValueError(
+            f"unsupported lyric_corrections_status: {corrections_status!r}"
+        )
 
     _reported_file(
         audit.get("model_path"),
@@ -1582,7 +1617,16 @@ def run_build(
         _load(resolved_output_path) if resolved_output_path.is_file() else {"songs": {}}
     )
     source = _load(resolved_source_path)
-    corrections = _load(source_dir / "lyric_corrections.json")
+    corrections_path = source_dir / "lyric_corrections.json"
+    corrections = (
+        _load(corrections_path)
+        if audit.get("lyric_corrections_status") == "provided"
+        or (
+            audit.get("lyric_corrections_status") is None
+            and corrections_path.is_file()
+        )
+        else {"songs": {}}
+    )
     line_windows, line_texts = build_line_windows(
         album,
         source,

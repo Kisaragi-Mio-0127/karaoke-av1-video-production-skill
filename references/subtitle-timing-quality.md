@@ -38,7 +38,15 @@ retain each source-space boundary as a subtle semantic gap, but the whitespace
 character itself must never become a timed or highlighted glyph event. For a
 source line without usable whitespace, measure the complete line before
 applying the character-count fallback. Never split inside a continuous
-katakana run. These are language rules, not song-specific display overrides.
+katakana run or across a canonical `linked_to_next` ruby span. Short-run
+rebalancing must preserve the same ruby-span boundary. These are language
+rules, not song-specific display overrides.
+
+Sentence-level Japanese ruby analysis may normalize a run of repeated source
+spaces internally, but the canonical SUG must restore the exact frozen
+whitespace axis before applying word ruby. Align generated ruby by the visible
+character sequence, keep every original whitespace character and timing field,
+and never link a ruby span across source whitespace.
 
 ## Ruby and editable projects
 

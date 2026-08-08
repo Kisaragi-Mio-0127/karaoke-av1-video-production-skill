@@ -368,6 +368,62 @@ def test_run_audit_forwards_and_records_single_explicit_sug(monkeypatch, tmp_pat
     assert report["songs"][0]["sug_path"] == "private/initial.sug"
 
 
+def test_run_audit_allows_first_run_without_lyric_corrections(monkeypatch, tmp_path):
+    import scripts.audit_karaoke_mms_alignment as audit_module
+
+    deliverable_dir = tmp_path / "deliverables" / "new-song"
+    source_dir = deliverable_dir / "sources"
+    source_dir.mkdir(parents=True)
+    manifest = tmp_path / "album.json"
+    source = source_dir / "lyrics.json"
+    model = tmp_path / "model.pt"
+    explicit_sug = tmp_path / "private" / "initial.sug"
+    output = tmp_path / "audit.json"
+    for path in (manifest, source, model, explicit_sug):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+
+    track = SimpleNamespace(song_id="new-song", language="ja")
+    album = SimpleNamespace(
+        project_root=tmp_path,
+        deliverable_dir=deliverable_dir,
+        tracks=(track,),
+    )
+    runtime = SimpleNamespace(
+        model_path=model,
+        requested_device="cuda",
+        resolved_device="cuda",
+    )
+    monkeypatch.setattr(audit_module, "load_album_manifest", lambda *_a, **_k: album)
+    monkeypatch.setattr(audit_module, "load_mms_runtime", lambda *_a, **_k: runtime)
+    monkeypatch.setattr(
+        audit_module,
+        "audit_track",
+        lambda *_a, **_k: {
+            "song_id": "new-song",
+            "language": "ja",
+            "language_identity": audit_module.language_identity("ja"),
+            "lines": [],
+            "unresolved": [],
+            "unresolved_count": 0,
+            "gate_ok": True,
+        },
+    )
+
+    report = audit_module.run_audit(
+        manifest_path=manifest,
+        source_path=source,
+        sug_path=explicit_sug,
+        output_path=output,
+        song_ids=("new-song",),
+        allow_partial_manifest=True,
+    )
+
+    assert report["lyric_corrections_status"] == "not-provided"
+    assert report["lyric_corrections_path"] is None
+    assert report["lyric_corrections_sha256"] is None
+
+
 def test_run_audit_rejects_ambiguous_explicit_sug_for_multiple_tracks(
     monkeypatch, tmp_path
 ):

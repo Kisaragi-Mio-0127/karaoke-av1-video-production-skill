@@ -31,6 +31,11 @@ present, followed by an embedded-cover lookup in the selected cover audio.
 `--background`, `--composition`, and `--cover-source-audio` are advanced
 explicit overrides.
 
+A first-run song does not need a `lyric_corrections.json`. When no corrections
+sidecar exists, the MMS audit records `lyric_corrections_status=not-provided`
+with null path/hash and continues from the frozen lyric source. If a corrections
+sidecar is present, its path remains an explicit audited input.
+
 Defaults:
 
 - `--quality-policy auto-fallback`

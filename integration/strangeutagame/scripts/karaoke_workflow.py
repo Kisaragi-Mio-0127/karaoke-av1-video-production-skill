@@ -23,12 +23,15 @@ try:
         parse_video_stream,
     )
     from scripts.karaoke_common.artwork import prepare_auto_artwork
-    from scripts.karaoke_common.ffmpeg_tools import resolve_ffmpeg as resolve_ffmpeg_tool
-    from scripts.render_karaoke_track import SHARED_FONT_DIR, SHARED_FONT_FILE
+    from scripts.karaoke_common.ffmpeg_tools import (
+        resolve_ffmpeg as resolve_ffmpeg_tool,
+    )
+    from scripts.karaoke_language import language_identity
     from scripts.render_karaoke_direct_av1_420_album import (
         DirectAV1420RenderError,
         validate_current_wide_compositions,
     )
+    from scripts.render_karaoke_track import SHARED_FONT_DIR, SHARED_FONT_FILE
     from scripts.render_vinyl_karaoke import validate_ass_for_render
 except ImportError:  # pragma: no cover - direct script entry points
     from inspect_karaoke_media import (  # type: ignore[no-redef]
@@ -40,13 +43,14 @@ except ImportError:  # pragma: no cover - direct script entry points
     from karaoke_common.ffmpeg_tools import (  # type: ignore[no-redef]
         resolve_ffmpeg as resolve_ffmpeg_tool,
     )
-    from render_karaoke_track import (  # type: ignore[no-redef]
-        SHARED_FONT_DIR,
-        SHARED_FONT_FILE,
-    )
+    from karaoke_language import language_identity  # type: ignore[no-redef]
     from render_karaoke_direct_av1_420_album import (  # type: ignore[no-redef]
         DirectAV1420RenderError,
         validate_current_wide_compositions,
+    )
+    from render_karaoke_track import (  # type: ignore[no-redef]
+        SHARED_FONT_DIR,
+        SHARED_FONT_FILE,
     )
     from render_vinyl_karaoke import validate_ass_for_render  # type: ignore[no-redef]
 
@@ -480,10 +484,13 @@ def enforce_language_contract(config: WorkflowConfig, ass_path: Path) -> dict[st
         raise KaraokeWorkflowError(
             f"zero-ruby contract failed: source={len(source_ruby)}, ass={len(ass_ruby)}"
         )
+    identity = language_identity(config.language)
     return {
         "language": config.language,
+        "language_identity": identity,
         "layout": config.layout,
         "ruby_policy": "disabled" if config.language in {"zh", "en"} else "reviewed",
+        "ruby_enabled": bool(identity["ruby_enabled"]),
         "source_ruby_records": len(source_ruby),
         "ass_ruby_events": len(ass_ruby),
         "pronunciation_validation": config.pronunciation_validation,

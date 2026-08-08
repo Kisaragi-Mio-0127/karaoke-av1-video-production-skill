@@ -25,6 +25,12 @@ The output root must not exist and must stay below the project's
 `.render-work` directory. The run never overwrites the manifest, frozen lyric
 source, canonical SUG, accepted media, or model files.
 
+The four shown inputs are required. Artwork is optional: `--cover` selects an
+explicit image; otherwise the standard deliverable `cover.jpg` is reused when
+present, followed by an embedded-cover lookup in the selected cover audio.
+`--background`, `--composition`, and `--cover-source-audio` are advanced
+explicit overrides.
+
 Defaults:
 
 - `--quality-policy auto-fallback`

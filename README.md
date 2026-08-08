@@ -199,6 +199,10 @@ The full-auto route prepares the current wide layout automatically. Choose
 visual. Geometry belongs to the single source of truth in
 [wide-visual-templates.md](references/wide-visual-templates.md).
 
+Artwork is automatic when a standard deliverable cover or embedded audio cover
+is available. Use `--cover` for an explicit image; composition, background, and
+cover-source-audio overrides remain optional.
+
 The default delivery is an MP4 with AV1 video, hard subtitles, and AAC-LC
 audio. Other containers and full-decode diagnostics are explicit opt-ins and
 must be verified before promotion. See

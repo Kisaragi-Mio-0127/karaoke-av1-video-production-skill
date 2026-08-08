@@ -122,6 +122,9 @@ def test_full_auto_keeps_zh_en_route_import_lazy() -> None:
     }
 
     assert not any("run_karaoke_zh_en" in name for name in top_level_imports)
+    source = path.read_text(encoding="utf-8")
+    for option in ("--cover", "--background", "--composition", "--cover-source-audio"):
+        assert option in source
 
 
 def test_installer_dry_run_is_manifest_driven(tmp_path: Path) -> None:
@@ -207,6 +210,8 @@ def test_network_and_output_expansion_require_explicit_flags() -> None:
     assert "--lossless-companion" in workflow and "action=\"store_true\"" in workflow
     assert "--full-decode" in workflow and "action=\"store_true\"" in workflow
     assert "--full-decode" in direct and "action=\"store_true\"" in direct
+    assert '"language_identity": identity' in workflow
+    assert '"ruby_enabled": bool(identity["ruby_enabled"])' in workflow
 
 
 def test_bootstrap_license_and_network_boundaries_are_publicly_declared() -> None:

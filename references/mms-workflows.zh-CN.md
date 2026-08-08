@@ -22,6 +22,8 @@ preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
 
 输出根目录必须不存在，且必须位于项目的`.render-work`目录下。运行绝不会覆盖清单、冻结歌词源、规范SUG、已接受媒体或模型文件。
 
+命令中展示的四项输入是必需项，美术参数是可选项。`--cover`可显式指定图片；否则流程会优先复用标准交付目录中的`cover.jpg`，不存在时再读取所选封面音频的内嵌图片。`--background`、`--composition`和`--cover-source-audio`是显式的高级覆盖项。
+
 默认值：
 
 - `--quality-policy auto-fallback`

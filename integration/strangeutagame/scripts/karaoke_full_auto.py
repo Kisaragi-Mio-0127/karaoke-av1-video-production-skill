@@ -110,6 +110,14 @@ def build_plan(
     source = args.source.expanduser().resolve()
     _require_file(manifest, "manifest")
     _require_file(source, "frozen lyric source")
+    for label, optional_path in (
+        ("explicit composition", args.composition),
+        ("explicit cover", args.cover),
+        ("explicit background", args.background),
+        ("explicit cover source audio", args.cover_source_audio),
+    ):
+        if optional_path is not None:
+            _require_file(optional_path.expanduser().resolve(), label)
     album = load_album_manifest(manifest, require_five_tracks=False)
     matches = [track for track in album.tracks if str(track.song_id) == args.song_id]
     if len(matches) != 1:
@@ -232,6 +240,14 @@ def _wrapper_args(plan: FullAutoPlan, args: argparse.Namespace) -> argparse.Name
         getattr(args, "device", DEFAULT_DEVICE),
     ]
     values.extend(("--quality-policy", args.quality_policy))
+    for option, value in (
+        ("--composition", args.composition),
+        ("--cover", args.cover),
+        ("--background", args.background),
+        ("--cover-source-audio", args.cover_source_audio),
+    ):
+        if value is not None:
+            values.extend((option, str(value.expanduser().resolve())))
     if plan.track.language != "ja":
         values.extend(("--language", plan.track.language))
     parsed = module.make_parser().parse_args(values)
@@ -350,6 +366,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--visual-style", choices=("vinyl", "spectrum"), default="spectrum"
     )
+    parser.add_argument("--composition", type=Path)
+    parser.add_argument("--cover", type=Path)
+    parser.add_argument("--background", type=Path)
+    parser.add_argument("--cover-source-audio", type=Path)
     return parser
 
 

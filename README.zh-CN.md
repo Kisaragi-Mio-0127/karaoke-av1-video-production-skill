@@ -129,6 +129,8 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
 
 full-auto入口会自动准备当前宽屏布局。默认频谱呈现使用`spectrum`，黑胶视觉使用`vinyl`。几何参数只在单一事实源[宽屏视觉模板](references/wide-visual-templates.zh-CN.md)中维护。
 
+存在标准交付封面或音频内嵌封面时，美术图会自动生成。需要显式图片时使用`--cover`；构图、背景和封面源音频覆盖项仍然是可选参数。
+
 默认交付物是包含AV1视频、硬字幕和AAC-LC音频的MP4。其他容器和完整解码诊断都必须显式选择，并在提升为交付物前完成验证。详见[批量发布门禁](references/batch-release-gates.zh-CN.md)和[AV1 4:2:0命令](references/av1-420-commands.zh-CN.md)。
 
 ## 仓库结构

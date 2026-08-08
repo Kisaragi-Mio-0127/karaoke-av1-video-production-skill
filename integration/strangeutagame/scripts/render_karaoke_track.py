@@ -297,6 +297,75 @@ def canonical_ruby_tokens(
     return tokens
 
 
+def _merge_legacy_adjacent_kanji_ruby_tokens(
+    tokens: Sequence[RubyToken],
+    *,
+    eligible_spans: frozenset[tuple[int, int]],
+) -> list[RubyToken]:
+    """Project reviewed legacy per-kanji readings as one render-only word span."""
+
+    merged: list[RubyToken] = []
+    index = 0
+    while index < len(tokens):
+        run = [tokens[index]]
+        while index + len(run) < len(tokens):
+            candidate = tokens[index + len(run)]
+            previous = run[-1]
+            if not (
+                (previous.start, previous.end) in eligible_spans
+                and (candidate.start, candidate.end) in eligible_spans
+                and previous.end - previous.start == 1
+                and candidate.end - candidate.start == 1
+                and previous.end == candidate.start
+                and _is_kanji_character(previous.text)
+                and _is_kanji_character(candidate.text)
+            ):
+                break
+            run.append(candidate)
+        if len(run) == 1:
+            merged.append(run[0])
+        else:
+            confidences = [token.confidence for token in run if token.confidence is not None]
+            merged.append(
+                RubyToken(
+                    text="".join(token.text for token in run),
+                    reading="".join(token.reading for token in run),
+                    start=run[0].start,
+                    end=run[-1].end,
+                    sentence_id=run[0].sentence_id,
+                    source=(
+                        run[0].source
+                        if all(token.source == run[0].source for token in run)
+                        else "mixed"
+                    ),
+                    review_status=(
+                        run[0].review_status
+                        if all(
+                            token.review_status == run[0].review_status
+                            for token in run
+                        )
+                        else "mixed"
+                    ),
+                    confidence=min(confidences, default=None),
+                    evidence=tuple(
+                        evidence for token in run for evidence in token.evidence
+                    ),
+                    model_prompt_version=(
+                        run[0].model_prompt_version
+                        if all(
+                            token.model_prompt_version == run[0].model_prompt_version
+                            for token in run
+                        )
+                        else None
+                    ),
+                    before_hash=None,
+                    after_hash=None,
+                )
+            )
+        index += len(run)
+    return merged
+
+
 def _canonical_tokens_for_phrase(
     source_sentence: Sentence,
     phrase: Sentence,
@@ -316,7 +385,17 @@ def _canonical_tokens_for_phrase(
         source_index: phrase_index
         for phrase_index, source_index in enumerate(concrete_indices)
     }
-    source_tokens = canonical_ruby_tokens(source_sentence, sidecar=sidecar)
+    legacy_single_spans = frozenset(
+        (span.start, span.end)
+        for span in iter_sug_ruby_spans(source_sentence)
+        if span.source == "legacy-existing"
+        and span.review_status == "human-locked"
+        and span.end - span.start == 1
+    )
+    source_tokens = _merge_legacy_adjacent_kanji_ruby_tokens(
+        canonical_ruby_tokens(source_sentence, sidecar=sidecar),
+        eligible_spans=legacy_single_spans,
+    )
     projected: list[RubyToken] = []
     for token in source_tokens:
         token_indices = list(range(token.start, token.end))
@@ -1301,6 +1380,62 @@ _CHINESE_PREFERRED_BREAK_AFTER_CHARS = frozenset(
 )
 
 
+def _is_kanji_character(text: str) -> bool:
+    """Return whether *text* is one CJK unified ideograph."""
+
+    if len(text) != 1:
+        return False
+    codepoint = ord(text)
+    return (
+        0x3400 <= codepoint <= 0x4DBF
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+        or 0x20000 <= codepoint <= 0x323AF
+    )
+
+
+def _is_protected_display_boundary(
+    characters: Sequence,
+    position: int,
+    *,
+    eligible_ruby_character_ids: frozenset[int] = frozenset(),
+) -> bool:
+    """Return whether a display line must not split at *position*.
+
+    Current word-level SUG projects mark a canonical span with
+    ``linked_to_next``. Older reviewed projects can instead store one reading
+    on each kanji without that link. In that legacy representation, adjacent
+    annotated kanji still form a lexical unit and must stay on the same line.
+    """
+
+    if position <= 0 or position >= len(characters):
+        return False
+    left = characters[position - 1]
+    right = characters[position]
+    if bool(getattr(left, "linked_to_next", False)):
+        return True
+    if is_pure_katakana(left.char) and is_pure_katakana(right.char):
+        return True
+    return (
+        _is_kanji_character(left.char)
+        and _is_kanji_character(right.char)
+        and id(left) in eligible_ruby_character_ids
+        and id(right) in eligible_ruby_character_ids
+    )
+
+
+def _legacy_reviewed_single_ruby_character_ids(sentence: Sentence) -> frozenset[int]:
+    """Return source-character identities eligible for legacy word projection."""
+
+    return frozenset(
+        id(sentence.characters[span.start])
+        for span in iter_sug_ruby_spans(sentence)
+        if span.source == "legacy-existing"
+        and span.review_status == "human-locked"
+        and span.end - span.start == 1
+    )
+
+
 def _validate_display_phrase_overrides(
     overrides: Mapping[str, Sequence[str]] | None,
 ) -> dict[str, tuple[str, ...]]:
@@ -1358,6 +1493,7 @@ def _split_sentence_by_display_override(
     *,
     display_phrase_overrides: Mapping[str, Sequence[str]],
     language: str = DEFAULT_LANGUAGE,
+    eligible_ruby_character_ids: frozenset[int] = frozenset(),
 ) -> list[list] | None:
     """Return original character slices for one explicit source-line override."""
 
@@ -1383,6 +1519,9 @@ def _split_sentence_by_display_override(
             f"{normalized_source_text!r} != {visible_text!r}"
         )
 
+    source_positions = {
+        id(character): index for index, character in enumerate(sentence.characters)
+    }
     result: list[list] = []
     cursor = 0
     for phrase_index, phrase in enumerate(override):
@@ -1391,10 +1530,17 @@ def _split_sentence_by_display_override(
         if (
             language == "ja"
             and phrase_index < len(override) - 1
-            and visible_characters[end - 1].linked_to_next
+            and source_positions[id(visible_characters[end])] == (
+                source_positions[id(visible_characters[end - 1])] + 1
+            )
+            and _is_protected_display_boundary(
+                visible_characters,
+                end,
+                eligible_ruby_character_ids=eligible_ruby_character_ids,
+            )
         ):
             raise ValueError(
-                "display override splits a canonical Japanese word span: "
+                "display override splits a protected Japanese display unit: "
                 f"{normalized_source_text!r} at character {end}"
             )
         cursor = end
@@ -1434,6 +1580,7 @@ def _split_character_run(
     max_chars: int,
     *,
     min_chars: int = MIN_DISPLAY_PHRASE_CHARS,
+    eligible_ruby_character_ids: frozenset[int] = frozenset(),
 ) -> list[list]:
     """Split one no-space run near a sung or grammatical phrase boundary."""
 
@@ -1455,13 +1602,10 @@ def _split_character_run(
         # A reviewed multi-character ruby span is one canonical display unit.
         # Splitting after a linked character would place part of that ruby in
         # each display phrase and make the renderer reject its own layout.
-        if bool(getattr(characters[position - 1], "linked_to_next", False)):
-            continue
-        # A continuous katakana run is one visible lexical unit.  Splitting
-        # inside it produces misleading preloaded lines even when every glyph
-        # is technically still present.
-        if is_pure_katakana(characters[position - 1].char) and is_pure_katakana(
-            characters[position].char
+        if _is_protected_display_boundary(
+            characters,
+            position,
+            eligible_ruby_character_ids=eligible_ruby_character_ids,
         ):
             continue
         left_onset = _character_onset(characters[position - 1])
@@ -1496,17 +1640,10 @@ def _split_character_run(
                     fallback_positions,
                     key=lambda candidate: (abs(candidate - target), candidate),
                 )
-                if not (
-                    bool(
-                        getattr(
-                            characters[position - 1],
-                            "linked_to_next",
-                            False,
-                        )
-                    )
-                    or
-                    is_pure_katakana(characters[position - 1].char)
-                    and is_pure_katakana(characters[position].char)
+                if not _is_protected_display_boundary(
+                    characters,
+                    position,
+                    eligible_ruby_character_ids=eligible_ruby_character_ids,
                 )
             ),
             None,
@@ -1524,6 +1661,7 @@ def _split_character_run(
             characters[best_position:],
             max_chars,
             min_chars=min_chars,
+            eligible_ruby_character_ids=eligible_ruby_character_ids,
         ),
     ]
 
@@ -1533,6 +1671,7 @@ def _join_short_display_runs(
     *,
     max_chars: int,
     min_chars: int = MIN_DISPLAY_PHRASE_CHARS,
+    eligible_ruby_character_ids: frozenset[int] = frozenset(),
 ) -> list[list]:
     """Join or rebalance short phrases until every avoidable phrase is >=6."""
 
@@ -1563,8 +1702,10 @@ def _join_short_display_runs(
         if (
             index + 1 < len(result)
             and len(result[index + 1]) - needed >= min_chars
-            and not bool(
-                getattr(result[index + 1][needed - 1], "linked_to_next", False)
+            and not _is_protected_display_boundary(
+                result[index + 1],
+                needed,
+                eligible_ruby_character_ids=eligible_ruby_character_ids,
             )
         ):
             donor = result[index + 1]
@@ -1575,8 +1716,10 @@ def _join_short_display_runs(
         if (
             index > 0
             and len(result[index - 1]) - needed >= min_chars
-            and not bool(
-                getattr(result[index - 1][-needed - 1], "linked_to_next", False)
+            and not _is_protected_display_boundary(
+                result[index - 1],
+                len(result[index - 1]) - needed,
+                eligible_ruby_character_ids=eligible_ruby_character_ids,
             )
         ):
             donor = result[index - 1]
@@ -1628,6 +1771,7 @@ def _split_sentence_character_runs(
     sentence: Sentence,
     *,
     max_chars: int,
+    eligible_ruby_character_ids: frozenset[int] = frozenset(),
 ) -> list[list]:
     """Split visible characters while treating source whitespace as boundaries."""
 
@@ -1636,13 +1780,29 @@ def _split_sentence_character_runs(
     for character in sentence.characters:
         if character.char.isspace():
             if current:
-                runs.extend(_split_character_run(current, max_chars))
+                runs.extend(
+                    _split_character_run(
+                        current,
+                        max_chars,
+                        eligible_ruby_character_ids=eligible_ruby_character_ids,
+                    )
+                )
                 current = []
             continue
         current.append(character)
     if current:
-        runs.extend(_split_character_run(current, max_chars))
-    runs = _join_short_display_runs(runs, max_chars=max_chars)
+        runs.extend(
+            _split_character_run(
+                current,
+                max_chars,
+                eligible_ruby_character_ids=eligible_ruby_character_ids,
+            )
+        )
+    runs = _join_short_display_runs(
+        runs,
+        max_chars=max_chars,
+        eligible_ruby_character_ids=eligible_ruby_character_ids,
+    )
     return _coalesce_display_runs_that_fit(runs, max_chars=max_chars)
 
 
@@ -1650,6 +1810,7 @@ def _split_japanese_whitespace_runs(
     sentence: Sentence,
     *,
     max_chars: int,
+    eligible_ruby_character_ids: frozenset[int] = frozenset(),
 ) -> list[list]:
     """Group whole whitespace-delimited semantic blocks without rebalancing glyphs."""
 
@@ -1658,12 +1819,24 @@ def _split_japanese_whitespace_runs(
     for character in sentence.characters:
         if character.char.isspace():
             if current:
-                runs.extend(_split_character_run(current, max_chars))
+                runs.extend(
+                    _split_character_run(
+                        current,
+                        max_chars,
+                        eligible_ruby_character_ids=eligible_ruby_character_ids,
+                    )
+                )
                 current = []
             continue
         current.append(character)
     if current:
-        runs.extend(_split_character_run(current, max_chars))
+        runs.extend(
+            _split_character_run(
+                current,
+                max_chars,
+                eligible_ruby_character_ids=eligible_ruby_character_ids,
+            )
+        )
     soft_max = max_chars + DISPLAY_PHRASE_SOFT_OVERRUN
     index = 1
     while index < len(runs):
@@ -1948,12 +2121,18 @@ def split_sentence_for_display(
         raise ValueError(
             f"max_chars must be at least {MIN_DISPLAY_PHRASE_CHARS}, got {max_chars}"
         )
+    eligible_ruby_character_ids = (
+        _legacy_reviewed_single_ruby_character_ids(sentence)
+        if language == "ja"
+        else frozenset()
+    )
     override_runs = _split_sentence_by_display_override(
         sentence,
         display_phrase_overrides=_validate_display_phrase_overrides(
             display_phrase_overrides
         ),
         language=language,
+        eligible_ruby_character_ids=eligible_ruby_character_ids,
     )
     if override_runs is not None:
         return [
@@ -2014,6 +2193,7 @@ def split_sentence_for_display(
         whitespace_runs = _split_japanese_whitespace_runs(
             sentence,
             max_chars=max_chars,
+            eligible_ruby_character_ids=eligible_ruby_character_ids,
         )
         if len(whitespace_runs) > 1:
             return [
@@ -2042,7 +2222,11 @@ def split_sentence_for_display(
         ) + 2 * layout.fit_outline_px
         if measured_width <= layout.slot_width:
             return [compact_sentence]
-    runs = _split_sentence_character_runs(sentence, max_chars=max_chars)
+    runs = _split_sentence_character_runs(
+        sentence,
+        max_chars=max_chars,
+        eligible_ruby_character_ids=eligible_ruby_character_ids,
+    )
     return [
         Sentence(
             singer_id=sentence.singer_id,

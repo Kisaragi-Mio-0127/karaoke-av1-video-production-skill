@@ -104,7 +104,9 @@ must not rewrite ruby or frozen display text.
 The display splitter preserves every source whitespace boundary and every
 tokenizer-produced `linked_to_next` word group. Automatic splitting,
 short-phrase rebalancing, and explicit display overrides must never cut one of
-those groups.
+those groups. For legacy reviewed SUG files without word links, project
+adjacent individually annotated kanji as one render-only word-level ruby span
+and keep that span together during display splitting.
 
 ## Existing SUG rerender
 

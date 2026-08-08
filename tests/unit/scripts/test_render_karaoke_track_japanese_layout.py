@@ -6,7 +6,7 @@ import pytest
 
 from scripts import render_karaoke_track as renderer
 from scripts.sug_ruby import is_pure_katakana
-from strange_uta_game.backend.domain import Sentence
+from strange_uta_game.backend.domain import Ruby, RubyPart, Sentence
 
 
 def _sentence(text: str) -> Sentence:
@@ -14,6 +14,157 @@ def _sentence(text: str) -> Sentence:
     for index, character in enumerate(sentence.characters):
         character.add_timestamp(index * 100)
     return sentence
+
+
+def _set_single_character_ruby(sentence: Sentence, index: int, reading: str) -> None:
+    sentence.characters[index].set_ruby(Ruby(parts=[RubyPart(text=reading)]))
+
+
+def test_legacy_per_kanji_ruby_keeps_compound_on_one_display_line():
+    sentence = Sentence.from_text("帰り道長い線路沿いを歩いて確認事項追加", "singer")
+    sen = sentence.text.index("線")
+    ro = sentence.text.index("路")
+    for index, character in enumerate(sentence.characters):
+        character.add_timestamp(index * 100 + (3_000 if index >= ro else 0))
+    _set_single_character_ruby(sentence, sen, "せん")
+    _set_single_character_ruby(sentence, ro, "ろ")
+
+    phrases = renderer.split_sentence_for_display(
+        sentence,
+        max_chars=8,
+        language="ja",
+    )
+    boundaries = {
+        (left.text[-1], right.text[0])
+        for left, right in zip(phrases, phrases[1:], strict=False)
+    }
+
+    assert ("線", "路") not in boundaries
+    assert "".join(phrase.text for phrase in phrases) == sentence.text
+
+
+def test_legacy_per_kanji_ruby_projects_as_one_word_level_ruby_span():
+    sentence = _sentence("線路")
+    _set_single_character_ruby(sentence, 0, "せん")
+    _set_single_character_ruby(sentence, 1, "ろ")
+
+    tokens = renderer._canonical_tokens_for_phrase(sentence, sentence)
+
+    assert [(token.text, token.reading, token.start, token.end) for token in tokens] == [
+        ("線路", "せんろ", 0, 2),
+    ]
+
+
+@pytest.mark.parametrize("reading", ["^", "^pause^"])
+def test_placeholder_ruby_never_projects_as_a_word_level_span(reading: str):
+    sentence = _sentence("線路")
+    _set_single_character_ruby(sentence, 0, reading)
+    _set_single_character_ruby(sentence, 1, reading)
+
+    assert renderer._canonical_tokens_for_phrase(sentence, sentence) == []
+
+
+def test_cjk_extension_h_is_recognized_as_kanji():
+    assert renderer._is_kanji_character(chr(0x31350)) is True
+
+
+def test_display_override_rejects_a_legacy_per_kanji_ruby_split():
+    sentence = _sentence("前半を保持する線路の後半も保持する")
+    line = sentence.text
+    sen = line.index("線")
+    ro = line.index("路")
+    _set_single_character_ruby(sentence, sen, "せん")
+    _set_single_character_ruby(sentence, ro, "ろ")
+
+    with pytest.raises(ValueError, match="protected Japanese display unit"):
+        renderer.split_sentence_for_display(
+            sentence,
+            max_chars=renderer.WIDE_LAYOUT.max_phrase_chars,
+            language="ja",
+            display_phrase_overrides={line: (line[:ro], line[ro:])},
+        )
+
+
+@pytest.mark.parametrize(
+    ("runs", "max_chars"),
+    [
+        (("短句", "前前前線路後後後後後"), 8),
+        (("前前前前前線路後後後", "短句"), 8),
+    ],
+)
+def test_short_phrase_rebalancing_never_moves_a_boundary_inside_legacy_ruby(
+    runs: tuple[str, str],
+    max_chars: int,
+):
+    sentences = [_sentence(text) for text in runs]
+    joined = [character for sentence in sentences for character in sentence.characters]
+    sen = next(index for index, character in enumerate(joined) if character.char == "線")
+    ro = next(index for index, character in enumerate(joined) if character.char == "路")
+    joined_sentence = Sentence(singer_id="singer", characters=joined)
+    _set_single_character_ruby(joined_sentence, sen, "せん")
+    _set_single_character_ruby(joined_sentence, ro, "ろ")
+
+    result = renderer._join_short_display_runs(
+        [list(sentence.characters) for sentence in sentences],
+        max_chars=max_chars,
+        eligible_ruby_character_ids=(
+            renderer._legacy_reviewed_single_ruby_character_ids(joined_sentence)
+        ),
+    )
+    boundaries = {
+        (left[-1].char, right[0].char)
+        for left, right in zip(result, result[1:], strict=False)
+    }
+
+    assert ("線", "路") not in boundaries
+
+
+@pytest.mark.parametrize("reading", ["^", "^pause^"])
+def test_ruby_placeholders_do_not_protect_a_display_boundary(reading: str):
+    sentence = _sentence("線路")
+    _set_single_character_ruby(sentence, 0, reading)
+    _set_single_character_ruby(sentence, 1, reading)
+
+    assert renderer._is_protected_display_boundary(sentence.characters, 1) is False
+
+
+def test_noneligible_valid_ruby_does_not_protect_a_display_boundary():
+    sentence = _sentence("線路")
+    _set_single_character_ruby(sentence, 0, "せん")
+    _set_single_character_ruby(sentence, 1, "ろ")
+
+    assert (
+        renderer._is_protected_display_boundary(
+            sentence.characters,
+            1,
+            eligible_ruby_character_ids=frozenset(),
+        )
+        is False
+    )
+
+
+def test_display_override_allows_a_source_whitespace_between_ruby_kanji():
+    sentence = _sentence("前半を保持する線 路の後半も保持する")
+    visible_text = sentence.text.replace(" ", "")
+    sen = sentence.text.index("線")
+    ro = sentence.text.index("路")
+    _set_single_character_ruby(sentence, sen, "せん")
+    _set_single_character_ruby(sentence, ro, "ろ")
+    visible_ro = visible_text.index("路")
+
+    phrases = renderer.split_sentence_for_display(
+        sentence,
+        max_chars=renderer.WIDE_LAYOUT.max_phrase_chars,
+        language="ja",
+        display_phrase_overrides={
+            visible_text: (visible_text[:visible_ro], visible_text[visible_ro:]),
+        },
+    )
+
+    assert [phrase.text for phrase in phrases] == [
+        "前半を保持する線",
+        "路の後半も保持する",
+    ]
 
 
 def test_japanese_line_that_fits_is_not_split_by_character_count(monkeypatch):
@@ -266,7 +417,7 @@ def test_display_override_never_cuts_a_canonical_word_span():
     sentence = _sentence("明日もずっと信じ続けて歩いていく")
     sentence.characters[7].linked_to_next = True
 
-    with pytest.raises(ValueError, match="canonical Japanese word span"):
+    with pytest.raises(ValueError, match="protected Japanese display unit"):
         renderer.split_sentence_for_display(
             sentence,
             max_chars=renderer.WIDE_LAYOUT.max_phrase_chars,

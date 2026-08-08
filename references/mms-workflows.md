@@ -99,6 +99,12 @@ Preserve reviewed ruby in the selected SUG. Pure katakana receives no separate
 ruby, and ignored stale pure-katakana ruby must not mutate the input. MMS timing
 must not rewrite ruby or frozen display text.
 
+Pronunciation review is optional by default. A missing, stale, machine-only,
+unapproved, or unreadable ruby-review sidecar is recorded as not performed and
+does not block rendering. Select `--pronunciation-validation required` only for
+an explicitly requested approval gate. Structural ruby/SUG errors remain hard
+failures in every mode.
+
 The default delivery is an AV1 `yuv420p` MP4 with hard subtitles and AAC-LC.
 MKV/FLAC and full null decode remain explicit opt-ins. Generate the current
 layout inside each new run and apply the ordinary subtitle, colour, stream,

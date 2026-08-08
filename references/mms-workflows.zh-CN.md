@@ -74,4 +74,6 @@ audit -> timing override build -> companion SUG -> release decision -> render
 
 在选定SUG中保留已审核注音。纯片假名不接收单独注音，被忽略的过时纯片假名注音不得改变输入。MMS时间不得改写注音或冻结显示文本。
 
+注音人工审核默认是可选项。缺失、过期、仅机器生成、未批准或无法读取的注音审核sidecar会记录为未执行，不会阻止渲染。只有显式需要批准门禁时才选择`--pronunciation-validation required`。注音或SUG结构错误在所有模式下仍是硬失败。
+
 默认交付是带硬字幕和AAC-LC的AV1`yuv420p`MP4。MKV/FLAC和完整空解码仍是显式选项。在每次新运行中生成当前布局，并在提升前执行常规字幕、颜色、流、时长和代表帧门禁。

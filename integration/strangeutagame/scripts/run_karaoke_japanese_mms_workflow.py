@@ -19,7 +19,6 @@ try:
     from scripts.karaoke_common.device import DEFAULT_DEVICE, add_device_argument
     from scripts.karaoke_mms_editable import create_mms_editable_companion
     from scripts.karaoke_model_paths import resolve_mms_model_path
-    from scripts.render_karaoke_track import SHARED_FONT_DIR, SHARED_FONT_FILE
     from scripts.karaoke_workflow import (
         KaraokeWorkflowError,
         WorkflowConfig,
@@ -27,6 +26,7 @@ try:
         run_workflow,
         sha256_file,
     )
+    from scripts.render_karaoke_track import SHARED_FONT_DIR, SHARED_FONT_FILE
 except ImportError:  # pragma: no cover - direct script execution
     import audit_karaoke_mms_alignment as mms_audit  # type: ignore[no-redef]
     import build_karaoke_mms_overrides as mms_build  # type: ignore[no-redef]
@@ -43,16 +43,16 @@ except ImportError:  # pragma: no cover - direct script execution
         create_mms_editable_companion,  # type: ignore[no-redef]
     )
     from karaoke_model_paths import resolve_mms_model_path  # type: ignore[no-redef]
-    from render_karaoke_track import (  # type: ignore[no-redef]
-        SHARED_FONT_DIR,
-        SHARED_FONT_FILE,
-    )
     from karaoke_workflow import (  # type: ignore[no-redef]
         KaraokeWorkflowError,
         WorkflowConfig,
         print_result,
         run_workflow,
         sha256_file,
+    )
+    from render_karaoke_track import (  # type: ignore[no-redef]
+        SHARED_FONT_DIR,
+        SHARED_FONT_FILE,
     )
 
 
@@ -677,7 +677,7 @@ def make_parser() -> argparse.ArgumentParser:
         default="strict",
         help=(
             "strict blocks rendering when quality evidence fails; auto-fallback "
-            "renders a structurally valid editable companion for review"
+            "records the uncertainty and renders the structurally valid companion"
         ),
     )
     parser.add_argument(

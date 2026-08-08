@@ -93,6 +93,7 @@ def test_japanese_full_auto_calls_single_msst_timing_and_mms(
     assert report["status"] == "rendered-with-fallback"
     assert report["stages"][1]["status"] == "quality-fallback"
     assert captured["args"].quality_policy == "auto-fallback"
+    assert captured["args"].pronunciation_validation == "optional"
     assert captured["args"].sug == env.project / ".render-work" / "run" / "initial" / "timing" / "song_slug.sug"
     assert captured["args"].recognition_audits == []
 

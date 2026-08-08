@@ -51,6 +51,7 @@ from scripts.karaoke_common.layout import (  # noqa: E402
 )
 from scripts.karaoke_common.pronunciation import (  # noqa: E402
     PRONUNCIATION_VALIDATION_MODES,
+    load_pronunciation_sidecar,
     validate_pronunciation,
 )
 from scripts.karaoke_common.visuals import (  # noqa: E402
@@ -105,37 +106,6 @@ __all__ = [
     "render_karaoke_video",
 ]
 
-
-def _require_reviewed_canonical_ruby(
-    project: Any,
-    sidecar: Mapping[str, Any] | None,
-    canonical_spans: list[Any],
-) -> None:
-    """Require the reviewed sidecar before rendering any canonical ruby."""
-
-    if not canonical_spans:
-        return
-    if sidecar is None:
-        raise RubyValidationError(
-            "canonical ruby spans require a reviewed ruby sidecar"
-        )
-    if not callable(validate_review_sidecar):
-        raise RubyValidationError(
-            "canonical ruby review validator is unavailable"
-        )
-    try:
-        errors = validate_review_sidecar(project, sidecar)
-    except RubyValidationError:
-        raise
-    except Exception as error:
-        raise RubyValidationError(
-            f"canonical ruby review validation failed: {error}"
-        ) from error
-    if errors:
-        raise RubyValidationError(
-            "canonical ruby review sidecar rejected: "
-            + "; ".join(str(error) for error in errors)
-        )
 
 FONT_FAMILY = "HarmonyOS Sans SC"
 SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
@@ -1415,9 +1385,18 @@ def _split_sentence_by_display_override(
 
     result: list[list] = []
     cursor = 0
-    for phrase in override:
+    for phrase_index, phrase in enumerate(override):
         end = cursor + len(phrase)
         result.append(visible_characters[cursor:end])
+        if (
+            language == "ja"
+            and phrase_index < len(override) - 1
+            and visible_characters[end - 1].linked_to_next
+        ):
+            raise ValueError(
+                "display override splits a canonical Japanese word span: "
+                f"{normalized_source_text!r} at character {end}"
+            )
         cursor = end
     if cursor != len(visible_characters):
         raise ValueError(
@@ -4579,10 +4558,10 @@ def main(argv: list[str] | None = None) -> int:
         except KaraokeColorPlanError as error:
             raise RubyValidationError(str(error)) from error
     ruby_sidecar_path = sug_path.with_suffix(".ruby-review.json")
-    ruby_sidecar = (
-        load_review_sidecar(ruby_sidecar_path)
-        if ruby_sidecar_path.exists()
-        else None
+    ruby_sidecar = load_pronunciation_sidecar(
+        ruby_sidecar_path,
+        mode=args.pronunciation_validation,
+        loader=load_review_sidecar,
     )
     releases = parse_release_overrides(args.release)
     if (args.timing_overrides is None) != (args.song_id is None):

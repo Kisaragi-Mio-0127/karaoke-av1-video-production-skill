@@ -4,12 +4,41 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 from scripts.karaoke_language import DEFAULT_LANGUAGE, normalize_language
 from scripts.sug_ruby import RubyValidationError, iter_sug_ruby_spans, validate_sug_ruby
 
 PRONUNCIATION_VALIDATION_MODES = ("optional", "required", "off")
+
+
+def load_pronunciation_sidecar(
+    path: str | Path,
+    *,
+    mode: str,
+    loader: Callable[[str | Path], Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    """Load review evidence without turning an optional file into a hard gate."""
+
+    if mode not in PRONUNCIATION_VALIDATION_MODES:
+        raise ValueError(f"unsupported pronunciation validation mode: {mode!r}")
+    sidecar_path = Path(path)
+    if mode == "off" or not sidecar_path.is_file():
+        return None
+    try:
+        return loader(sidecar_path)
+    except Exception as error:
+        if mode == "required":
+            if isinstance(error, RubyValidationError):
+                raise
+            raise RubyValidationError(
+                f"canonical ruby review sidecar could not be loaded: {error}"
+            ) from error
+        return {
+            "records": [],
+            "_optional_load_error": f"{type(error).__name__}: {error}",
+        }
 
 
 @dataclass(frozen=True)
@@ -107,19 +136,52 @@ def validate_pronunciation(
             sidecar_record_count=0,
         )
     if sidecar_validator is None:
-        raise RubyValidationError("canonical ruby review validator is unavailable")
+        if mode == "required":
+            raise RubyValidationError("canonical ruby review validator is unavailable")
+        return PronunciationValidationResult(
+            mode=mode,
+            status="not-performed",
+            reason="optional-sidecar-validator-unavailable",
+            language=language,
+            source_ruby_count=source_count,
+            rendered_ruby_count=rendered_count,
+            sidecar_present=True,
+            sidecar_record_count=record_count,
+        )
     try:
         errors = sidecar_validator(source, sidecar)
-    except RubyValidationError:
-        raise
     except Exception as error:
+        if mode == "optional":
+            return PronunciationValidationResult(
+                mode=mode,
+                status="not-performed",
+                reason="optional-sidecar-validation-error",
+                language=language,
+                source_ruby_count=source_count,
+                rendered_ruby_count=rendered_count,
+                sidecar_present=True,
+                sidecar_record_count=record_count,
+            )
+        if isinstance(error, RubyValidationError):
+            raise
         raise RubyValidationError(
             f"canonical ruby review validation failed: {error}"
         ) from error
     if errors:
-        raise RubyValidationError(
-            "canonical ruby review sidecar rejected: "
-            + "; ".join(str(error) for error in errors)
+        if mode == "required":
+            raise RubyValidationError(
+                "canonical ruby review sidecar rejected: "
+                + "; ".join(str(error) for error in errors)
+            )
+        return PronunciationValidationResult(
+            mode=mode,
+            status="not-performed",
+            reason="optional-sidecar-rejected",
+            language=language,
+            source_ruby_count=source_count,
+            rendered_ruby_count=rendered_count,
+            sidecar_present=True,
+            sidecar_record_count=record_count,
         )
     if mode == "required" and source_count < 1:
         raise RubyValidationError(

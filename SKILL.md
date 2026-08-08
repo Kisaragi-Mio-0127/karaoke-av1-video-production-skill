@@ -87,6 +87,11 @@ only and must never overwrite existing reviewed ruby. Manual or Agent review of
 the generated companion remains optional. MMS may adjust timing/alignment, but
 must not rewrite ruby or frozen display text.
 
+The display splitter preserves every source whitespace boundary and every
+tokenizer-produced `linked_to_next` word group. Automatic splitting,
+short-phrase rebalancing, and explicit display overrides must never cut one of
+those groups.
+
 ## Existing SUG rerender
 
 Use the normal route when an existing or manually adjusted SUG should be
@@ -129,7 +134,10 @@ the exact contract.
   stale pure-katakana ruby is ignored without mutating the source SUG.
 - Pronunciation validation remains optional. The staged/direct CLIs expose
   `--pronunciation-validation {off,optional,required}`; use `required` only
-  when that gate is explicitly requested.
+  when that gate is explicitly requested. In `optional` mode, a missing,
+  stale, machine-only, unapproved, or unreadable review sidecar is reported as
+  not performed and never blocks rendering; malformed SUG/ruby structure still
+  fails in every mode.
 - Resolve singer colours from explicit SUG singer metadata and the shared
   ordered colour plan. Keep per-song decisions outside shared code.
 

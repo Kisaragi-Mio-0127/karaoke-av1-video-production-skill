@@ -13,7 +13,7 @@ Track every generation through:
 
 ```text
 source lyrics -> candidate ruby fill -> canonical SUG
--> contextual ruby review/correction -> timing and phrase decisions
+-> optional contextual ruby review/correction -> timing and phrase decisions
 -> read-only renderer -> ASS and render report
 -> encoded video -> promoted or archived output
 ```
@@ -21,8 +21,8 @@ source lyrics -> candidate ruby fill -> canonical SUG
 Record a generation ID or equivalent evidence at every layer. For dedicated
 Japanese MMS, any `*_sha256` value is report-only and never a check,
 gate, exception, or exit input. The canonical SUG is the editable source of
-truth: candidate generation fills missing ruby, review writes accepted
-corrections, and rendering reads the reviewed project. The reviewed phrases
+truth: candidate generation fills missing ruby, optional review may write accepted
+corrections, and rendering reads the selected project. The display phrases
 must recompose each normalized source line exactly. Identify overrides by
 complete source line plus stable segment or occurrence identity, assert their
 hit counts, and reject unreachable, duplicate, or overly broad rules.
@@ -38,8 +38,9 @@ retain each source-space boundary as a subtle semantic gap, but the whitespace
 character itself must never become a timed or highlighted glyph event. For a
 source line without usable whitespace, measure the complete line before
 applying the character-count fallback. Never split inside a continuous
-katakana run or across a canonical `linked_to_next` ruby span. Short-run
-rebalancing must preserve the same ruby-span boundary. These are language
+katakana run or across a canonical `linked_to_next` word span. Short-run
+rebalancing and explicit display overrides must preserve the same word-span
+boundary. These are language
 rules, not song-specific display overrides.
 
 Sentence-level Japanese ruby analysis may normalize a run of repeated source
@@ -89,14 +90,16 @@ absolute-path/schema/song-language/token-index/timeline preflight
 -> render gate -> new ASS/report/video output
 ```
 
-The audit gate, override-build gate, absolute-path/schema/song-language,
-token/index, timeline, and ASS/report/media semantics must pass before
-rendering. The wrapper creates
+Absolute-path/schema/song-language, token/index, timeline, and
+ASS/report/media structural semantics must pass before rendering. Under
+`strict`, the automatic audit and override-build quality gates must also pass;
+under `auto-fallback`, their uncertainty is recorded and usable initial timing
+continues to rendering without human approval. The wrapper creates
 `audit/`, `build/`, and `render/`; these are its only workflow subdirectories. Only
 reviewed `visual_release_overrides_ms` from `build/timing_overrides.json` enter
 `render/`. MMS audit data, other build values, and separated vocals remain
-timing evidence, not delivery tracks. A failed gate is review-only and must not
-create or replace a release video. If the dedicated entry is absent, do not
+timing evidence, not delivery tracks. A failed structural gate must not create
+or replace a release video. If the dedicated entry is absent, do not
 recreate it by adding MMS flags to another workflow.
 
 Independent ASR is a separate optional lane from forced alignment. The

@@ -64,6 +64,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.karaoke_common.pronunciation import (  # noqa: E402
     PRONUNCIATION_VALIDATION_MODES,
+    load_pronunciation_sidecar,
     validate_pronunciation,
 )
 from scripts.sug_ruby import (  # noqa: E402
@@ -120,7 +121,11 @@ def validate_editable_pronunciation_sources(
         checked.add(path)
         document = json.loads(path.read_text(encoding="utf-8"))
         sidecar_path = path.with_suffix(".ruby-review.json")
-        sidecar = load_review_sidecar(sidecar_path) if sidecar_path.is_file() else None
+        sidecar = load_pronunciation_sidecar(
+            sidecar_path,
+            mode=mode,
+            loader=load_review_sidecar,
+        )
         try:
             result = validate_pronunciation(
                 document,

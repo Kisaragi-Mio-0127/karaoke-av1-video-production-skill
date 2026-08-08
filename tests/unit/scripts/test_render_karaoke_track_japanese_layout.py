@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from scripts import render_karaoke_track as renderer
 from scripts.sug_ruby import is_pure_katakana
 from strange_uta_game.backend.domain import Sentence
@@ -258,6 +260,24 @@ def test_required_split_never_cuts_a_canonical_ruby_span():
         cursor += len(run)
         assert cursor != start + 1
         assert not sentence.characters[cursor - 1].linked_to_next
+
+
+def test_display_override_never_cuts_a_canonical_word_span():
+    sentence = _sentence("明日もずっと信じ続けて歩いていく")
+    sentence.characters[7].linked_to_next = True
+
+    with pytest.raises(ValueError, match="canonical Japanese word span"):
+        renderer.split_sentence_for_display(
+            sentence,
+            max_chars=renderer.WIDE_LAYOUT.max_phrase_chars,
+            language="ja",
+            display_phrase_overrides={
+                "明日もずっと信じ続けて歩いていく": (
+                    "明日もずっと信じ",
+                    "続けて歩いていく",
+                )
+            },
+        )
 
 
 def test_long_pure_katakana_without_lexical_boundary_stays_intact():

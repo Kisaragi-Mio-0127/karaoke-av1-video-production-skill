@@ -19,7 +19,7 @@ try:
     from scripts.karaoke_common.device import DEFAULT_DEVICE, add_device_argument
     from scripts.karaoke_mms_editable import create_mms_editable_companion
     from scripts.karaoke_model_paths import resolve_mms_model_path
-    from scripts.karaoke_review_preview import SHARED_FONT_DIR, SHARED_FONT_FILE
+    from scripts.render_karaoke_track import SHARED_FONT_DIR, SHARED_FONT_FILE
     from scripts.karaoke_workflow import (
         KaraokeWorkflowError,
         WorkflowConfig,
@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - direct script execution
         create_mms_editable_companion,  # type: ignore[no-redef]
     )
     from karaoke_model_paths import resolve_mms_model_path  # type: ignore[no-redef]
-    from karaoke_review_preview import (  # type: ignore[no-redef]
+    from render_karaoke_track import (  # type: ignore[no-redef]
         SHARED_FONT_DIR,
         SHARED_FONT_FILE,
     )

@@ -60,14 +60,17 @@ def test_dependency_manifest_exactly_covers_python_bundle() -> None:
     assert "run_karaoke_zh_en_full_auto.py" not in declared
     assert "run_karaoke_zh_en_workflow.py" not in declared
     assert "run_karaoke_zh_en_mms_workflow.py" not in declared
+    assert not any(path.startswith("karaoke_zh_en/") for path in declared)
     assert {
         "karaoke_common/artwork.py",
+        "karaoke_common/visuals.py",
         "karaoke_full_auto.py",
         "karaoke_mms_editable.py",
         "karaoke_model_paths.py",
         "run_karaoke_japanese_full_auto.py",
         "run_karaoke_japanese_workflow.py",
         "run_karaoke_japanese_mms_workflow.py",
+        "render_karaoke_track.py",
     }.issubset(declared)
     records_by_path = {record["path"]: record for record in records}
     assert records_by_path["karaoke_full_auto.py"]["category"] == (

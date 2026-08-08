@@ -24,7 +24,7 @@ try:
     )
     from scripts.karaoke_common.artwork import prepare_auto_artwork
     from scripts.karaoke_common.ffmpeg_tools import resolve_ffmpeg as resolve_ffmpeg_tool
-    from scripts.karaoke_review_preview import SHARED_FONT_DIR, SHARED_FONT_FILE
+    from scripts.render_karaoke_track import SHARED_FONT_DIR, SHARED_FONT_FILE
     from scripts.render_karaoke_direct_av1_420_album import (
         DirectAV1420RenderError,
         validate_current_wide_compositions,
@@ -40,7 +40,7 @@ except ImportError:  # pragma: no cover - direct script entry points
     from karaoke_common.ffmpeg_tools import (  # type: ignore[no-redef]
         resolve_ffmpeg as resolve_ffmpeg_tool,
     )
-    from karaoke_review_preview import (  # type: ignore[no-redef]
+    from render_karaoke_track import (  # type: ignore[no-redef]
         SHARED_FONT_DIR,
         SHARED_FONT_FILE,
     )
@@ -51,7 +51,7 @@ except ImportError:  # pragma: no cover - direct script entry points
     from render_vinyl_karaoke import validate_ass_for_render  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PREVIEW_SCRIPT = REPO_ROOT / "scripts" / "karaoke_review_preview.py"
+TRACK_RENDERER_SCRIPT = REPO_ROOT / "scripts" / "render_karaoke_track.py"
 WORKFLOW_REPORT_NAME = "workflow-report.json"
 TEST_ROOT_MARKER = ".karaoke-workflow-test-root"
 VISUAL_STYLES = ("vinyl", "spectrum")
@@ -269,7 +269,7 @@ def build_ass_command(
 ) -> list[str]:
     command = [
         sys.executable,
-        str(PREVIEW_SCRIPT),
+        str(TRACK_RENDERER_SCRIPT),
         "--sug",
         str(config.sug.resolve()),
         "--audio",

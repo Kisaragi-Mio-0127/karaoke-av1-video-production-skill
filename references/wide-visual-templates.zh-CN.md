@@ -75,7 +75,7 @@ uv run --no-sync python scripts/build_karaoke_wide_artwork.py `
 使用匹配样式渲染代表性预览：
 
 ```powershell
-uv run --no-sync python scripts/karaoke_review_preview.py `
+uv run --no-sync python scripts/render_karaoke_track.py `
   --sug <project.sug> --audio <post-mix-audio> `
   --composition <composition-png> --fonts-dir <fonts-dir> `
   --font-file <main-font> --output <new-output-mp4> `

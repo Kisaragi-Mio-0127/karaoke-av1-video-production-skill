@@ -114,7 +114,7 @@ def test_render_report_publishes_real_probe_against_durable_ass_path(
         direct_report=tmp_path / "published.json",
     )
 
-    def fake_run_preview(command):
+    def fake_run_track_renderer(command):
         Path(command[command.index("--output") + 1]).write_bytes(b"mp4")
         Path(command[command.index("--ass-output") + 1]).write_text(
             "ass fixture",
@@ -136,8 +136,10 @@ def test_render_report_publishes_real_probe_against_durable_ass_path(
             "ass_sha256": renderer.sha256_file(ass_path),
         }
 
-    monkeypatch.setattr(renderer, "run_preview", fake_run_preview)
-    monkeypatch.setattr(renderer, "validate_preview_report", lambda *_a, **_k: None)
+    monkeypatch.setattr(renderer, "run_track_renderer", fake_run_track_renderer)
+    monkeypatch.setattr(
+        renderer, "validate_track_render_report", lambda *_a, **_k: None
+    )
     generation_paths = []
 
     def fake_generation_gate(_task, ass_path, _report, *, require_current_sources):
@@ -162,7 +164,7 @@ def test_render_report_publishes_real_probe_against_durable_ass_path(
 
     result = renderer.render_one(
         task,
-        preview_script=tmp_path / "preview.py",
+        track_renderer_script=tmp_path / "renderer.py",
         ffmpeg=tmp_path / "ffmpeg.exe",
         av1_cq=38,
     )
@@ -227,13 +229,13 @@ def test_preview_command_is_direct_av1_420(tmp_path: Path):
         duration_seconds=12.5,
         profile="standard",
     )
-    command = renderer.build_preview_command(
+    command = renderer.build_track_render_command(
         task,
         temporary_video=tmp_path / "output.mp4",
         temporary_lossless_video=tmp_path / "output.mkv",
         temporary_ass=tmp_path / "output.ass",
         temporary_report=tmp_path / "output.json",
-        preview_script=tmp_path / "preview.py",
+        track_renderer_script=tmp_path / "renderer.py",
         av1_cq=38,
         singer_colors=("lead=#112233", "guest=#AABBCC"),
     )
@@ -268,13 +270,13 @@ def test_spectrum_command_omits_vinyl_and_uses_distinct_artifacts(tmp_path: Path
         ass_output=tmp_path / "timing" / "wide" / "song.ass",
     )
     (configured,) = renderer.configure_av1_tasks((task,), root=tmp_path)
-    command = renderer.build_preview_command(
+    command = renderer.build_track_render_command(
         configured,
         temporary_video=tmp_path / "output.mp4",
         temporary_lossless_video=None,
         temporary_ass=tmp_path / "output.ass",
         temporary_report=tmp_path / "output.json",
-        preview_script=tmp_path / "preview.py",
+        track_renderer_script=tmp_path / "renderer.py",
         av1_cq=38,
     )
 
@@ -329,13 +331,13 @@ def test_preview_command_carries_timing_override_generation(tmp_path: Path):
         profile="wide",
     )
 
-    command = renderer.build_preview_command(
+    command = renderer.build_track_render_command(
         task,
         temporary_video=tmp_path / "output.mp4",
         temporary_lossless_video=tmp_path / "output.mkv",
         temporary_ass=tmp_path / "output.ass",
         temporary_report=tmp_path / "output.json",
-        preview_script=tmp_path / "preview.py",
+        track_renderer_script=tmp_path / "renderer.py",
         av1_cq=38,
     )
 
@@ -517,7 +519,7 @@ def test_lossless_verifier_rejects_shifted_audio_with_equal_container_duration(
     assert result["checks"]["lossless_av_end_boundaries_match"] is False
 
 
-def test_preview_report_rejects_wrong_pixel_format():
+def test_track_render_report_rejects_wrong_pixel_format():
     report = {
         "status": "ok",
         "ass": {"ass": "lyrics.ass"},
@@ -529,10 +531,10 @@ def test_preview_report_rejects_wrong_pixel_format():
     }
 
     with pytest.raises(renderer.DirectAV1420RenderError, match="pixel_format"):
-        renderer.validate_preview_report(report, av1_cq=38)
+        renderer.validate_track_render_report(report, av1_cq=38)
 
 
-def test_preview_report_lossless_companion_is_opt_in():
+def test_track_render_report_lossless_companion_is_opt_in():
     color_plan = {
         "schema_version": "karaoke-color-plan/v1",
         "color_plan_sha256": "test-color-plan",
@@ -554,7 +556,7 @@ def test_preview_report_lossless_companion_is_opt_in():
         "video": video,
     }
 
-    renderer.validate_preview_report(report, av1_cq=38)
+    renderer.validate_track_render_report(report, av1_cq=38)
     report["video"]["lossless"] = {
         "status": "omitted",
         "requested": False,
@@ -562,10 +564,10 @@ def test_preview_report_lossless_companion_is_opt_in():
         "reason": "lossless-companion-not-requested",
         "path": None,
     }
-    renderer.validate_preview_report(report, av1_cq=38)
+    renderer.validate_track_render_report(report, av1_cq=38)
     report["video"].pop("lossless")
     with pytest.raises(renderer.DirectAV1420RenderError, match="no lossless"):
-        renderer.validate_preview_report(
+        renderer.validate_track_render_report(
             report,
             av1_cq=38,
             lossless_companion=True,
@@ -575,16 +577,16 @@ def test_preview_report_lossless_companion_is_opt_in():
         "audio_codec": "flac",
         "video_codec": "copy",
     }
-    renderer.validate_preview_report(
+    renderer.validate_track_render_report(
         report,
         av1_cq=38,
         lossless_companion=True,
     )
     with pytest.raises(renderer.DirectAV1420RenderError, match="unexpected"):
-        renderer.validate_preview_report(report, av1_cq=38)
+        renderer.validate_track_render_report(report, av1_cq=38)
 
 
-def test_preview_report_requires_nonempty_matching_color_plan_hash():
+def test_track_render_report_requires_nonempty_matching_color_plan_hash():
     report = {
         "status": "ok",
         "ass": {
@@ -604,7 +606,7 @@ def test_preview_report_requires_nonempty_matching_color_plan_hash():
     }
 
     with pytest.raises(renderer.DirectAV1420RenderError, match="color-plan.*hash"):
-        renderer.validate_preview_report(report, av1_cq=38)
+        renderer.validate_track_render_report(report, av1_cq=38)
 
 
 def _generation_gate_fixture(tmp_path: Path, *, secondary: bool = True):
@@ -941,8 +943,8 @@ def test_main_forwards_repeatable_singer_colors_to_each_render_task(
         SimpleNamespace(profile="wide", visual_style=style, track=track)
         for style in ("vinyl", "spectrum")
     )
-    preview_script = tmp_path / "preview.py"
-    preview_script.write_text("", encoding="utf-8")
+    track_renderer_script = tmp_path / "renderer.py"
+    track_renderer_script.write_text("", encoding="utf-8")
     observed: list[tuple[str, ...]] = []
 
     monkeypatch.setattr(renderer.render_core, "load_album_manifest", lambda *_a, **_k: album)
@@ -975,8 +977,8 @@ def test_main_forwards_repeatable_singer_colors_to_each_render_task(
             "--single-track",
             "--profile",
             "wide",
-            "--preview-script",
-            str(preview_script),
+            "--track-renderer-script",
+            str(track_renderer_script),
             "--visual-style",
             "both",
             "--singer-color",

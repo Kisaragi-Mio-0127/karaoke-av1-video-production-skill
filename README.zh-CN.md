@@ -73,7 +73,7 @@ python scripts/install_strangeutagame_integration.py --target <project> --force
 
 本仓库不包含也不替代上游StrangeUtaGame应用。集成包必须安装到兼容工作区，因为部分制作脚本会使用其SUG领域模型、解析器、导出器以及编辑器和音频接口：
 
-- `karaoke_timing.py`、`karaoke_review_preview.py`、`sug_ruby.py`和`karaoke_mms_editable.py`直接导入上游Python模块。
+- `karaoke_timing.py`、`render_karaoke_track.py`、`sug_ruby.py`和`karaoke_mms_editable.py`直接导入上游Python模块。
 - Full-auto、分阶段MMS、直接重渲染和批量入口会间接使用这些模块，因此必须从目标工作区通过其现有`.venv`运行。
 - 媒体检查、美术图、取色、变调、打包、快照和转码工具不导入上游代码，但其中一部分仍会读取目标项目的清单、SUG、字体、媒体或目录约定。
 - 仓库侧安装器和环境工具在目标工作区外运行，但会通过`--target`接收StrangeUtaGame路径，并不会替代应用本身。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render short review clips from canonical SUG ruby facts."""
+"""Build subtitles and render one karaoke track from a canonical SUG project."""
 
 from __future__ import annotations
 
@@ -53,6 +53,12 @@ from scripts.karaoke_common.pronunciation import (  # noqa: E402
     PRONUNCIATION_VALIDATION_MODES,
     validate_pronunciation,
 )
+from scripts.karaoke_common.visuals import (  # noqa: E402
+    VISUAL_STYLES,
+    VINYL_MOTIONS,
+    build_visual_filter_graph,
+    normalize_rgb_hex,
+)
 from scripts.karaoke_japanese.layout import (  # noqa: E402
     WIDE_LAYOUT,
     WIDE_SEMANTIC_GAP_EM,
@@ -64,16 +70,6 @@ from scripts.karaoke_language import (  # noqa: E402
     uses_ruby,
 )
 from scripts.karaoke_timing import ms_to_ass_time, verify_font  # noqa: E402
-from scripts.karaoke_zh_en.layout import (  # noqa: E402
-    CHINESE_WIDE_LAYOUT,
-    ENGLISH_WIDE_LAYOUT,
-    ENGLISH_WIDE_LETTER_SPACING_EM,
-    ENGLISH_WIDE_MAIN_FONT_SIZE,
-    ENGLISH_WIDE_MIN_MAIN_FONT_SIZE,
-    ENGLISH_WIDE_MIN_SPLIT_WORDS,
-    ENGLISH_WIDE_RENDER_ADVANCE_SCALE,
-    ENGLISH_WIDE_WORD_GAP_EM,
-)
 from scripts.render_vinyl_karaoke import escape_filter_path  # noqa: E402
 from scripts.sug_ruby import (  # noqa: E402
     RubyToken,
@@ -94,13 +90,6 @@ from strange_uta_game.backend.infrastructure.persistence.sug_io import (  # noqa
 )
 
 __all__ = [
-    "CHINESE_WIDE_LAYOUT",
-    "ENGLISH_WIDE_LAYOUT",
-    "ENGLISH_WIDE_LETTER_SPACING_EM",
-    "ENGLISH_WIDE_MAIN_FONT_SIZE",
-    "ENGLISH_WIDE_MIN_MAIN_FONT_SIZE",
-    "ENGLISH_WIDE_RENDER_ADVANCE_SCALE",
-    "ENGLISH_WIDE_WORD_GAP_EM",
     "Lane",
     "STANDARD_LAYOUT",
     "STANDARD_RIGHT_AVAILABLE_WIDTH",
@@ -111,8 +100,9 @@ __all__ = [
     "WIDE_LAYOUT",
     "WIDE_RUBY_TO_MAIN_ANCHOR_GAP_PX",
     "WIDE_SEMANTIC_GAP_EM",
-    "build_review_ass",
-    "build_review_ass_required",
+    "build_karaoke_ass",
+    "build_karaoke_ass_required",
+    "render_karaoke_video",
 ]
 
 
@@ -165,6 +155,7 @@ PRE_ROLL_MS = 200
 POST_ROLL_MS = 180
 MAX_EARLY_DISPLAY_MS = 20_000
 MIN_DISPLAY_PHRASE_CHARS = 6
+SPACE_DELIMITED_MIN_SPLIT_WORDS = 3
 MAX_DISPLAY_PHRASE_CHARS = 16
 DISPLAY_PHRASE_SOFT_OVERRUN = 2
 INTERLUDE_GAP_THRESHOLD_MS = 8_000
@@ -182,8 +173,6 @@ LOSSLESS_AUDIO_CODEC = "flac"
 SUBTITLE_LAYOUTS = {
     "standard": STANDARD_LAYOUT,
     "wide": WIDE_LAYOUT,
-    "wide-zh": CHINESE_WIDE_LAYOUT,
-    "wide-en": ENGLISH_WIDE_LAYOUT,
 }
 LANES = STANDARD_LAYOUT.lanes
 
@@ -1685,14 +1674,14 @@ def _split_english_sentence_for_wide_fit(
     ) <= layout.slot_width:
         return [sentence]
     spans = _english_word_spans(sentence)
-    if len(spans) < 2 * ENGLISH_WIDE_MIN_SPLIT_WORDS:
+    if len(spans) < 2 * SPACE_DELIMITED_MIN_SPLIT_WORDS:
         return [sentence]
 
     candidates: list[tuple[float, int, Sentence, Sentence]] = []
     fallback_candidates: list[tuple[float, int, Sentence, Sentence]] = []
     for split_at in range(
-        ENGLISH_WIDE_MIN_SPLIT_WORDS,
-        len(spans) - ENGLISH_WIDE_MIN_SPLIT_WORDS + 1,
+        SPACE_DELIMITED_MIN_SPLIT_WORDS,
+        len(spans) - SPACE_DELIMITED_MIN_SPLIT_WORDS + 1,
     ):
         left = _english_word_slice(sentence, spans, 0, split_at)
         right = _english_word_slice(sentence, spans, split_at, len(spans))
@@ -1782,11 +1771,7 @@ def split_sentence_for_display(
             for run in override_runs
         ]
     if language == "en":
-        if (
-            font_file is not None
-            and layout is not None
-            and layout.name == ENGLISH_WIDE_LAYOUT.name
-        ):
+        if font_file is not None and layout is not None:
             return _split_english_sentence_for_wide_fit(
                 sentence,
                 font_file=font_file,
@@ -1842,15 +1827,23 @@ def layout_for_language(
     layout: SubtitleLayout,
     language: str,
 ) -> SubtitleLayout:
-    """Select language-specific wide typography without changing Japanese."""
+    """Select a local language extension only when a non-Japanese run needs it."""
 
     language = normalize_language(language)
     if not layout.name.startswith("wide"):
         return layout
-    if language == "en":
-        return ENGLISH_WIDE_LAYOUT
-    if language == "zh":
-        return CHINESE_WIDE_LAYOUT
+    if language in {"en", "zh"}:
+        try:
+            from scripts.karaoke_zh_en.layout import (
+                CHINESE_WIDE_LAYOUT,
+                ENGLISH_WIDE_LAYOUT,
+            )
+        except ImportError as error:
+            raise RuntimeError(
+                "Chinese/English wide layouts are a local extension; install the "
+                "chinese-english-karaoke-production Skill before rendering this language"
+            ) from error
+        return ENGLISH_WIDE_LAYOUT if language == "en" else CHINESE_WIDE_LAYOUT
     return layout
 
 
@@ -2376,7 +2369,7 @@ def _ass_bgr(color: str, *, alpha: str = "00") -> str:
     return f"&H{alpha}{blue}{green}{red}"
 
 
-def build_review_ass(
+def build_karaoke_ass(
     project,
     output_path: Path,
     *,
@@ -3477,17 +3470,17 @@ def build_review_ass(
     }
 
 
-def build_review_ass_required(*args: Any, **kwargs: Any) -> dict:
-    """Compatibility entry point for callers that explicitly require sidecars."""
+def build_karaoke_ass_required(*args: Any, **kwargs: Any) -> dict:
+    """Build ASS while requiring pronunciation validation evidence."""
 
     kwargs["pronunciation_validation"] = "required"
-    return build_review_ass(*args, **kwargs)
+    return build_karaoke_ass(*args, **kwargs)
 
 
 def ensure_lossless_output_is_new(output_path: Path) -> None:
     if output_path.exists():
         raise FileExistsError(
-            "lossless preview refuses to overwrite existing output: "
+            "lossless renderer refuses to overwrite existing output: "
             f"{output_path}"
         )
 
@@ -3591,7 +3584,7 @@ def render_lossless_review_clip(
 
     ensure_lossless_output_is_new(output_path)
     if not mp4_path.exists():
-        raise FileNotFoundError(f"MP4 preview was not generated: {mp4_path}")
+        raise FileNotFoundError(f"MP4 render was not generated: {mp4_path}")
     if source_codec is None:
         source_codec = probe_lossless_audio_codec(audio_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3637,7 +3630,7 @@ def render_lossless_review_clip(
     }
 
 
-def render_review_clip(
+def render_karaoke_video(
     *,
     ass_path: Path,
     audio_path: Path,
@@ -3673,133 +3666,35 @@ def render_review_clip(
     start = max(0.0, float(start_seconds))
     duration = max(0.1, float(duration_seconds))
     end = start + duration
-    if visual_style not in {"vinyl", "spectrum"}:
+    if visual_style not in VISUAL_STYLES:
         raise ValueError(f"unsupported visual style: {visual_style}")
-    if vinyl_motion not in {"static", "rotate"}:
+    if vinyl_motion not in VINYL_MOTIONS:
         raise ValueError(f"unsupported vinyl motion: {vinyl_motion}")
     if visual_style == "vinyl" and vinyl_path is None:
         raise ValueError("vinyl visual style requires a vinyl image")
     if visual_style == "spectrum" and output_path.exists():
-        raise FileExistsError(f"spectrum preview already exists: {output_path}")
-    color = spectrum_color.strip().lstrip("#")
-    if not re.fullmatch(r"[0-9A-Fa-f]{6}", color):
-        raise ValueError(f"invalid spectrum color: {spectrum_color!r}")
-    color = color.upper()
-    progress = (progress_color or f"#{color}").strip().lstrip("#")
-    if not re.fullmatch(r"[0-9A-Fa-f]{6}", progress):
-        raise ValueError(f"invalid progress color: {progress_color!r}")
-    progress = progress.upper()
+        raise FileExistsError(f"spectrum render already exists: {output_path}")
+    color = normalize_rgb_hex(spectrum_color, name="spectrum color")
+    progress = normalize_rgb_hex(
+        progress_color or f"#{color}", name="progress color"
+    )
     program_duration = max(
         end,
         float(program_duration_seconds)
         if program_duration_seconds is not None
         else end,
     )
-    if visual_style == "vinyl":
-        vinyl_filter = (
-            "format=rgba,rotate=2*PI*t/8:ow=iw:oh=ih:"
-            "fillcolor=black@0:bilinear=1"
-            if vinyl_motion == "rotate"
-            else "format=rgba"
-        )
-        filter_complex = (
-            "[0:v]format=rgba[bg];"
-            f"[1:v]scale={layout.vinyl_size}:{layout.vinyl_size}:flags=lanczos,"
-            f"{vinyl_filter}[vinyl];"
-            f"[bg][vinyl]overlay={layout.vinyl_x}:{layout.vinyl_y}:format=auto[scene];"
-            f"[scene]{subtitle},trim=start={start:.3f}:end={end:.3f},"
-            "setpts=PTS-STARTPTS[v];"
-            f"[2:a]atrim=start={start:.3f}:end={end:.3f},"
-            "asetpts=PTS-STARTPTS[a]"
-        )
-    else:
-        filter_complex = (
-            f"[0:v]format=rgba,trim=start={start:.3f}:end={end:.3f},"
-            "setpts=PTS-STARTPTS[bgclip];"
-            f"[1:a]atrim=start={start:.3f}:end={end:.3f},"
-            "asetpts=PTS-STARTPTS,asplit=2[a][specaudio];"
-            "[specaudio]aformat=channel_layouts=mono,"
-            "showfreqs=s=80x220:r=30:mode=bar:ascale=log:fscale=log:"
-            f"win_size=4096:overlap=0.80:averaging=4:colors=0x{color},"
-            "scale=1040:220:flags=neighbor,"
-            "drawgrid=width=13:height=220:thickness=5:color=black@1,"
-            "format=rgba,colorkey=0x000000:0.06:0.08,alphaextract,"
-            # Preserve the 220 px bars at y=290 while giving their mask 8 px
-            # of clearance above and below for rounded edges.
-            "pad=1040:236:0:8:color=black,"
-            "erosion=coordinates=90,erosion=coordinates=90,"
-            "erosion=coordinates=90,dilation=coordinates=90,"
-            "dilation=coordinates=90,dilation=coordinates=90,"
-            "gblur=sigma=0.8:steps=1,"
-            "split=5[coremask][specinner][specouter][specwide][specpeak];"
-            "[specinner]pad=1168:348:64:56:color=black,"
-            "gblur=sigma=4:steps=2,"
-            "lut=y='val*2.0'[innermask];"
-            "[specouter]pad=1168:348:64:56:color=black,"
-            "gblur=sigma=14:steps=2,"
-            "lut=y='val*2.4'[outermask];"
-            "[specwide]pad=1168:348:64:56:color=black,"
-            "gblur=sigma=28:steps=3,"
-            "lut=y='val*2.8'[widemask];"
-            "[specpeak]pad=1168:348:64:56:color=black,"
-            "lagfun=decay=0.975,"
-            "gblur=sigma=2.2:steps=2,lut=y='val*0.55'[peakmask];"
-            f"color=c=0x{color}:s=1040x236:r=30:d={duration:.3f},"
-            "format=rgba,colorchannelmixer=rr=1:rg=0.18:rb=0.18:"
-            "gr=0.18:gg=1:gb=0.18:br=0.18:bg=0.18:bb=1[corecolor];"
-            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
-            "format=rgba[innercolor];"
-            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
-            "format=rgba[outercolor];"
-            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
-            "format=rgba[widecolor];"
-            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
-            "format=rgba[peakcolor];"
-            "[corecolor][coremask]alphamerge[core];"
-            "[innercolor][innermask]alphamerge[innerglow];"
-            "[outercolor][outermask]alphamerge[outerglow];"
-            "[widecolor][widemask]alphamerge[wideglow];"
-            "[peakcolor][peakmask]alphamerge[peakhold];"
-            # Moving the padded layers upward exactly offsets their new top
-            # padding: bars stay at y=290 and the glow gains a clip-safe top.
-            "[bgclip][wideglow]overlay=736:226:format=auto[wide];"
-            "[wide][outerglow]overlay=736:226:format=auto[outer];"
-            "[outer][peakhold]overlay=736:226:format=auto[held];"
-            "[held][innerglow]overlay=736:226:format=auto[inner];"
-            "[inner][core]overlay=800:282:format=auto[spectrumbars];"
-            f"[spectrumbars]drawbox=x=800:y=516:w=1040:h=3:"
-            f"color=0x{color}@0.85:t=fill[spectrumscene];"
-            f"color=c=black@0.0:s=1040x28:r=30:d={duration:.3f},"
-            "format=rgba[progressbase];"
-            f"color=c=0x{progress}@0.98:s=1040x6:r=30:d={duration:.3f},"
-            "format=rgba[progressfill];"
-            "[progressbase][progressfill]overlay="
-            f"x='-1040+1040*(t+{start:.3f})/{program_duration:.3f}':"
-            "y=11:eval=frame:format=auto[progress];"
-            "[progress]split=2[progresscore][progressglowsrc];"
-            "[progressglowsrc]gblur=sigma=8:steps=2,"
-            "colorchannelmixer=aa=2.0[progressglow];"
-            f"color=c=0x{progress}:s=40x40:r=30:d={duration:.3f},"
-            "format=rgba,"
-            "geq=r='r(X\\,Y)':g='g(X\\,Y)':b='b(X\\,Y)':"
-            "a='255*lte((X-19.5)*(X-19.5)+(Y-19.5)*(Y-19.5)\\,100)'"
-            "[knobsource];"
-            "[knobsource]split=2[knobcore][knobglowsrc];"
-            "[knobglowsrc]gblur=sigma=7:steps=2,"
-            "colorchannelmixer=aa=1.8[knobglow];"
-            f"[spectrumscene]drawbox=x=800:y=548:w=1040:h=6:"
-            f"color=0x{progress}@0.34:t=fill[track];"
-            "[track][progressglow]overlay=800:537:format=auto[trackglow];"
-            "[trackglow][progresscore]overlay=800:537:format=auto[progressscene];"
-            "[progressscene][knobglow]overlay="
-            f"x='800+1040*(t+{start:.3f})/{program_duration:.3f}-20':"
-            "y=531:eval=frame:format=auto[knobhalo];"
-            "[knobhalo][knobcore]overlay="
-            f"x='800+1040*(t+{start:.3f})/{program_duration:.3f}-20':"
-            "y=531:eval=frame:format=auto[visual];"
-            f"[visual]setpts=PTS+{start:.3f}/TB,{subtitle},"
-            "setpts=PTS-STARTPTS[v]"
-        )
+    filter_complex = build_visual_filter_graph(
+        visual_style=visual_style,
+        subtitle_filter=subtitle,
+        start_seconds=start,
+        duration_seconds=duration,
+        program_duration_seconds=program_duration,
+        layout=layout,
+        vinyl_motion=vinyl_motion,
+        spectrum_color=color,
+        progress_color=progress,
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pixel_format = "yuv420p"
     if video_encoder == "av1_nvenc":
@@ -4226,7 +4121,7 @@ def ensure_spectrum_targets_are_new(
     existing = [str(path) for path in targets if path.exists()]
     if existing:
         raise FileExistsError(
-            "spectrum preview refuses to overwrite existing outputs: "
+            "spectrum renderer refuses to overwrite existing outputs: "
             + ", ".join(existing)
         )
 
@@ -4450,7 +4345,7 @@ def main(argv: list[str] | None = None) -> int:
         else {}
     )
     layout = SUBTITLE_LAYOUTS[args.layout]
-    ass_report = build_review_ass(
+    ass_report = build_karaoke_ass(
         project,
         ass_path,
         font_file=args.font_file.resolve(),
@@ -4492,7 +4387,7 @@ def main(argv: list[str] | None = None) -> int:
         if lossless_output is not None
         else {}
     )
-    video_report = render_review_clip(
+    video_report = render_karaoke_video(
         ass_path=ass_path,
         audio_path=args.audio.resolve(),
         composition_path=args.composition.resolve(),

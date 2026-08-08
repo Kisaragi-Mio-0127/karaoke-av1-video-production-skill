@@ -72,7 +72,7 @@ from scripts.sug_ruby import (  # noqa: E402
     validate_review_sidecar,
 )
 
-PREVIEW_SCRIPT = REPO_ROOT / "scripts" / "karaoke_review_preview.py"
+TRACK_RENDERER_SCRIPT = REPO_ROOT / "scripts" / "render_karaoke_track.py"
 VINYL_GENERATOR = REPO_ROOT / "scripts" / "render_vinyl_karaoke.py"
 WIDE_ARTWORK_GENERATOR = REPO_ROOT / "scripts" / "build_karaoke_wide_artwork.py"
 PROFILES = ("standard", "wide")
@@ -939,7 +939,7 @@ def lossless_companion_policy(
     *,
     requested: bool = False,
 ) -> dict[str, Any]:
-    """Request a companion only when preview can prove a lossless source codec."""
+    """Request a companion only when the track renderer can prove a lossless source."""
 
     suffix = audio_path.suffix.casefold()
     if not requested:
@@ -972,14 +972,14 @@ def lossless_companion_policy(
     )
 
 
-def build_preview_command(
+def build_track_render_command(
     task: render_core.RenderTask,
     *,
     temporary_video: Path,
     temporary_lossless_video: Path | None,
     temporary_ass: Path,
     temporary_report: Path,
-    preview_script: Path,
+    track_renderer_script: Path,
     av1_cq: int,
     pronunciation_validation: str = "optional",
     vinyl_motion: str = "rotate",
@@ -989,7 +989,7 @@ def build_preview_command(
     visual_style = _task_visual_style(task)
     command = [
         sys.executable,
-        str(preview_script.resolve()),
+        str(track_renderer_script.resolve()),
         "--sug",
         str(task.sug_path),
         "--audio",
@@ -1056,7 +1056,7 @@ def _flag_value(command: Sequence[str], flag: str) -> str:
     try:
         return str(command[command.index(flag) + 1])
     except (ValueError, IndexError) as error:
-        raise DirectAV1420RenderError(f"preview command is missing {flag}") from error
+        raise DirectAV1420RenderError(f"track render command is missing {flag}") from error
 
 
 def validate_direct_source_command(command: Sequence[str]) -> None:
@@ -1106,7 +1106,7 @@ def validate_direct_source_command(command: Sequence[str]) -> None:
         _flag_value(command, "--song-id")
 
 
-def run_preview(
+def run_track_renderer(
     command: Sequence[str],
 ) -> subprocess.CompletedProcess[str]:
     print("$", subprocess.list2cmdline([str(value) for value in command]), flush=True)
@@ -1131,7 +1131,7 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def validate_preview_report(
+def validate_track_render_report(
     report: dict[str, Any],
     *,
     av1_cq: int,
@@ -1140,17 +1140,17 @@ def validate_preview_report(
 ) -> None:
     if report.get("status") != "ok":
         raise DirectAV1420RenderError(
-            f"unexpected preview report status: {report.get('status')!r}"
+            f"unexpected track render report status: {report.get('status')!r}"
         )
     ass = report.get("ass")
     if not isinstance(ass, dict) or not ass.get("ass"):
-        raise DirectAV1420RenderError("preview report has no ASS artifact")
+        raise DirectAV1420RenderError("track render report has no ASS artifact")
     video = report.get("video")
     if not isinstance(video, dict):
-        raise DirectAV1420RenderError("preview report has no video artifact")
+        raise DirectAV1420RenderError("track render report has no video artifact")
     if visual_style is not None and video.get("visual_style") != visual_style:
         raise DirectAV1420RenderError(
-            f"preview report mismatch: visual_style={video.get('visual_style')!r}, "
+            f"track render report mismatch: visual_style={video.get('visual_style')!r}, "
             f"expected {visual_style!r}"
         )
     expected = {
@@ -1166,7 +1166,7 @@ def validate_preview_report(
     for key, value in expected.items():
         if video.get(key) != value:
             raise DirectAV1420RenderError(
-                f"preview report mismatch: {key}={video.get(key)!r}, expected {value!r}"
+                f"track render report mismatch: {key}={video.get(key)!r}, expected {value!r}"
             )
     color_plan = ass.get("color_plan")
     color_plan_sha256 = (
@@ -1197,11 +1197,11 @@ def validate_preview_report(
     failed = [name for name, ok in color_checks.items() if not ok]
     if failed:
         raise DirectAV1420RenderError(
-            "preview color-plan mismatch: " + ", ".join(failed)
+            "track render color-plan mismatch: " + ", ".join(failed)
         )
     lossless = video.get("lossless")
     if not lossless_companion:
-        # Older preview reports recorded an explicit omission object even when
+        # Older render reports recorded an explicit omission object even when
         # no MKV was requested.  Treat that as metadata, not as a companion.
         # A path or a positive requested/performed flag still proves that an
         # unexpected lossless artifact was produced.
@@ -1216,14 +1216,14 @@ def validate_preview_report(
         )
         if lossless is not None and not explicitly_omitted:
             raise DirectAV1420RenderError(
-                "preview report has an unexpected lossless companion"
+                "track render report has an unexpected lossless companion"
             )
         return
     if not isinstance(lossless, dict):
-        raise DirectAV1420RenderError("preview report has no lossless companion")
+        raise DirectAV1420RenderError("track render report has no lossless companion")
     if lossless.get("audio_codec") != "flac" or lossless.get("video_codec") != "copy":
         raise DirectAV1420RenderError(
-            f"preview lossless report is invalid: {lossless!r}"
+            f"track render lossless report is invalid: {lossless!r}"
         )
 
 
@@ -2123,7 +2123,7 @@ def _validate_report_durable_paths(
 def render_one(
     task: render_core.RenderTask,
     *,
-    preview_script: Path,
+    track_renderer_script: Path,
     ffmpeg: Path | None,
     av1_cq: int,
     libass_font_probe: Mapping[str, Any] | None = None,
@@ -2145,13 +2145,13 @@ def render_one(
     )
     temporary_ass = _temporary_path(task.ass_output)
     temporary_report = _temporary_path(task.direct_report)
-    command = build_preview_command(
+    command = build_track_render_command(
         task,
         temporary_video=temporary_video,
         temporary_lossless_video=temporary_lossless_video,
         temporary_ass=temporary_ass,
         temporary_report=temporary_report,
-        preview_script=preview_script,
+        track_renderer_script=track_renderer_script,
         av1_cq=av1_cq,
         pronunciation_validation=pronunciation_validation,
         vinyl_motion=vinyl_motion,
@@ -2161,16 +2161,16 @@ def render_one(
     validate_direct_source_command(command)
     started = time.perf_counter()
     try:
-        completed = run_preview(command)
+        completed = run_track_renderer(command)
         if completed.returncode != 0:
             raise DirectAV1420RenderError(
-                f"preview render failed for {task.profile}:{task.track.artifact_slug} "
+                f"track render failed for {task.profile}:{task.track.artifact_slug} "
                 f"(returncode={completed.returncode})\n"
                 f"{completed.stderr[-2500:] or completed.stdout[-1000:]}"
             )
-        preview_report = _read_json(temporary_report)
-        validate_preview_report(
-            preview_report,
+        track_render_report = _read_json(temporary_report)
+        validate_track_render_report(
+            track_render_report,
             av1_cq=av1_cq,
             lossless_companion=lossless_companion,
             visual_style=_task_visual_style(task),
@@ -2178,7 +2178,7 @@ def render_one(
         validate_ass_report_generation(
             task,
             temporary_ass,
-            preview_report,
+            track_render_report,
             require_current_sources=False,
         )
         media = verify_av1_420_output(
@@ -2237,7 +2237,7 @@ def render_one(
             else None
         )
         normalised = normalise_report(
-            preview_report,
+            track_render_report,
             task,
             media=media,
             lossless_media=lossless_media,
@@ -2368,7 +2368,7 @@ def collect_existing_results(
         if not task.direct_report.is_file():
             raise DirectAV1420RenderError(f"missing AV1 render report: {task.direct_report}")
         report = _read_json(task.direct_report)
-        validate_preview_report(
+        validate_track_render_report(
             report,
             av1_cq=av1_cq,
             lossless_companion=lossless_companion,
@@ -2952,7 +2952,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artwork-dir", type=Path, default=None)
     parser.add_argument("--fonts-dir", type=Path, default=None)
     parser.add_argument("--font-file", type=Path, default=None)
-    parser.add_argument("--preview-script", type=Path, default=PREVIEW_SCRIPT)
+    parser.add_argument(
+        "--track-renderer-script", type=Path, default=TRACK_RENDERER_SCRIPT
+    )
     parser.add_argument("--ffmpeg", type=Path, default=None)
     parser.add_argument("--report-only", action="store_true")
     parser.add_argument(
@@ -3021,9 +3023,11 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(
                 "--single-track requires exactly one selected song and one profile"
             )
-        preview_script = _resolve_path(args.preview_script)
-        if not args.report_only and not preview_script.is_file():
-            raise FileNotFoundError(f"preview script does not exist: {preview_script}")
+        track_renderer_script = _resolve_path(args.track_renderer_script)
+        if not args.report_only and not track_renderer_script.is_file():
+            raise FileNotFoundError(
+                f"track renderer script does not exist: {track_renderer_script}"
+            )
         ffmpeg = _resolve_path(args.ffmpeg) if args.ffmpeg else None
         tasks = configure_av1_tasks(
             render_core.plan_tasks(
@@ -3092,7 +3096,7 @@ def main(argv: list[str] | None = None) -> int:
                 return [
                     render_one(
                         task,
-                        preview_script=preview_script,
+                        track_renderer_script=track_renderer_script,
                         ffmpeg=ffmpeg,
                         av1_cq=args.av1_cq,
                         pronunciation_validation=args.pronunciation_validation,

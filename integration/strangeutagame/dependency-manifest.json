@@ -79,6 +79,11 @@
       "reason": "Resolves FFmpeg and FFprobe consistently, preferring the project-owned tools directory while retaining explicit overrides."
     },
     {
+      "path": "karaoke_common/visuals.py",
+      "category": "package-file",
+      "reason": "Owns the vinyl and spectrum FFmpeg filter graphs used by the single-track renderer."
+    },
+    {
       "path": "karaoke_japanese/__init__.py",
       "category": "package-file",
       "reason": "Japanese layout package initializer for the selectable wide-visual workflow."
@@ -87,16 +92,6 @@
       "path": "karaoke_japanese/layout.py",
       "category": "package-file",
       "reason": "Japanese wide-layout geometry imported by the preview renderer."
-    },
-    {
-      "path": "karaoke_zh_en/__init__.py",
-      "category": "package-file",
-      "reason": "Package initializer for shared non-Japanese layout definitions imported by the generic preview renderer."
-    },
-    {
-      "path": "karaoke_zh_en/layout.py",
-      "category": "package-file",
-      "reason": "Shared layout definitions required by the generic renderer; no Chinese or English workflow entry is bundled."
     }
   ],
   "scripts": [
@@ -151,9 +146,9 @@
       "reason": "Runs the isolated language-routed workflow, enforces the selected wide-composition identity, conditionally regenerates rotating vinyl, and keeps MKV plus full-decode diagnostics explicit opt-ins."
     },
     {
-      "path": "karaoke_review_preview.py",
+      "path": "render_karaoke_track.py",
       "category": "direct-upstream-import",
-      "reason": "Imports StrangeUtaGame Sentence and SugProjectParser."
+      "reason": "Builds ASS and renders one track; imports StrangeUtaGame Sentence and SugProjectParser while delegating visual graphs to karaoke_common/visuals.py."
     },
     {
       "path": "karaoke_timing.py",

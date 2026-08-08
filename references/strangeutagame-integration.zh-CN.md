@@ -145,24 +145,24 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py --manifes
 
 这些集成文件是在StrangeUtaGame之外后续开发的，不属于其上游Git历史，本仓库也不拥有或包含上游`strange_uta_game`源码。下表中的“可独立运行”是指不依赖上游StrangeUtaGame代码和工作区资源，并不表示不依赖本集成自己的Python包、输入媒体、字体、FFmpeg、模型或其他明确列出的工具。
 
-安装器把清单授权的所有Python路径安装到`<target>/scripts/`，包括`karaoke_common`、`karaoke_japanese`和`karaoke_zh_en`包目录；两份requirements文件安装到目标根目录。上游包仍位于`<target>/src/strange_uta_game/`，固定版本requirements中的本地`-e .`条目使其可从目标唯一的`.venv`导入。MMS和Whisper资产是位于`<target>/models/`下的独立项目自有运行时文件。
+安装器把清单授权的所有Python路径安装到`<target>/scripts/`，包括`karaoke_common`和`karaoke_japanese`包目录；两份requirements文件安装到目标根目录。上游包仍位于`<target>/src/strange_uta_game/`，固定版本requirements中的本地`-e .`条目使其可从目标唯一的`.venv`导入。MMS和Whisper资产是位于`<target>/models/`下的独立项目自有运行时文件。
 
 ### 直接或传递依赖上游代码
 
 | 脚本/模块 | 依赖的上游模块、资源或运行时 | 安装位置 | 可脱离上游独立运行？ |
 |---|---|---|---|
 | `karaoke_timing.py` | 直接导入`backend.application.auto_check_service`、`backend.domain`、`backend.infrastructure.exporters`和`backend.infrastructure.persistence.sug_io`；还使用SUG项目、字体、Whisper/stable-ts和FFmpeg。 | `<target>/scripts/karaoke_timing.py` | 否。 |
-| `karaoke_review_preview.py` | 直接导入上游`Character`、`Sentence`和`SugProjectParser`；还导入`karaoke_timing.py`并调用FFmpeg完成预览/渲染。 | `<target>/scripts/karaoke_review_preview.py` | 否。 |
+| `render_karaoke_track.py` | 构建ASS并渲染单曲；直接导入上游`Character`、`Sentence`和`SugProjectParser`，黑胶与频谱FFmpeg图由`karaoke_common/visuals.py`负责。 | `<target>/scripts/render_karaoke_track.py` | 否。 |
 | `karaoke_mms_editable.py` | 直接从上游SUG持久化模块导入`SugProjectParser`，读取并写入SUG companion。 | `<target>/scripts/karaoke_mms_editable.py` | 否。 |
 | `sug_ruby.py` | 对象回写路径动态导入上游`Ruby`和`RubyPart`；仅检查和验证原始JSON的路径不需要该导入。 | `<target>/scripts/sug_ruby.py` | 部分可以：仅JSON验证可脱离上游，对象回写不可。 |
 | `audit_karaoke_asr_recognition.py` | 从`karaoke_timing.py`导入LRC/修正辅助函数，因此加载这些函数会初始化上游导入；此外需要项目自有Whisper权重和stable-whisper/torch运行时。 | `<target>/scripts/audit_karaoke_asr_recognition.py` | 受支持的审计路径不可。 |
 | `audit_karaoke_mms_alignment.py` | 导入`karaoke_timing.py`和规范ruby辅助函数；读取SUG时间、原始/MSST音频，并通过torchaudio MMS_FA加载本地`models/mms/model.pt`。 | `<target>/scripts/audit_karaoke_mms_alignment.py` | 否。 |
 | `build_karaoke_mms_overrides.py` | 从`karaoke_timing.py`导入时间结构/辅助函数，并读取SUG/MMS审计产物。 | `<target>/scripts/build_karaoke_mms_overrides.py` | 否。 |
 | `sync_karaoke_editable_ruby.py` | 针对SUG项目数据使用`sug_ruby.py`；规范对象回写路径依赖上游领域类。 | `<target>/scripts/sync_karaoke_editable_ruby.py` | 受支持的集成回写流程不可。 |
-| `karaoke_workflow.py` | 使用同一Python解释器导入并启动`karaoke_review_preview.py`，因此继承预览/时间模块的上游导入；还使用目标项目根目录、资产、FFmpeg和发布辅助模块。 | `<target>/scripts/karaoke_workflow.py` | 否。 |
-| `render_karaoke_direct_av1_420_album.py` | 每个渲染任务都执行`karaoke_review_preview.py`，因此继承其直接上游解析器/领域依赖；还使用SUG文件、图稿/字体资产和FFmpeg AV1编码器。 | `<target>/scripts/render_karaoke_direct_av1_420_album.py` | 否。 |
+| `karaoke_workflow.py` | 使用同一Python解释器导入并启动`render_karaoke_track.py`，因此继承其SUG/时间模块上游导入；还使用目标项目根目录、资产、FFmpeg和发布辅助模块。 | `<target>/scripts/karaoke_workflow.py` | 否。 |
+| `render_karaoke_direct_av1_420_album.py` | 每个渲染任务都执行`render_karaoke_track.py`，因此继承其直接上游解析器/领域依赖；还使用SUG文件、图稿/字体资产和FFmpeg AV1编码器。 | `<target>/scripts/render_karaoke_direct_av1_420_album.py` | 否。 |
 | `run_karaoke_japanese_workflow.py` | `karaoke_workflow.py`的轻量入口，继承其预览、SUG、项目布局和FFmpeg依赖。 | `<target>/scripts/run_karaoke_japanese_workflow.py` | 否。 |
-| `run_karaoke_japanese_mms_workflow.py` | 导入MMS审计/构建、`karaoke_mms_editable.py`、`karaoke_review_preview.py`和`karaoke_workflow.py`；需要规范/companion SUG、本地MMS模型、音频stem、字体和FFmpeg。 | `<target>/scripts/run_karaoke_japanese_mms_workflow.py` | 否。 |
+| `run_karaoke_japanese_mms_workflow.py` | 导入MMS审计/构建、`karaoke_mms_editable.py`、`render_karaoke_track.py`和`karaoke_workflow.py`；需要规范/companion SUG、本地MMS模型、音频stem、字体和FFmpeg。 | `<target>/scripts/run_karaoke_japanese_mms_workflow.py` | 否。 |
 | `karaoke_full_auto.py` | 导入`karaoke_timing.py`、ASR和MSST准备模块，然后延迟导入日文MMS工作流；需要目标清单/布局、上游SUG运行时、本地MMS/Whisper模型、MSST适配器和FFmpeg。 | `<target>/scripts/karaoke_full_auto.py` | 否。 |
 | `run_karaoke_japanese_full_auto.py` | `karaoke_full_auto.py`的日文限定入口，继承完整的时间、MMS、SUG、MSST、模型和渲染依赖链。 | `<target>/scripts/run_karaoke_japanese_full_auto.py` | 否。 |
 
@@ -176,10 +176,11 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py --manifes
 | `prepare_karaoke_msst_vocals.py` | 不导入上游代码；加载外部本地`prepare_sovits41_msst_stems.py`适配器及其MSST运行时/模型文件，这些内容由本集成之外的组件拥有。 | `<target>/scripts/prepare_karaoke_msst_vocals.py` | 相对于StrangeUtaGame可以；相对于独立MSST适配器/运行时不可以。 |
 | `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | 不导入上游代码，处理集成清单、路径、快照或发布文件；专辑规划通过统一FFmpeg解析器检查媒体。 | `<target>/scripts/`下对应路径 | 可以，但需要声明的集成输入。 |
 | `karaoke_model_paths.py` | 不导入上游代码，只解析项目自有`models/mms/model.pt`和`models/whisper/`路径。 | `<target>/scripts/karaoke_model_paths.py` | 相对于上游代码可以；调用方仍需要模型文件。 |
-| `karaoke_common/layout.py`<br>`karaoke_japanese/layout.py`<br>`karaoke_zh_en/layout.py` | 不导入上游代码，是本集成自有布局定义。`karaoke_zh_en`包提供通用预览布局，不提供中文/英文工作流入口。 | `<target>/scripts/`下对应包路径 | 可以；这些是模块，不是独立命令。 |
+| `karaoke_common/layout.py`<br>`karaoke_japanese/layout.py` | 不导入上游代码，是公开通用和日文布局定义；本仓库不包含中英文布局。 | `<target>/scripts/`下对应包路径 | 可以；这些是模块，不是独立命令。 |
+| `karaoke_common/visuals.py` | 不导入上游代码，集中构建单曲渲染器使用的黑胶与频谱FFmpeg图。 | `<target>/scripts/karaoke_common/visuals.py` | 可以；这是模块，不是独立命令。 |
 | `karaoke_common/device.py` | 不导入上游代码，动态加载`torch`选择CPU/CUDA。 | `<target>/scripts/karaoke_common/device.py` | 可以；这是模块，不是独立命令。 |
 | `karaoke_common/pronunciation.py` | 不直接导入上游代码，使用`sug_ruby.py`中支持JSON的部分执行注音策略。 | `<target>/scripts/karaoke_common/pronunciation.py` | 验证路径可以；这是模块，不是独立命令。 |
-| `karaoke_common/__init__.py`<br>`karaoke_japanese/__init__.py`<br>`karaoke_zh_en/__init__.py` | 仅为包初始化文件，依赖取决于其导出的包成员。 | `<target>/scripts/`下对应包路径 | 相对于上游代码可以；不是独立命令。 |
+| `karaoke_common/__init__.py`<br>`karaoke_japanese/__init__.py` | 仅为包初始化文件，依赖取决于其导出的包成员。 | `<target>/scripts/`下对应包路径 | 相对于上游代码可以；不是独立命令。 |
 
 ### Skill侧安装与兼容性工具
 

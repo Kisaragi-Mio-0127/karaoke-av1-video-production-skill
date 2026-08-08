@@ -10,38 +10,25 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from scripts import karaoke_review_preview as preview
+from scripts import render_karaoke_track as renderer
 from scripts import render_karaoke_direct_av1_420_album as direct
 from scripts import render_vinyl_karaoke as vinyl_renderer
 from scripts.karaoke_common.layout import STANDARD_LAYOUT, Lane, SubtitleLayout
 from scripts.karaoke_japanese import layout as japanese_layout
 from scripts.karaoke_japanese.layout import WIDE_LAYOUT
-from scripts.karaoke_zh_en import layout as zh_en_layout
-from scripts.karaoke_zh_en.layout import (
-    CHINESE_WIDE_LAYOUT,
-    ENGLISH_WIDE_LAYOUT,
-    ENGLISH_WIDE_RENDER_ADVANCE_SCALE,
-    ENGLISH_WIDE_WORD_GAP_EM,
-)
 from strange_uta_game.backend.domain import Sentence
 
 
-def test_preview_reexports_extracted_layout_contracts():
-    assert preview.Lane is Lane
-    assert preview.SubtitleLayout is SubtitleLayout
-    assert preview.STANDARD_LAYOUT is STANDARD_LAYOUT
-    assert preview.WIDE_LAYOUT is WIDE_LAYOUT
-    assert preview.CHINESE_WIDE_LAYOUT is CHINESE_WIDE_LAYOUT
-    assert preview.ENGLISH_WIDE_LAYOUT is ENGLISH_WIDE_LAYOUT
-    assert ENGLISH_WIDE_RENDER_ADVANCE_SCALE == 0.85
-    assert ENGLISH_WIDE_WORD_GAP_EM == 0.18
+def test_track_renderer_reexports_public_layout_contracts():
+    assert renderer.Lane is Lane
+    assert renderer.SubtitleLayout is SubtitleLayout
+    assert renderer.STANDARD_LAYOUT is STANDARD_LAYOUT
+    assert renderer.WIDE_LAYOUT is WIDE_LAYOUT
 
 
-def test_language_layout_packages_do_not_import_each_other():
+def test_japanese_layout_does_not_import_local_zh_en_extension():
     japanese_source = Path(japanese_layout.__file__).read_text(encoding="utf-8")
-    zh_en_source = Path(zh_en_layout.__file__).read_text(encoding="utf-8")
     assert "karaoke_zh_en" not in japanese_source
-    assert "karaoke_japanese" not in zh_en_source
 
 
 @pytest.mark.parametrize(
@@ -196,7 +183,7 @@ def test_wide_composition_gate_rejects_old_or_preserved_vinyl_backplate(
         direct.validate_current_wide_compositions([task])
 
 
-def test_build_review_ass_writes_file_and_returns_report(tmp_path: Path):
+def test_build_karaoke_ass_writes_file_and_returns_report(tmp_path: Path):
     sentence = Sentence.from_text("Hello", "singer")
     for index, character in enumerate(sentence.characters):
         character.add_timestamp(1_000 + index * 100)
@@ -215,7 +202,7 @@ def test_build_review_ass_writes_file_and_returns_report(tmp_path: Path):
     font_file = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "arial.ttf"
     assert font_file.is_file()
 
-    report = preview.build_review_ass(
+    report = renderer.build_karaoke_ass(
         project,
         output,
         font_file=font_file,
@@ -243,8 +230,8 @@ def _render_filter(
         output.write_bytes(b"video")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(preview.subprocess, "run", fake_run)
-    report = preview.render_review_clip(
+    monkeypatch.setattr(renderer.subprocess, "run", fake_run)
+    report = renderer.render_karaoke_video(
         ass_path=tmp_path / "subtitles.ass",
         audio_path=tmp_path / "audio.flac",
         composition_path=tmp_path / "composition.png",
@@ -263,7 +250,7 @@ def test_vinyl_defaults_to_rotate(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     report, graph = _render_filter(tmp_path, monkeypatch)
     assert report["vinyl_motion"] == "rotate"
     assert "rotate=2*PI*t/8" in graph
-    assert preview.make_parser().get_default("vinyl_motion") == "rotate"
+    assert renderer.make_parser().get_default("vinyl_motion") == "rotate"
     assert direct.make_parser().get_default("vinyl_motion") == "rotate"
 
 
@@ -299,13 +286,13 @@ def test_direct_preview_command_requests_lossless_only_for_lossless_sources(
         duration_seconds=12.5,
         profile="standard",
     )
-    command = direct.build_preview_command(
+    command = direct.build_track_render_command(
         task,
         temporary_video=tmp_path / "output.mp4",
         temporary_lossless_video=tmp_path / "output.mkv",
         temporary_ass=tmp_path / "output.ass",
         temporary_report=tmp_path / "output.json",
-        preview_script=tmp_path / "preview.py",
+        track_renderer_script=tmp_path / "renderer.py",
         av1_cq=38,
     )
 
@@ -326,13 +313,13 @@ def test_direct_preview_command_lossless_companion_is_explicit_opt_in(
         duration_seconds=12.5,
         profile="standard",
     )
-    command = direct.build_preview_command(
+    command = direct.build_track_render_command(
         task,
         temporary_video=tmp_path / "output.mp4",
         temporary_lossless_video=tmp_path / "output.mkv",
         temporary_ass=tmp_path / "output.ass",
         temporary_report=tmp_path / "output.json",
-        preview_script=tmp_path / "preview.py",
+        track_renderer_script=tmp_path / "renderer.py",
         av1_cq=38,
         lossless_companion=True,
     )
@@ -353,13 +340,13 @@ def test_direct_preview_command_rejects_mp3_lossless_opt_in(tmp_path: Path):
         profile="standard",
     )
     with pytest.raises(direct.DirectAV1420RenderError, match="lossless source"):
-        direct.build_preview_command(
+        direct.build_track_render_command(
             task,
             temporary_video=tmp_path / "output.mp4",
             temporary_lossless_video=tmp_path / "output.mkv",
             temporary_ass=tmp_path / "output.ass",
             temporary_report=tmp_path / "output.json",
-            preview_script=tmp_path / "preview.py",
+            track_renderer_script=tmp_path / "renderer.py",
             av1_cq=38,
             lossless_companion=True,
         )
@@ -418,7 +405,9 @@ def test_report_only_mp3_does_not_probe_or_require_mkv(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(direct, "validate_preview_report", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        direct, "validate_track_render_report", lambda *_a, **_k: None
+    )
     # This test isolates the MP3/MKV selection policy.  ASS generation identity
     # is covered by the direct-renderer gate tests with real minimal ASS data.
     monkeypatch.setattr(
@@ -548,7 +537,7 @@ def test_fresh_render_full_decode_flows_into_real_media_verifiers(
     mp4_decode_flags: list[bool] = []
     mkv_decode_flags: list[bool] = []
 
-    def fake_run_preview(command):
+    def fake_run_track_renderer(command):
         Path(command[command.index("--output") + 1]).write_bytes(b"mp4")
         Path(command[command.index("--ass-output") + 1]).write_text(
             "ass",
@@ -580,8 +569,10 @@ def test_fresh_render_full_decode_flows_into_real_media_verifiers(
             "decode": {"returncode": 0} if performed else None,
         }
 
-    monkeypatch.setattr(direct, "run_preview", fake_run_preview)
-    monkeypatch.setattr(direct, "validate_preview_report", lambda *_a, **_k: None)
+    monkeypatch.setattr(direct, "run_track_renderer", fake_run_track_renderer)
+    monkeypatch.setattr(
+        direct, "validate_track_render_report", lambda *_a, **_k: None
+    )
     # This test isolates full-decode flag propagation.  The ASS/report
     # generation gate has dedicated tests in test_render_karaoke_direct_av1_420_album.
     monkeypatch.setattr(
@@ -608,7 +599,7 @@ def test_fresh_render_full_decode_flows_into_real_media_verifiers(
 
     result = direct.render_one(
         task,
-        preview_script=tmp_path / "preview.py",
+        track_renderer_script=tmp_path / "renderer.py",
         ffmpeg=None,
         av1_cq=38,
         libass_font_probe={"ok": True, "probe_kind": "real_lyrics"},

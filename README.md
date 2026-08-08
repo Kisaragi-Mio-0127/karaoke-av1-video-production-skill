@@ -123,7 +123,7 @@ application. The integration bundle is installed into a compatible checkout
 because several production scripts use its SUG domain model, parser, exporters,
 and editor/audio interfaces:
 
-- `karaoke_timing.py`, `karaoke_review_preview.py`, `sug_ruby.py`, and
+- `karaoke_timing.py`, `render_karaoke_track.py`, `sug_ruby.py`, and
   `karaoke_mms_editable.py` import upstream Python modules directly.
 - Full-auto, staged MMS, direct rerender, and batch entry scripts depend on
   those modules transitively and must run from the target checkout through its

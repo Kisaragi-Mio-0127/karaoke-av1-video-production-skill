@@ -61,7 +61,7 @@ ID3_TEXT_FRAMES = {
 
 
 def executable(explicit: Path | None, env_name: str, command: str) -> Path:
-    """Resolve the requested member of the project FFmpeg tool pair."""
+    """Resolve FFmpeg from the project pair and Rubber Band explicitly."""
 
     try:
         if command == "ffmpeg":
@@ -70,6 +70,18 @@ def executable(explicit: Path | None, env_name: str, command: str) -> Path:
             return resolve_ffprobe(explicit, root=ROOT)
     except RuntimeError as error:
         raise SystemExit(str(error)) from error
+    if command == "rubberband":
+        candidates = [
+            explicit,
+            Path(value) if (value := os.environ.get(env_name)) else None,
+            Path(found) if (found := shutil.which(command)) else None,
+        ]
+        for candidate in candidates:
+            if candidate is not None and candidate.is_file():
+                return candidate.resolve()
+        raise SystemExit(
+            f"Cannot find {command}; pass --{command} or set {env_name}"
+        )
     raise SystemExit(f"Unsupported executable: {command} ({env_name})")
 
 

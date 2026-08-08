@@ -113,3 +113,13 @@ def test_wav_id3_metadata_carries_album_artist_and_disc(tmp_path: Path) -> None:
     assert b"TPE2" in data
     assert b"TPOS" in data
     assert b"COMM" in data
+
+
+def test_executable_accepts_explicit_rubberband(tmp_path: Path) -> None:
+    rubberband = tmp_path / "rubberband.exe"
+    rubberband.write_bytes(b"stub")
+
+    assert (
+        pitch_shift_audio.executable(rubberband, "RUBBERBAND", "rubberband")
+        == rubberband.resolve()
+    )

@@ -1,5 +1,7 @@
 # Japanese Full-Auto and MMS Contract
 
+[简体中文](mms-workflows.zh-CN.md) | English
+
 Run commands from the StrangeUtaGame project root with `uv run --no-sync`.
 This public integration contains Japanese and language-neutral workflow files.
 

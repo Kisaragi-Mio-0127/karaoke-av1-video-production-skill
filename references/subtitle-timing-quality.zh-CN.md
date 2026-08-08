@@ -1,6 +1,62 @@
-# Subtitle Timing And Quality Gates（中文入口）
+# 字幕时间与质量门禁
 
-本文件只作为中文入口，不复制独立的模型路径、MMS流程或布局常数。
-规范内容请阅读 [English quality gates](subtitle-timing-quality.md)、
-[MMS workflow contract](mms-workflows.md) 和
-[single-source wide-layout contract](wide-visual-templates.md)。
+[English](subtitle-timing-quality.md) | 简体中文
+
+将这些门禁用于语义短语分段、提示字幕显示、日文注音、日文full-auto和分阶段MMS契约，以及相邻行高亮释放。不要从本参考为另一种语言推断MMS接口。
+
+## 事实链与语义短语
+
+追踪每一次生成，依次经过：
+
+```text
+source lyrics -> candidate ruby fill -> canonical SUG
+-> contextual ruby review/correction -> timing and phrase decisions
+-> read-only renderer -> ASS and render report
+-> encoded video -> promoted or archived output
+```
+
+在每一层记录生成ID或等价证据。对于专用日文MMS，任何`*_sha256`值仅用于报告，绝不能作为检查、门禁、例外或退出输入。规范SUG是可编辑的事实来源：候选生成填充缺失注音，审核写入已接受的修正，渲染读取已审核项目。已审核短语必须逐字准确地重新组成每个归一化源行。使用完整源行以及稳定的segment或occurrence身份标识覆盖规则，断言命中次数，并拒绝不可达、重复或过宽的规则。
+
+将较长但语义完整的短语记录为已审核例外，并在目标字号和尺寸下验证视觉适配。只在获批准的换气点或语义边界添加语义间距，同时记录字符索引以及一个像素或em增量。
+
+对于日文宽屏布局，在应用按字符数分割前测量完整行。只要目标字号下能够容纳，就保持整行不变。如果必须分割，绝不要在连续片假名串内部切分；这是语言规则，不是歌曲专属的显示覆盖。
+
+## 注音与可编辑项目
+
+将注音词边界与读音正确性视为独立门禁。纯片假名不需要单独注音。在只读规范视图中忽略过时的纯片假名注音span，不要改写源SUG。保留其他已审核注音，适当时保持多汉字词汇单元完整，不要仅因读音连续就合并相邻词。根据完整短语而不是全局表层形式替换来解析上下文相关读音。
+
+对于每一行带注音的歌词，检查规范SUG的`linked_to_next`链，并在SUG、ASS/报告和渲染几何中比较相同的表层跨度和读音。记录源层、可编辑层和渲染层状态，以及置信度、证据、审核身份、前后SUG身份、例外、未改变时间状态和代表帧。
+
+当自动证据与发布检查一致时，跳过手动时间审核。需要听音或编辑时，确定规范项目，检查恢复副本，从项目目录解析相对媒体路径，并证明音频确实到达播放引擎。探针打开项目但不保存；时间编辑随后在正常可编辑模式下完成，并保存到规范SUG。
+
+## 显式日文MMS工作流、编辑器与独立ASR
+
+`run_karaoke_japanese_full_auto.py`是默认的首次运行入口，`run_karaoke_japanese_mms_workflow.py`是分阶段MMS/恢复入口。它仅限日文，且与批量渲染分离。Full-auto要求`--manifest`、`--song-id`、`--source`和新的`--output-dir`；它在调用分阶段包装器前准备私有初始SUG。分阶段包装器也可以接收单个显式`--sug`用于恢复或重新渲染。两条路径都在`render/artwork-current`中构建当前构图，而显式`--composition`仍是高级门控覆盖。任何一条路径都不得重新获取歌词或修改已解析的输入。
+
+工作流通过`--mms-model-path`使用项目自有的`models/mms/model.pt`检查点。`.cache`保留给派生运行时数据和证据；它不是模型权威来源，本契约也不包含下载回退。封面访问仍是独立的策略决定。这两项策略都不授权远程歌词、音频或输入替换。在不暴露不必要绝对路径的前提下，记录解析后的模型身份和缓存来源。
+
+记录解析后的模型、两项网络决策和所有输入身份，然后将选定输入解析为绝对路径并运行：
+
+```text
+absolute-path/schema/song-language/token-index/timeline preflight
+-> MMS dual-audio audit -> timing-override build
+-> render gate -> new ASS/report/video output
+```
+
+审计门禁、覆盖构建门禁、绝对路径/模式/歌曲语言、token/索引、时间线以及ASS/报告/媒体语义必须在渲染前通过。包装器创建`audit/`、`build/`和`render/`；这些是其唯一的工作流子目录。只有`build/timing_overrides.json`中的已审核`visual_release_overrides_ms`会进入`render/`。MMS审计数据、其他构建值和分离人声仍是时间证据，不是交付音轨。门禁失败只能供审核使用，不得创建或替换发布视频。如果专用入口不存在，不要通过给另一个工作流增加MMS标志来重新创建它。
+
+独立ASR是强制对齐之外的单独可选链路。文档化路径使用已配置的日文profile；其他profile需要经过验证的适配器。独立ASR不可用、失败或无法匹配冻结歌词窗口时，记录`unresolved`，不要以插值或强制对齐输出替代。
+
+批量渲染绝不运行MMS。如果固定路径的`timing_overrides`产物存在，批量流程自动消费已有的`visual_release_overrides_ms`并记录产物身份；它既不创建覆盖，也不要求MMS生成覆盖。渲染器不会验证MMS来源，因此在批量运行前验证该产物的来源、生成身份、审核状态和日文工作流门禁。
+
+编辑器探针隔离设置、缓存和恢复状态；阻止保存；记录项目和音频身份、解析后的媒体路径、引擎元数据、有限且非空的波形证据、脏状态和退出后的项目身份。强制退出或缺失最终身份检查仍为`unresolved`。
+
+## 高亮、视觉适配与测试
+
+从ASS卡拉OK标签、事件时间、`post-roll`和`fade`推导相邻行释放。分别记录事件开始、累积卡拉OK时长、事件结束、`post-roll`结束、`fade`结束、下一行可见开始和最终释放。当证据冲突时检查边界帧。
+
+对于逐字符高亮，分别记录声学起点、视觉起点、视觉释放、行释放、事件结束和`fade`结束。确保每个可见字符在ASS时间量化后都有严格递增的视觉开始时间，包括长音符号、小假名、数字和标点。
+
+对于从封面导出的颜色，在Lab邻域面积聚合前，按绝对色度过滤近黑像素。记录提取方法、提取器身份、排序调色板、候选项、接受的RGB值和审核决定。将接受的颜色一致应用到可编辑歌手颜色、ASS的`Main`/`Glow`以及活动提示字幕颜色，验证RGB到ASS-BGR的转换，并检查高亮前、期间和之后的帧。
+
+在可写的项目本地临时目录中运行渲染器、预览、分段、提示字幕、注音、释放和打包测试。覆盖覆盖规则可达性、短语重组、提示字幕时间、字号例外、三层注音状态、可编辑项目身份、相对媒体解析、音频加载证据；仅当选择专用工作流时，覆盖日文MMS输入身份及审计/构建门禁；以及ASS/报告身份、释放字段和边界帧。

@@ -1,3 +1,5 @@
+# Repository lint/format policy only; Python and model environments are owned by
+# the target StrangeUtaGame checkout.
 target-version = "py312"
 line-length = 100
 extend-exclude = [".test-tmp"]

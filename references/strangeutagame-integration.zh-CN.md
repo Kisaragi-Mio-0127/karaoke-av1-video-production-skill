@@ -117,12 +117,61 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py --manifes
 
 ## 布局与交付
 
-当前宽屏构图、spectrum/vinyl选择和次级覆盖规则只在
-[wide-visual-templates.md](wide-visual-templates.md)中定义。本集成参考只保留高层说明，不复制几何常数。
+当前宽屏构图、spectrum/vinyl选择和次级覆盖规则只在[宽屏视觉模板](wide-visual-templates.zh-CN.md)中定义。本集成参考只保留高层说明，不复制几何常数。
 
-默认交付是带硬字幕和AAC-LC音频的AV1`yuv420p`MP4。MKV/FLAC和完整空解码都是显式选项。提升交付前执行字幕、流、时长和代表帧门禁；详见
-[av1-420-commands.md](av1-420-commands.md)和
-[batch-release-gates.md](batch-release-gates.md)。
+默认交付是带硬字幕和AAC-LC音频的AV1`yuv420p`MP4。MKV/FLAC和完整空解码都是显式选项。提升交付前执行字幕、流、时长和代表帧门禁；详见[AV1 4:2:0命令](av1-420-commands.zh-CN.md)和[批量发布门禁](batch-release-gates.zh-CN.md)。
+
+## 各脚本对上游StrangeUtaGame的依赖
+
+这些集成文件是在StrangeUtaGame之外后续开发的，不属于其上游Git历史，本仓库也不拥有或包含上游`strange_uta_game`源码。下表中的“可独立运行”是指不依赖上游StrangeUtaGame代码和工作区资源，并不表示不依赖本集成自己的Python包、输入媒体、字体、FFmpeg、模型或其他明确列出的工具。
+
+安装器把清单授权的所有Python路径安装到`<target>/scripts/`，包括`karaoke_common`、`karaoke_japanese`和`karaoke_zh_en`包目录；两份requirements文件安装到目标根目录。上游包仍位于`<target>/src/strange_uta_game/`，固定版本requirements中的本地`-e .`条目使其可从目标唯一的`.venv`导入。MMS和Whisper资产是位于`<target>/models/`下的独立项目自有运行时文件。
+
+### 直接或传递依赖上游代码
+
+| 脚本/模块 | 依赖的上游模块、资源或运行时 | 安装位置 | 可脱离上游独立运行？ |
+|---|---|---|---|
+| `karaoke_timing.py` | 直接导入`backend.application.auto_check_service`、`backend.domain`、`backend.infrastructure.exporters`和`backend.infrastructure.persistence.sug_io`；还使用SUG项目、字体、Whisper/stable-ts和FFmpeg。 | `<target>/scripts/karaoke_timing.py` | 否。 |
+| `karaoke_review_preview.py` | 直接导入上游`Character`、`Sentence`和`SugProjectParser`；还导入`karaoke_timing.py`并调用FFmpeg完成预览/渲染。 | `<target>/scripts/karaoke_review_preview.py` | 否。 |
+| `karaoke_mms_editable.py` | 直接从上游SUG持久化模块导入`SugProjectParser`，读取并写入SUG companion。 | `<target>/scripts/karaoke_mms_editable.py` | 否。 |
+| `sug_ruby.py` | 对象回写路径动态导入上游`Ruby`和`RubyPart`；仅检查和验证原始JSON的路径不需要该导入。 | `<target>/scripts/sug_ruby.py` | 部分可以：仅JSON验证可脱离上游，对象回写不可。 |
+| `audit_karaoke_asr_recognition.py` | 从`karaoke_timing.py`导入LRC/修正辅助函数，因此加载这些函数会初始化上游导入；此外需要项目自有Whisper权重和stable-whisper/torch运行时。 | `<target>/scripts/audit_karaoke_asr_recognition.py` | 受支持的审计路径不可。 |
+| `audit_karaoke_mms_alignment.py` | 导入`karaoke_timing.py`和规范ruby辅助函数；读取SUG时间、原始/MSST音频，并通过torchaudio MMS_FA加载本地`models/mms/model.pt`。 | `<target>/scripts/audit_karaoke_mms_alignment.py` | 否。 |
+| `build_karaoke_mms_overrides.py` | 从`karaoke_timing.py`导入时间结构/辅助函数，并读取SUG/MMS审计产物。 | `<target>/scripts/build_karaoke_mms_overrides.py` | 否。 |
+| `sync_karaoke_editable_ruby.py` | 针对SUG项目数据使用`sug_ruby.py`；规范对象回写路径依赖上游领域类。 | `<target>/scripts/sync_karaoke_editable_ruby.py` | 受支持的集成回写流程不可。 |
+| `karaoke_workflow.py` | 使用同一Python解释器导入并启动`karaoke_review_preview.py`，因此继承预览/时间模块的上游导入；还使用目标项目根目录、资产、FFmpeg和发布辅助模块。 | `<target>/scripts/karaoke_workflow.py` | 否。 |
+| `render_karaoke_direct_av1_420_album.py` | 每个渲染任务都执行`karaoke_review_preview.py`，因此继承其直接上游解析器/领域依赖；还使用SUG文件、图稿/字体资产和FFmpeg AV1编码器。 | `<target>/scripts/render_karaoke_direct_av1_420_album.py` | 否。 |
+| `run_karaoke_japanese_workflow.py` | `karaoke_workflow.py`的轻量入口，继承其预览、SUG、项目布局和FFmpeg依赖。 | `<target>/scripts/run_karaoke_japanese_workflow.py` | 否。 |
+| `run_karaoke_japanese_mms_workflow.py` | 导入MMS审计/构建、`karaoke_mms_editable.py`、`karaoke_review_preview.py`和`karaoke_workflow.py`；需要规范/companion SUG、本地MMS模型、音频stem、字体和FFmpeg。 | `<target>/scripts/run_karaoke_japanese_mms_workflow.py` | 否。 |
+| `karaoke_full_auto.py` | 导入`karaoke_timing.py`、ASR和MSST准备模块，然后延迟导入日文MMS工作流；需要目标清单/布局、上游SUG运行时、本地MMS/Whisper模型、MSST适配器和FFmpeg。 | `<target>/scripts/karaoke_full_auto.py` | 否。 |
+| `run_karaoke_japanese_full_auto.py` | `karaoke_full_auto.py`的日文限定入口，继承完整的时间、MMS、SUG、MSST、模型和渲染依赖链。 | `<target>/scripts/run_karaoke_japanese_full_auto.py` | 否。 |
+
+### 不导入上游代码但依赖工件或布局
+
+| 脚本/模块 | 依赖的上游模块、资源或运行时 | 安装位置 | 可脱离上游独立运行？ |
+|---|---|---|---|
+| `finalize_karaoke_release.py` | 不导入上游代码，但会验证预期的规范/companion `.sug`工件和集成发布布局；使用imageio-ffmpeg。 | `<target>/scripts/finalize_karaoke_release.py` | 有条件可以：不依赖上游代码，但依赖已有SUG工件/布局。 |
+| `build_karaoke_wide_artwork.py`<br>`karaoke_cover_palette.py`<br>`karaoke_color_plan.py`<br>`karaoke_common/artwork.py` | 不导入上游代码，使用Pillow和本集成输入生成确定性图稿/调色板。 | `<target>/scripts/`下对应路径 | 可以，但需要声明的图片、字体和元数据。 |
+| `inspect_karaoke_media.py`<br>`transcode_karaoke_av1.py`<br>`render_vinyl_karaoke.py`<br>`pitch_shift_audio.py` | 不导入上游代码，使用媒体/清单元数据和外部运行时：FFmpeg，以及所选路径中的FFprobe；移调还需要Rubber Band 3.x。 | `<target>/scripts/`下对应路径 | 可以，但需要相应媒体和外部命令。 |
+| `prepare_karaoke_msst_vocals.py` | 不导入上游代码；加载外部本地`prepare_sovits41_msst_stems.py`适配器及其MSST运行时/模型文件，这些内容由本集成之外的组件拥有。 | `<target>/scripts/prepare_karaoke_msst_vocals.py` | 相对于StrangeUtaGame可以；相对于独立MSST适配器/运行时不可以。 |
+| `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | 不导入上游代码，处理集成清单、路径、快照或发布文件；专辑规划通过imageio-ffmpeg解析媒体。 | `<target>/scripts/`下对应路径 | 可以，但需要声明的集成输入。 |
+| `karaoke_model_paths.py` | 不导入上游代码，只解析项目自有`models/mms/model.pt`和`models/whisper/`路径。 | `<target>/scripts/karaoke_model_paths.py` | 相对于上游代码可以；调用方仍需要模型文件。 |
+| `karaoke_common/layout.py`<br>`karaoke_japanese/layout.py`<br>`karaoke_zh_en/layout.py` | 不导入上游代码，是本集成自有布局定义。`karaoke_zh_en`包提供通用预览布局，不提供中文/英文工作流入口。 | `<target>/scripts/`下对应包路径 | 可以；这些是模块，不是独立命令。 |
+| `karaoke_common/device.py` | 不导入上游代码，动态加载`torch`选择CPU/CUDA。 | `<target>/scripts/karaoke_common/device.py` | 可以；这是模块，不是独立命令。 |
+| `karaoke_common/pronunciation.py` | 不直接导入上游代码，使用`sug_ruby.py`中支持JSON的部分执行注音策略。 | `<target>/scripts/karaoke_common/pronunciation.py` | 验证路径可以；这是模块，不是独立命令。 |
+| `karaoke_common/__init__.py`<br>`karaoke_japanese/__init__.py`<br>`karaoke_zh_en/__init__.py` | 仅为包初始化文件，依赖取决于其导出的包成员。 | `<target>/scripts/`下对应包路径 | 相对于上游代码可以；不是独立命令。 |
+
+### Skill侧安装与兼容性工具
+
+这些工具保留在Skill工作区，集成安装器不会把它们复制到目标工作区。
+
+| 工具 | 依赖的上游模块、资源或运行时 | 位置 | 可脱离上游独立运行？ |
+|---|---|---|---|
+| `install_strangeutagame_integration.py` | 要求兼容目标布局包含`pyproject.toml`、`src/strange_uta_game/`和`scripts/`，只复制清单授权的集成文件。 | `<skill>/scripts/` | 否：需要目标工作区，但不导入上游代码。 |
+| `check_sug_compatibility.py` | 从`<target>/src`直接导入上游版本、`SugMigrator`和`SugProjectParser`，读取代表性SUG项目但不保存。 | `<skill>/scripts/` | 否。 |
+| `open_editable_project_with_audio_probe.py` | 动态导入上游GUI/应用目录、时间加载器/接口、项目存储、SUG持久化和目标`main`模块；还探测上游音频转换钩子和媒体。 | `<skill>/scripts/` | 否。 |
+| `check_karaoke_environment.py`<br>`bootstrap_karaoke_environment.py`<br>`karaoke_bootstrap.py` | 需要兼容目标布局和目标`.venv`；探测或安装清单内Python模块（包括目标自身的可编辑`strange_uta_game`），并管理项目自有模型文件；还探测`git`、`uv`、FFmpeg/FFprobe和硬件运行时。 | `<skill>/scripts/` | 否：用途就是检查/设置目标工作区。 |
+| Skill侧`pitch_shift_audio.py` | 无上游依赖，是独立的FFmpeg/FFprobe/Rubber Band 3.x工具。 | `<skill>/scripts/pitch_shift_audio.py` | 可以。 |
 
 ## 已安装文件与验证
 

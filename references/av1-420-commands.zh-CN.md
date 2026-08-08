@@ -1,4 +1,4 @@
-# AV1 4:2:0 命令模式
+# AV1 4:2:0命令模式
 
 [English](av1-420-commands.md) | 简体中文
 

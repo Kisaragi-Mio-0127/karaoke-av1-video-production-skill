@@ -6,8 +6,7 @@
 
 ## 可以自动完成什么
 
-推荐的日文入口是单命令
-`scripts/run_karaoke_japanese_full_auto.py`。给定清单、歌曲ID、冻结歌词和新的输出目录后，它会：
+推荐的日文入口是单命令`scripts/run_karaoke_japanese_full_auto.py`。给定清单、歌曲ID、冻结歌词和新的输出目录后，它会：
 
 - 准备选中歌曲的MSST人声分轨；
 - 生成私有初始SUG；
@@ -68,8 +67,18 @@ python scripts/install_strangeutagame_integration.py --target <project> --dry-ru
 python scripts/install_strangeutagame_integration.py --target <project> --force
 ```
 
-安装器只复制
-[`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json)授权的路径，并为被替换文件保留回滚备份。
+安装器只复制[`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json)授权的路径，并为被替换文件保留回滚备份。
+
+## 对上游StrangeUtaGame的依赖
+
+本仓库不包含也不替代上游StrangeUtaGame应用。集成包必须安装到兼容工作区，因为部分制作脚本会使用其SUG领域模型、解析器、导出器以及编辑器和音频接口：
+
+- `karaoke_timing.py`、`karaoke_review_preview.py`、`sug_ruby.py`和`karaoke_mms_editable.py`直接导入上游Python模块。
+- Full-auto、分阶段MMS、直接重渲染和批量入口会间接使用这些模块，因此必须从目标工作区通过其现有`.venv`运行。
+- 媒体检查、美术图、取色、变调、打包、快照和转码工具不导入上游代码，但其中一部分仍会读取目标项目的清单、SUG、字体、媒体或目录约定。
+- 仓库侧安装器和环境工具在目标工作区外运行，但会通过`--target`接收StrangeUtaGame路径，并不会替代应用本身。
+
+完整的逐脚本依赖与安装位置见[StrangeUtaGame集成说明](references/strangeutagame-integration.zh-CN.md)，机器可读的事实源是[`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json)。
 
 ## 主要命令
 
@@ -118,12 +127,9 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
 
 ## 布局与交付
 
-full-auto入口会自动准备当前宽屏布局。默认频谱呈现使用`spectrum`，黑胶视觉使用`vinyl`。几何参数只在单一事实源
-[wide-visual-templates.md](references/wide-visual-templates.md)中维护。
+full-auto入口会自动准备当前宽屏布局。默认频谱呈现使用`spectrum`，黑胶视觉使用`vinyl`。几何参数只在单一事实源[宽屏视觉模板](references/wide-visual-templates.zh-CN.md)中维护。
 
-默认交付物是包含AV1视频、硬字幕和AAC-LC音频的MP4。其他容器和完整解码诊断都必须显式选择，并在提升为交付物前完成验证。详见
-[batch-release-gates.md](references/batch-release-gates.md)和
-[av1-420-commands.md](references/av1-420-commands.md)。
+默认交付物是包含AV1视频、硬字幕和AAC-LC音频的MP4。其他容器和完整解码诊断都必须显式选择，并在提升为交付物前完成验证。详见[批量发布门禁](references/batch-release-gates.zh-CN.md)和[AV1 4:2:0命令](references/av1-420-commands.zh-CN.md)。
 
 ## 仓库结构
 
@@ -132,6 +138,21 @@ full-auto入口会自动准备当前宽屏布局。默认频谱呈现使用`spec
 - `integration/strangeutagame/`：可安装的日文和通用支持文件。
 - `scripts/`：安装器、环境检查和显式Bootstrap工具。
 - `tests/`：仓库及集成回归测试，不会安装到StrangeUtaGame。
+- `ruff.toml`：本仓库的Ruff代码检查配置；它不会创建Python环境，也不会影响生产渲染。
+
+## 文档索引
+
+| 主题 | English | 简体中文 |
+| --- | --- | --- |
+| Full-auto与MMS | [English](references/mms-workflows.md) | [中文](references/mms-workflows.zh-CN.md) |
+| StrangeUtaGame集成与逐脚本依赖 | [English](references/strangeutagame-integration.md) | [中文](references/strangeutagame-integration.zh-CN.md) |
+| ASR、SUG与变调 | [English](references/asr-sug-pitch.md) | [中文](references/asr-sug-pitch.zh-CN.md) |
+| 宽屏视觉模板 | [English](references/wide-visual-templates.md) | [中文](references/wide-visual-templates.zh-CN.md) |
+| 字幕与时间轴质量 | [English](references/subtitle-timing-quality.md) | [中文](references/subtitle-timing-quality.zh-CN.md) |
+| AV1 4:2:0命令 | [English](references/av1-420-commands.md) | [中文](references/av1-420-commands.zh-CN.md) |
+| 批量发布门禁 | [English](references/batch-release-gates.md) | [中文](references/batch-release-gates.zh-CN.md) |
+| 歌手颜色与顶部字幕 | [English](references/singer-overlays.md) | [中文](references/singer-overlays.zh-CN.md) |
+| 第三方组件说明 | [English](THIRD_PARTY_NOTICES.md) | [中文](THIRD_PARTY_NOTICES.zh-CN.md) |
 
 ## 验证
 
@@ -147,5 +168,4 @@ uv run --no-sync --project $project python scripts/install_strangeutagame_integr
   --target <project> --dry-run
 ```
 
-代码和文档使用GPL-3.0-only。运行时组件说明见
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+代码和文档使用GPL-3.0-only。运行时组件说明见[第三方组件说明](THIRD_PARTY_NOTICES.zh-CN.md)。

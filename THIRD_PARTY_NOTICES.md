@@ -1,5 +1,7 @@
 # Third-Party Notices
 
+[简体中文](THIRD_PARTY_NOTICES.zh-CN.md) | English
+
 ## MMS_FA model
 
 The optional forced-alignment workflow can load the `MMS_FA` model through

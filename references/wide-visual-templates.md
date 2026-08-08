@@ -1,5 +1,7 @@
 # Wide Visual Templates
 
+[简体中文](wide-visual-templates.zh-CN.md) | English
+
 This is the single source of truth for the current wide-layout geometry. Both
 `karaoke-av1-video-production` and
 `chinese-english-karaoke-production` link here; do not copy these constants

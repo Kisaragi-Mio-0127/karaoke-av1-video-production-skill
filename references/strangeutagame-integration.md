@@ -185,6 +185,70 @@ duration, and representative-frame gates before promotion; see
 [av1-420-commands.md](av1-420-commands.md) and
 [batch-release-gates.md](batch-release-gates.md).
 
+## Per-script upstream StrangeUtaGame dependencies
+
+These integration files were developed after and outside StrangeUtaGame; they
+are not files from its upstream Git history, and this repository does not own
+or contain the upstream `strange_uta_game` source. In the table below,
+"independent" means independent of upstream StrangeUtaGame code and checkout
+resources. It does not mean independent of the integration's own Python
+packages, input media, fonts, FFmpeg, models, or other explicitly listed tools.
+
+The installer places every manifest-authorized Python path under
+`<target>/scripts/` (including the `karaoke_common`, `karaoke_japanese`, and
+`karaoke_zh_en` package directories). It places the two requirements files at
+the target root. The upstream package remains at
+`<target>/src/strange_uta_game/` and is made importable in the target's one
+`.venv` by the pinned requirements file's local `-e .` entry. MMS and Whisper
+assets are separate project-owned runtime files under `<target>/models/`.
+
+### Direct or transitive upstream code dependencies
+
+| Script/module | Upstream module, resource, or runtime dependency | Installed location | Independent of upstream? |
+|---|---|---|---|
+| `karaoke_timing.py` | Directly imports `backend.application.auto_check_service`, `backend.domain`, `backend.infrastructure.exporters`, and `backend.infrastructure.persistence.sug_io`; also uses SUG projects, fonts, Whisper/stable-ts, and FFmpeg. | `<target>/scripts/karaoke_timing.py` | No. |
+| `karaoke_review_preview.py` | Directly imports upstream `Character`, `Sentence`, and `SugProjectParser`; also imports `karaoke_timing.py` and runs FFmpeg for preview/render work. | `<target>/scripts/karaoke_review_preview.py` | No. |
+| `karaoke_mms_editable.py` | Directly imports `SugProjectParser` from upstream SUG persistence and reads/writes SUG companions. | `<target>/scripts/karaoke_mms_editable.py` | No. |
+| `sug_ruby.py` | Its object-writeback path dynamically imports upstream `Ruby` and `RubyPart`; raw-JSON inspection and validation paths do not require that import. | `<target>/scripts/sug_ruby.py` | Partial: JSON-only validation can run without upstream; object writeback cannot. |
+| `audit_karaoke_asr_recognition.py` | Imports LRC/correction helpers from `karaoke_timing.py`, so loading those helpers initializes the upstream imports; additionally requires project-owned Whisper weights and stable-whisper/torch runtime. | `<target>/scripts/audit_karaoke_asr_recognition.py` | No for the supported audit path. |
+| `audit_karaoke_mms_alignment.py` | Imports `karaoke_timing.py` and canonical ruby helpers; consumes SUG timing plus original/MSST audio and loads the local `models/mms/model.pt` through torchaudio MMS_FA. | `<target>/scripts/audit_karaoke_mms_alignment.py` | No. |
+| `build_karaoke_mms_overrides.py` | Imports timing structures/helpers from `karaoke_timing.py` and consumes SUG/MMS audit artifacts. | `<target>/scripts/build_karaoke_mms_overrides.py` | No. |
+| `sync_karaoke_editable_ruby.py` | Uses `sug_ruby.py` against SUG project data; the canonical object's writeback path depends on upstream domain classes. | `<target>/scripts/sync_karaoke_editable_ruby.py` | No for the supported integrated writeback workflow. |
+| `karaoke_workflow.py` | Imports and launches `karaoke_review_preview.py` with the same Python executable; therefore inherits the preview/timing upstream imports. It also uses the target project root, assets, FFmpeg, and release helpers. | `<target>/scripts/karaoke_workflow.py` | No. |
+| `render_karaoke_direct_av1_420_album.py` | Executes `karaoke_review_preview.py` per render task and therefore inherits its direct upstream parser/domain dependency; also uses SUG files, artwork/font assets, and FFmpeg AV1 encoders. | `<target>/scripts/render_karaoke_direct_av1_420_album.py` | No. |
+| `run_karaoke_japanese_workflow.py` | Thin entry over `karaoke_workflow.py`; inherits its preview, SUG, project-layout, and FFmpeg dependencies. | `<target>/scripts/run_karaoke_japanese_workflow.py` | No. |
+| `run_karaoke_japanese_mms_workflow.py` | Imports MMS audit/build, `karaoke_mms_editable.py`, `karaoke_review_preview.py`, and `karaoke_workflow.py`; requires canonical/companion SUG files, local MMS model, audio stems, fonts, and FFmpeg. | `<target>/scripts/run_karaoke_japanese_mms_workflow.py` | No. |
+| `karaoke_full_auto.py` | Imports `karaoke_timing.py`, ASR, and MSST preparation, then lazily imports the Japanese MMS workflow; requires the target manifest/layout, upstream SUG runtime, local MMS/Whisper models, MSST adapter, and FFmpeg. | `<target>/scripts/karaoke_full_auto.py` | No. |
+| `run_karaoke_japanese_full_auto.py` | Japanese-only entry over `karaoke_full_auto.py`; inherits the complete timing, MMS, SUG, MSST, model, and render dependency chain. | `<target>/scripts/run_karaoke_japanese_full_auto.py` | No. |
+
+### Artifact/layout dependencies without upstream code imports
+
+| Script/module | Upstream module, resource, or runtime dependency | Installed location | Independent of upstream? |
+|---|---|---|---|
+| `finalize_karaoke_release.py` | Imports no upstream code, but validates expected canonical/companion `.sug` artifacts and the integration release layout; uses imageio-ffmpeg. | `<target>/scripts/finalize_karaoke_release.py` | Conditional: independent of upstream code, not of existing SUG artifacts/layout. |
+| `build_karaoke_wide_artwork.py`<br>`karaoke_cover_palette.py`<br>`karaoke_color_plan.py`<br>`karaoke_common/artwork.py` | No upstream import. These build deterministic artwork/palettes with Pillow and integration-owned inputs. | Corresponding paths under `<target>/scripts/` | Yes, with their declared images/fonts/metadata. |
+| `inspect_karaoke_media.py`<br>`transcode_karaoke_av1.py`<br>`render_vinyl_karaoke.py`<br>`pitch_shift_audio.py` | No upstream import. They use media/manifest metadata and external runtimes: FFmpeg (and FFprobe where selected); pitch shifting additionally requires Rubber Band 3.x. | Corresponding paths under `<target>/scripts/` | Yes, with the required media and external commands. |
+| `prepare_karaoke_msst_vocals.py` | No upstream import. It loads an external local `prepare_sovits41_msst_stems.py` adapter and its MSST runtime/model files, owned outside this integration. | `<target>/scripts/prepare_karaoke_msst_vocals.py` | Yes with respect to StrangeUtaGame; no with respect to the separate MSST adapter/runtime. |
+| `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | No upstream import. They operate on integration manifests, paths, snapshots, or release files; album planning resolves imageio-ffmpeg for media validation. | Corresponding paths under `<target>/scripts/` | Yes, with their declared integration inputs. |
+| `karaoke_model_paths.py` | No upstream import; resolves only project-owned `models/mms/model.pt` and `models/whisper/` paths. | `<target>/scripts/karaoke_model_paths.py` | Yes with respect to upstream code; model files are still required by callers. |
+| `karaoke_common/layout.py`<br>`karaoke_japanese/layout.py`<br>`karaoke_zh_en/layout.py` | No upstream import; these are integration-owned layout definitions. The `karaoke_zh_en` package supplies generic preview layouts, not Chinese/English workflow entries. | Corresponding package paths under `<target>/scripts/` | Yes; modules, not standalone commands. |
+| `karaoke_common/device.py` | No upstream import; dynamically loads `torch` to select CPU/CUDA. | `<target>/scripts/karaoke_common/device.py` | Yes; module, not a standalone command. |
+| `karaoke_common/pronunciation.py` | No direct upstream import; uses the JSON-capable portions of `sug_ruby.py` to enforce pronunciation policy. | `<target>/scripts/karaoke_common/pronunciation.py` | Yes for its validation path; module, not a standalone command. |
+| `karaoke_common/__init__.py`<br>`karaoke_japanese/__init__.py`<br>`karaoke_zh_en/__init__.py` | Package initializers only; dependencies are those of the package members they export. | Corresponding package paths under `<target>/scripts/` | Yes for upstream code; not standalone commands. |
+
+### Skill-side installation and compatibility tools
+
+These tools stay in the Skill checkout; the integration installer does not
+copy them into the target.
+
+| Tool | Upstream module, resource, or runtime dependency | Location | Independent of upstream? |
+|---|---|---|---|
+| `install_strangeutagame_integration.py` | Requires a compatible target layout containing `pyproject.toml`, `src/strange_uta_game/`, and `scripts/`; copies only manifest-authorized integration files. | `<skill>/scripts/` | No: it needs a target checkout, but does not import upstream code. |
+| `check_sug_compatibility.py` | Directly imports upstream version, `SugMigrator`, and `SugProjectParser` from `<target>/src`; reads representative SUG projects without saving them. | `<skill>/scripts/` | No. |
+| `open_editable_project_with_audio_probe.py` | Dynamically imports upstream GUI/app directories, timing loader/interface, project store, SUG persistence, and the target `main` module; also probes upstream audio-converter hooks and media. | `<skill>/scripts/` | No. |
+| `check_karaoke_environment.py`<br>`bootstrap_karaoke_environment.py`<br>`karaoke_bootstrap.py` | Require a compatible target layout and target `.venv`; probe or install the manifest's Python modules, including the target's editable `strange_uta_game`, and manage project-owned model files. They also probe `git`, `uv`, FFmpeg/FFprobe, and hardware runtime. | `<skill>/scripts/` | No: their purpose is to check/bootstrap a target checkout. |
+| Skill-side `pitch_shift_audio.py` | No upstream dependency; standalone FFmpeg/FFprobe/Rubber Band 3.x utility. | `<skill>/scripts/pitch_shift_audio.py` | Yes. |
+
 ## Installed files and validation
 
 The installed Japanese/general bundle contains the authorized scripts,

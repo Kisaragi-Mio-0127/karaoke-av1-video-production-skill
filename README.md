@@ -113,6 +113,30 @@ The installer copies only paths authorized by
 [`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json)
 and keeps rollback backups for replaced files.
 
+## Dependency on upstream StrangeUtaGame
+
+This repository does not contain or replace the upstream StrangeUtaGame
+application. The integration bundle is installed into a compatible checkout
+because several production scripts use its SUG domain model, parser, exporters,
+and editor/audio interfaces:
+
+- `karaoke_timing.py`, `karaoke_review_preview.py`, `sug_ruby.py`, and
+  `karaoke_mms_editable.py` import upstream Python modules directly.
+- Full-auto, staged MMS, direct rerender, and batch entry scripts depend on
+  those modules transitively and must run from the target checkout through its
+  existing `.venv`.
+- Media inspection, artwork, palette, pitch-shift, packaging, snapshot, and
+  transcoding helpers do not import upstream code, but some still consume the
+  manifest, SUG, font, media, or directory conventions of the target project.
+- Repository-side installer and environment tools run outside the target, but
+  receive the StrangeUtaGame checkout through `--target` and never substitute
+  for the application itself.
+
+The complete per-script dependency and installation map is in
+[StrangeUtaGame integration](references/strangeutagame-integration.md). The
+machine-readable source is
+[`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json).
+
 ## Main commands
 
 Japanese full-auto production from a manifest track:
@@ -186,6 +210,22 @@ must be verified before promotion. See
 - `scripts/`: installer, environment check, and explicit bootstrap tools.
 - `tests/`: repository and integration regression tests; not installed into
   StrangeUtaGame.
+- `ruff.toml`: Ruff lint configuration for this repository; it does not create
+  a Python environment or affect production rendering.
+
+## Documentation
+
+| Topic | English | 简体中文 |
+| --- | --- | --- |
+| Full-auto and MMS | [English](references/mms-workflows.md) | [中文](references/mms-workflows.zh-CN.md) |
+| StrangeUtaGame integration and per-script dependencies | [English](references/strangeutagame-integration.md) | [中文](references/strangeutagame-integration.zh-CN.md) |
+| ASR, SUG, and pitch shifting | [English](references/asr-sug-pitch.md) | [中文](references/asr-sug-pitch.zh-CN.md) |
+| Wide visual templates | [English](references/wide-visual-templates.md) | [中文](references/wide-visual-templates.zh-CN.md) |
+| Subtitle and timing quality | [English](references/subtitle-timing-quality.md) | [中文](references/subtitle-timing-quality.zh-CN.md) |
+| AV1 4:2:0 commands | [English](references/av1-420-commands.md) | [中文](references/av1-420-commands.zh-CN.md) |
+| Batch release gates | [English](references/batch-release-gates.md) | [中文](references/batch-release-gates.zh-CN.md) |
+| Singer colours and overlays | [English](references/singer-overlays.md) | [中文](references/singer-overlays.zh-CN.md) |
+| Third-party component notices | [English](THIRD_PARTY_NOTICES.md) | [中文](THIRD_PARTY_NOTICES.zh-CN.md) |
 
 ## Validation
 

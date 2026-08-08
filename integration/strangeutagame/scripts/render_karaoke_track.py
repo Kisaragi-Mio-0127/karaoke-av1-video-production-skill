@@ -28,6 +28,7 @@ from scripts.karaoke_color_plan import (  # noqa: E402
     parse_singer_color_overrides,
     resolve_color_plan,
 )
+from scripts.karaoke_common.ffmpeg_tools import resolve_ffmpeg  # noqa: E402
 from scripts.karaoke_common.layout import (  # noqa: E402
     CANVAS_WIDTH,
     MAIN_ADVANCE_SCALE,
@@ -48,14 +49,13 @@ from scripts.karaoke_common.layout import (  # noqa: E402
     Lane,
     SubtitleLayout,
 )
-from scripts.karaoke_common.ffmpeg_tools import resolve_ffmpeg  # noqa: E402
 from scripts.karaoke_common.pronunciation import (  # noqa: E402
     PRONUNCIATION_VALIDATION_MODES,
     validate_pronunciation,
 )
 from scripts.karaoke_common.visuals import (  # noqa: E402
-    VISUAL_STYLES,
     VINYL_MOTIONS,
+    VISUAL_STYLES,
     build_visual_filter_graph,
     normalize_rgb_hex,
 )
@@ -1323,6 +1323,14 @@ _BAD_DISPLAY_BOUNDARY_START_CHARS = frozenset(
     "・ーぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ"
 )
 _BAD_DISPLAY_BOUNDARY_END_CHARS = frozenset("・ーっッ")
+_JAPANESE_CONTINUATION_BLOCKS = frozenset(
+    {"けど", "けれど", "から", "ので", "のに", "ても", "なら", "たら", "れば"}
+)
+_CHINESE_PREFERRED_BREAK_AFTER_CHARS = frozenset(
+    "，。！？；：、…—,.!?;:）】》〉」』”’"
+)
+
+
 def _validate_display_phrase_overrides(
     overrides: Mapping[str, Sequence[str]] | None,
 ) -> dict[str, tuple[str, ...]]:
@@ -1589,6 +1597,7 @@ def _coalesce_display_runs_that_fit(
     runs: list[list],
     *,
     max_chars: int,
+    allow_soft_overrun: bool = True,
 ) -> list[list]:
     """Keep adjacent breathing segments on one line when they still fit.
 
@@ -1597,14 +1606,97 @@ def _coalesce_display_runs_that_fit(
     to the renderer as a subtle semantic gap inside the merged phrase.
     """
 
-    soft_max = max_chars + DISPLAY_PHRASE_SOFT_OVERRUN
+    maximum = (
+        max_chars + DISPLAY_PHRASE_SOFT_OVERRUN
+        if allow_soft_overrun
+        else max_chars
+    )
     result: list[list] = []
     for run in runs:
-        if result and len(result[-1]) + len(run) <= soft_max:
+        if result and len(result[-1]) + len(run) <= maximum:
             result[-1].extend(run)
         else:
             result.append(list(run))
     return result
+
+
+def _split_sentence_character_runs(
+    sentence: Sentence,
+    *,
+    max_chars: int,
+) -> list[list]:
+    """Split visible characters while treating source whitespace as boundaries."""
+
+    runs: list[list] = []
+    current: list = []
+    for character in sentence.characters:
+        if character.char.isspace():
+            if current:
+                runs.extend(_split_character_run(current, max_chars))
+                current = []
+            continue
+        current.append(character)
+    if current:
+        runs.extend(_split_character_run(current, max_chars))
+    runs = _join_short_display_runs(runs, max_chars=max_chars)
+    return _coalesce_display_runs_that_fit(runs, max_chars=max_chars)
+
+
+def _split_japanese_whitespace_runs(
+    sentence: Sentence,
+    *,
+    max_chars: int,
+) -> list[list]:
+    """Group whole whitespace-delimited semantic blocks without rebalancing glyphs."""
+
+    runs: list[list] = []
+    current: list = []
+    for character in sentence.characters:
+        if character.char.isspace():
+            if current:
+                runs.extend(_split_character_run(current, max_chars))
+                current = []
+            continue
+        current.append(character)
+    if current:
+        runs.extend(_split_character_run(current, max_chars))
+    soft_max = max_chars + DISPLAY_PHRASE_SOFT_OVERRUN
+    index = 1
+    while index < len(runs):
+        continuation = "".join(character.char for character in runs[index])
+        if continuation in _JAPANESE_CONTINUATION_BLOCKS:
+            # A standalone connective continues the preceding semantic block.
+            # Attach it before short-run consolidation can make it the prefix
+            # of the following line, even if the semantic unit needs overrun.
+            runs[index - 1].extend(runs.pop(index))
+            continue
+        index += 1
+    index = 0
+    while index < len(runs):
+        current = runs[index]
+        if len(current) >= MIN_DISPLAY_PHRASE_CHARS:
+            index += 1
+            continue
+        if index + 1 < len(runs) and len(current) + len(runs[index + 1]) <= soft_max:
+            runs[index] = current + runs.pop(index + 1)
+            continue
+        if index > 0 and len(runs[index - 1]) + len(current) <= soft_max:
+            runs[index - 1].extend(current)
+            runs.pop(index)
+            index = max(0, index - 1)
+            continue
+        # A short source block is preferable to moving individual glyphs
+        # across a reviewed whitespace boundary. Keep it intact when neither
+        # neighbouring semantic block can be merged whole.
+        index += 1
+    # Joining complete blocks is safe; moving individual characters between
+    # them is not. In particular, do not turn ``降り出す前に 帰る場所を``
+    # into ``降り出す前 | に帰る場所を`` merely to satisfy a minimum length.
+    return _coalesce_display_runs_that_fit(
+        runs,
+        max_chars=max_chars,
+        allow_soft_overrun=False,
+    )
 
 
 def _english_word_spans(sentence: Sentence) -> list[tuple[int, int]]:
@@ -1732,6 +1824,105 @@ def _split_english_sentence_for_wide_fit(
     return [sentence]
 
 
+def _chinese_phrase_width_at_target(
+    source_sentence: Sentence,
+    display_sentence: Sentence,
+    *,
+    font_file: Path,
+    layout: SubtitleLayout,
+) -> float:
+    semantic_gaps = _semantic_gap_after_indices(
+        source_sentence,
+        display_sentence,
+        language="zh",
+    )
+    return _measured_text_span(
+        font_file,
+        display_sentence.text,
+        font_size=layout.main_font_size,
+        advance_scale=layout.fit_advance_scale,
+        semantic_gap_count=len(semantic_gaps),
+        semantic_gap_em=layout.semantic_gap_em,
+        letter_spacing_em=layout.letter_spacing_em,
+        word_gap_em=layout.word_gap_em,
+    ) + 2 * layout.fit_outline_px
+
+
+def _split_chinese_sentence_for_wide_fit(
+    source_sentence: Sentence,
+    compact_sentence: Sentence,
+    *,
+    font_file: Path,
+    layout: SubtitleLayout,
+) -> list[Sentence]:
+    """Split one frozen Chinese source line without changing source characters."""
+
+    if not compact_sentence.characters:
+        return [compact_sentence]
+    if _chinese_phrase_width_at_target(
+        source_sentence,
+        compact_sentence,
+        font_file=font_file,
+        layout=layout,
+    ) <= layout.slot_width:
+        return [compact_sentence]
+
+    semantic_boundaries = {
+        index + 1
+        for index in _semantic_gap_after_indices(
+            source_sentence,
+            compact_sentence,
+            language="zh",
+        )
+    }
+    punctuation_boundaries = {
+        index + 1
+        for index, character in enumerate(compact_sentence.characters[:-1])
+        if character.char in _CHINESE_PREFERRED_BREAK_AFTER_CHARS
+    }
+    preferred_boundaries = semantic_boundaries | punctuation_boundaries
+
+    result: list[Sentence] = []
+    start = 0
+    character_count = len(compact_sentence.characters)
+    while start < character_count:
+        furthest_fit: int | None = None
+        for end in range(start + 1, character_count + 1):
+            candidate = Sentence(
+                singer_id=source_sentence.singer_id,
+                characters=list(compact_sentence.characters[start:end]),
+            )
+            if _chinese_phrase_width_at_target(
+                source_sentence,
+                candidate,
+                font_file=font_file,
+                layout=layout,
+            ) <= layout.slot_width:
+                furthest_fit = end
+        if furthest_fit is None:
+            # A normal CJK glyph is much narrower than a subtitle slot. Keep
+            # forward progress for malformed/custom font metrics without ever
+            # dropping or replacing the source Character.
+            furthest_fit = start + 1
+        if furthest_fit < character_count:
+            preferred = [
+                boundary
+                for boundary in preferred_boundaries
+                if start < boundary <= furthest_fit
+            ]
+            end = max(preferred, default=furthest_fit)
+        else:
+            end = furthest_fit
+        result.append(
+            Sentence(
+                singer_id=source_sentence.singer_id,
+                characters=list(compact_sentence.characters[start:end]),
+            )
+        )
+        start = end
+    return result
+
+
 def split_sentence_for_display(
     sentence: Sentence,
     *,
@@ -1753,8 +1944,6 @@ def split_sentence_for_display(
         raise ValueError(
             f"max_chars must be at least {MIN_DISPLAY_PHRASE_CHARS}, got {max_chars}"
         )
-    if max_chars is None and language == "ja":
-        return [sentence]
     override_runs = _split_sentence_by_display_override(
         sentence,
         display_phrase_overrides=_validate_display_phrase_overrides(
@@ -1770,6 +1959,20 @@ def split_sentence_for_display(
             )
             for run in override_runs
         ]
+    compact_sentence = sentence
+    if language in {"ja", "zh"} and any(
+        character.char.isspace() for character in sentence.characters
+    ):
+        compact_sentence = Sentence(
+            singer_id=sentence.singer_id,
+            characters=[
+                character
+                for character in sentence.characters
+                if not character.char.isspace()
+            ],
+        )
+    if max_chars is None and language == "ja":
+        return [compact_sentence]
     if language == "en":
         if font_file is not None and layout is not None:
             return _split_english_sentence_for_wide_fit(
@@ -1779,18 +1982,53 @@ def split_sentence_for_display(
             )
         return [sentence]
     if language == "zh":
-        return [sentence]
+        if font_file is not None and layout is not None:
+            return _split_chinese_sentence_for_wide_fit(
+                sentence,
+                compact_sentence,
+                font_file=font_file,
+                layout=layout,
+            )
+        return [compact_sentence]
     if max_chars is None:
         return [sentence]
+    visible_character_count = sum(
+        not character.char.isspace() for character in sentence.characters
+    )
+    has_internal_whitespace = any(
+        character.char.isspace() for character in sentence.characters[1:-1]
+    )
+    if (
+        language == "ja"
+        and has_internal_whitespace
+        and visible_character_count > max_chars
+    ):
+        # Japanese lyric providers commonly use spaces inside one timed LRC
+        # line to mark semantic or breathing boundaries. Prefer those explicit
+        # boundaries before the measured-width fast path so a visually wide
+        # but technically fitting sentence does not remain needlessly long.
+        whitespace_runs = _split_japanese_whitespace_runs(
+            sentence,
+            max_chars=max_chars,
+        )
+        if len(whitespace_runs) > 1:
+            return [
+                Sentence(
+                    singer_id=sentence.singer_id,
+                    characters=list(run),
+                )
+                for run in whitespace_runs
+                if run
+            ]
     if font_file is not None and layout is not None:
         semantic_gaps = _semantic_gap_after_indices(
             sentence,
-            sentence,
+            compact_sentence,
             language=language,
         )
         measured_width = _measured_text_span(
             font_file,
-            sentence.text,
+            compact_sentence.text,
             font_size=layout.main_font_size,
             advance_scale=layout.fit_advance_scale,
             semantic_gap_count=len(semantic_gaps),
@@ -1799,20 +2037,8 @@ def split_sentence_for_display(
             word_gap_em=layout.word_gap_em,
         ) + 2 * layout.fit_outline_px
         if measured_width <= layout.slot_width:
-            return [sentence]
-    runs: list[list] = []
-    current: list = []
-    for character in sentence.characters:
-        if character.char.isspace():
-            if current:
-                runs.extend(_split_character_run(current, max_chars))
-                current = []
-            continue
-        current.append(character)
-    if current:
-        runs.extend(_split_character_run(current, max_chars))
-    runs = _join_short_display_runs(runs, max_chars=max_chars)
-    runs = _coalesce_display_runs_that_fit(runs, max_chars=max_chars)
+            return [compact_sentence]
+    runs = _split_sentence_character_runs(sentence, max_chars=max_chars)
     return [
         Sentence(
             singer_id=sentence.singer_id,

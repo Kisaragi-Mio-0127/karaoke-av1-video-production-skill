@@ -29,10 +29,16 @@ hit counts, and reject unreachable, duplicate, or overly broad rules.
 
 Record long but semantically complete phrases as reviewed exceptions and verify visual fit at the target font and size. Add semantic spacing only at approved breath or semantic boundaries, recording the character index and one pixel or em increment.
 
-For Japanese wide layout, measure the complete line before applying a
-character-count split. Keep a line intact when it fits at the target size. If
-a split is required, never split inside a continuous katakana run; this is a
-language rule, not a song-specific display override.
+For Japanese wide layout, treat whitespace inside one timed source line as an
+explicit semantic or breathing boundary, not as a source-line break. When the
+visible line exceeds the normal display-length target, group those whitespace
+segments into balanced phrases before the measured-width fast path; merge
+avoidable fragments shorter than the minimum phrase length. A compact line may
+retain each source-space boundary as a subtle semantic gap, but the whitespace
+character itself must never become a timed or highlighted glyph event. For a
+source line without usable whitespace, measure the complete line before
+applying the character-count fallback. Never split inside a continuous
+katakana run. These are language rules, not song-specific display overrides.
 
 ## Ruby and editable projects
 

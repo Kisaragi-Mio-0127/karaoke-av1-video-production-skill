@@ -36,19 +36,22 @@ render into an installer.
 
 ## FFmpeg and FFprobe
 
-Install a matched FFmpeg build containing both executables. On Windows, the
-recommended project-owned layout is:
+The default supported baseline is a matched FFmpeg/FFprobe 8.x build. The
+tested Windows package is Gyan FFmpeg 8.0.1 Essentials. Keep both executables
+in the project-owned layout:
 
 ```text
 <StrangeUtaGame>/tools/ffmpeg/bin/ffmpeg.exe
 <StrangeUtaGame>/tools/ffmpeg/bin/ffprobe.exe
 ```
 
-Download a current Essentials build from the
-[FFmpeg download page](https://ffmpeg.org/download.html) (the Windows link
-currently points to builds such as Gyan), extract it, and copy both files from
-the archive's `bin` directory into the layout above. Verify from the target
-checkout:
+Download the pinned
+[Gyan FFmpeg 8.0.1 Essentials archive](https://github.com/GyanD/codexffmpeg/releases/download/8.0.1/ffmpeg-8.0.1-essentials_build.zip),
+extract it, and copy both files from the archive's `bin` directory into the
+layout above. Do not use the moving `ffmpeg-release` URL for the default setup,
+because it can advance to a new major version. Treat FFmpeg 9.x as an explicit
+compatibility migration that requires a successful NVENC probe. Verify from
+the target checkout:
 
 ```powershell
 tools\ffmpeg\bin\ffmpeg.exe -hide_banner -version

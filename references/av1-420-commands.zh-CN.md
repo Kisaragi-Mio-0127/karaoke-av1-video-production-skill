@@ -2,7 +2,7 @@
 
 [English](av1-420-commands.md) | 简体中文
 
-根据仓库和本机FFmpeg版本调整命令。Windows路径要正确引用；字幕滤镜先用短预览验证。
+默认使用已验证的FFmpeg/FFprobe 8.x配套版本（当前为8.0.1）；9.x属于显式兼容性迁移。Windows路径要正确引用；字幕滤镜和NVENC先用短探测验证。
 
 ## 输入探测与画布
 

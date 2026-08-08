@@ -28,8 +28,9 @@ Read these references when needed:
   `--device cpu` when the target policy requires a fixed backend.
 - Production commands use project-owned `models/mms/model.pt` and
   `models/whisper` and do not implicitly download models.
-- Use the matched project tools under `tools/ffmpeg/bin`; install and verify
-  them with the StrangeUtaGame integration reference.
+- Use the matched FFmpeg 8.x project tools under `tools/ffmpeg/bin`; install
+  and verify them with the StrangeUtaGame integration reference. Treat 9.x as
+  an explicit compatibility migration, not the default.
 - The public `check_karaoke_environment.py` does not actively initiate network
   requests. It checks model sizes by default and reads full model files only
   with `--deep-verify`; a custom manifest requires `--allow-custom-manifest`.

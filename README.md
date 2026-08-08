@@ -64,7 +64,7 @@ The public environment tools have distinct boundaries:
    non-commercial use. A managed Python download requires
    `--allow-python-download`.
 3. Bootstrap does not manage `git`, `uv`, `ffmpeg`, `ffprobe`, or GPU drivers.
-   Install FFmpeg and FFprobe as a matched pair under
+   Install FFmpeg 8.x and FFprobe 8.x as the default matched pair under
    `<StrangeUtaGame>/tools/ffmpeg/bin`; see the
    [integration guide](references/strangeutagame-integration.md#ffmpeg-and-ffprobe).
    `--dry-run` deep-verifies and plans

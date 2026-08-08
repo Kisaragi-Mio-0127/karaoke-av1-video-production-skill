@@ -32,7 +32,7 @@ uv run --no-sync python --version
 
 1. `check_karaoke_environment.py`不会主动发起网络请求。它探测本地命令、目标`.venv`、选定的CUDA/CPU后端和项目自有模型文件。默认只检查模型精确大小；`--deep-verify`才会读取完整模型文件并做SHA-256校验。自定义清单必须加`--allow-custom-manifest`；需要隐藏绝对本地路径时可加`--redact-paths`。
 2. `bootstrap_karaoke_environment.py`只有在显式调用时才执行设置。它探测NVIDIA/CPU，复用或创建唯一的`target/.venv`，安装固定版本的Python包，并把缺失的MMS/Whisper文件下载到`target/models/`。自定义清单必须加`--allow-custom-manifest`。MMS模型下载必须加`--accept-mms-cc-by-nc-4-0`，该选项确认必须署名且仅限非商业用途；托管Python下载必须加`--allow-python-download`。
-3. Bootstrap不管理`git`、`uv`、`ffmpeg`、`ffprobe`或GPU驱动。请把配套的FFmpeg与FFprobe安装到`<StrangeUtaGame>/tools/ffmpeg/bin`；具体步骤见[集成说明](references/strangeutagame-integration.zh-CN.md#ffmpeg与ffprobe)。`--dry-run`会深度校验并规划，但不会写入或主动发起网络请求；`--offline`会阻止模型和Python下载，并把uv置于离线模式。
+3. Bootstrap不管理`git`、`uv`、`ffmpeg`、`ffprobe`或GPU驱动。默认请把配套的FFmpeg 8.x与FFprobe 8.x安装到`<StrangeUtaGame>/tools/ffmpeg/bin`；具体步骤见[集成说明](references/strangeutagame-integration.zh-CN.md#ffmpeg与ffprobe)。9.x属于显式兼容性迁移，不是默认版本。`--dry-run`会深度校验并规划，但不会写入或主动发起网络请求；`--offline`会阻止模型和Python下载，并把uv置于离线模式。
 
 检查已有目标，不下载也不修改目标：
 

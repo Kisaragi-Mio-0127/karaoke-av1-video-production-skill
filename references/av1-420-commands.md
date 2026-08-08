@@ -2,7 +2,7 @@
 
 [简体中文](av1-420-commands.zh-CN.md) | English
 
-Adapt commands to the repository and the installed FFmpeg build. Quote Windows paths correctly and verify subtitle filters with a short preview.
+Use the default tested FFmpeg/FFprobe 8.x pair (currently 8.0.1). Treat 9.x as an explicit compatibility migration. Quote Windows paths correctly and verify subtitle filters and NVENC with short probes.
 
 ## Input probing and canvas
 

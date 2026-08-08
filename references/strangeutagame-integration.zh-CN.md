@@ -24,14 +24,14 @@ python "$skillRoot/scripts/install_strangeutagame_integration.py" --target <Stra
 
 ## FFmpeg与FFprobe
 
-请安装同一套构建中的FFmpeg与FFprobe。Windows推荐放在项目专用目录：
+默认支持基线是同一套构建中的FFmpeg/FFprobe 8.x；当前验证包为Gyan FFmpeg 8.0.1 Essentials。Windows放在项目专用目录：
 
 ```text
 <StrangeUtaGame>/tools/ffmpeg/bin/ffmpeg.exe
 <StrangeUtaGame>/tools/ffmpeg/bin/ffprobe.exe
 ```
 
-从[FFmpeg下载页](https://ffmpeg.org/download.html)选择当前Windows构建（该页面会链接到Gyan等构建），解压后把压缩包`bin`目录中的两个文件复制到上述位置。然后在目标项目根目录验证：
+下载固定的[Gyan FFmpeg 8.0.1 Essentials压缩包](https://github.com/GyanD/codexffmpeg/releases/download/8.0.1/ffmpeg-8.0.1-essentials_build.zip)，解压后把其中`bin`目录的两个文件复制到上述位置。默认安装不要使用会自动跳到新主版本的`ffmpeg-release`链接。FFmpeg 9.x属于显式兼容性迁移，必须先通过NVENC短编码探测。然后在目标项目根目录验证：
 
 ```powershell
 tools\ffmpeg\bin\ffmpeg.exe -hide_banner -version

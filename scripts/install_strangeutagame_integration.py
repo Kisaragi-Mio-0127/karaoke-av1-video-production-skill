@@ -143,7 +143,13 @@ def _manifest_requirement_paths() -> list[tuple[Path, Path]]:
         relative = PurePosixPath(raw_path)
         destination = PurePosixPath(raw_destination)
         if (
-            relative.is_absolute()
+            "\\" in raw_path
+            or "\\" in raw_destination
+            or ":" in raw_path
+            or ":" in raw_destination
+            or raw_path.startswith("//")
+            or raw_destination.startswith("//")
+            or relative.is_absolute()
             or not relative.parts
             or any(part in {"", ".", ".."} for part in relative.parts)
             or relative.parts[0] != "requirements"

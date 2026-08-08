@@ -2,49 +2,115 @@
 
 [简体中文](strangeutagame-integration.zh-CN.md) | English
 
-This bundle adds the karaoke production workflow to a compatible StrangeUtaGame checkout. The dependency manifest defines the installed scripts, shared modules, packages, and support tools.
+This reference covers the public Japanese/general integration for a compatible
+StrangeUtaGame checkout. It documents the installer, the no-active-network
+environment check, and the explicit bootstrap boundary. The public bundle does
+not add Chinese/English workflow entries.
 
 ## Install
 
-Preview the copy plan, then install:
+Preview the copy plan, then install into an existing checkout:
 
 ```powershell
 $skillRoot = (Resolve-Path .).Path
-python "$skillRoot/scripts/install_strangeutagame_integration.py" --target D:\path\to\StrangeUtaGame --dry-run
-python "$skillRoot/scripts/install_strangeutagame_integration.py" --target D:\path\to\StrangeUtaGame
+python "$skillRoot/scripts/install_strangeutagame_integration.py" --target <StrangeUtaGame> --dry-run
+python "$skillRoot/scripts/install_strangeutagame_integration.py" --target <StrangeUtaGame> --force
 ```
 
-The installer checks the project layout and copies only paths listed under
-`scripts`, `shared_modules`, and `package_files` in
+The installer checks the project layout and copies only paths authorized by
 `integration/strangeutagame/dependency-manifest.json`. A differing destination
-file requires an explicit overwrite decision and is backed up for rollback.
+requires `--force` and receives a rollback backup. The installer does not
+create or replace the target Python environment.
 
-## Environment
+## Runtime selection
 
-Python 3.12 is the tested baseline; the public scripts require Python 3.10 or newer. Reuse the checkout's existing `.venv` and run ordinary commands through `uv run --no-sync`:
+Use the target checkout's one `.venv` through `uv run --no-sync`. The public
+runtime convention is `--device auto` so the workflow follows the CUDA/CPU
+capability selected during bootstrap. Pin the backend explicitly with
+`--device cuda` or `--device cpu` when the target policy requires it.
+
+Production commands use project-owned `models/mms/model.pt` and
+`models/whisper`. They do not implicitly download model files. Prepare missing
+runtime inputs with the explicit bootstrap below; do not turn a production
+render into an installer.
+
+The public runtime is Japanese/general only. Use the separate local
+Chinese/English Skill for those language workflows.
+
+## No-active-network check
+
+`scripts/check_karaoke_environment.py` checks local state without actively
+initiating network requests. This is not an operating-system network-isolation
+guarantee: it probes local commands, the target `.venv`, NVIDIA/CPU capability,
+Python modules, and project-owned model files.
+
+Run it from the public Skill repository:
 
 ```powershell
-Set-Location D:\path\to\StrangeUtaGame
-if (-not (Test-Path -LiteralPath '.\.venv\Scripts\python.exe')) {
-  uv sync
-}
-uv run --no-sync python --version
+python scripts/check_karaoke_environment.py --target <StrangeUtaGame>
+python scripts/check_karaoke_environment.py --target <StrangeUtaGame> --deep-verify
 ```
 
-Install `ffmpeg` and `ffprobe` separately and verify libass plus an available
-AV1 encoder. Rubber Band is required only for pitch shifting. CJK fonts are
-selected according to the production configuration. The Japanese full-auto
-entry also needs the project-local MSST preparation and MMS model inputs; the
-staged Japanese MMS wrapper uses the same local evidence. Use the existing
-project environment rather than downloading models during a run.
+The built-in bootstrap manifest is used by default. A non-built-in
+`--manifest <custom-manifest>` requires `--allow-custom-manifest`; custom model
+URLs are still restricted to the built-in HTTPS host allowlist. The default
+check verifies configured model sizes only, so it does not read every large
+model file. `--deep-verify` reads each complete model and verifies SHA-256.
+Use `--redact-paths` when sharing JSON reports outside the local machine.
+
+A failed `core_ok` can still identify a usable Python/model environment when
+external tools are absent. Install `git`, `uv`, `ffmpeg`, and `ffprobe`
+separately; the bootstrap does not manage them or GPU drivers.
+
+## Explicit bootstrap
+
+Bootstrap is an explicit setup command. It probes NVIDIA/CPU, reuses or
+creates the single `<target>/.venv`, installs the version-pinned Python
+packages, and downloads missing configured MMS/Whisper files into
+`<target>/models/`. It does not create a second environment.
+
+Review the plan first:
+
+```powershell
+python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --dry-run
+```
+
+`--dry-run` deep-verifies existing models and plans actions, but does not write
+or actively initiate network requests. When setup is approved, run:
+
+```powershell
+python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --accept-mms-cc-by-nc-4-0
+```
+
+The MMS flag is mandatory before a missing MMS checkpoint may be downloaded. It
+acknowledges CC BY-NC 4.0 attribution and non-commercial-use requirements; the
+download writes a source/license sidecar beside the checkpoint. A custom
+manifest also requires `--allow-custom-manifest`. If no suitable local Python
+is available, add `--allow-python-download` to explicitly allow uv to download
+a managed interpreter. The default is to refuse that Python download.
+
+Use `--offline` only when required packages and models are already available in
+local caches. It blocks model and Python downloads and passes uv offline mode.
+Bootstrap never installs or updates `git`, `uv`, `ffmpeg`, `ffprobe`, or GPU
+drivers.
 
 ## Project configuration
 
-Copy `examples/album.example.json`, replace its placeholders, and pass the resulting manifest through `--manifest` or `KARAOKE_ALBUM_MANIFEST`.
+Use an authorized manifest and frozen lyric source. The selected track, audio,
+fonts, model paths, and new private output directory must exist before
+production starts. Keep canonical SUG, frozen lyrics, private evidence,
+companion SUG, and delivery media separate.
 
-Song-specific display, ruby-group, and timing-reading decisions can be supplied through `KARAOKE_DISPLAY_OVERRIDES`, `KARAOKE_RUBY_GROUP_OVERRIDES`, and `KARAOKE_TIMING_READING_OVERRIDES`. The Japanese workflow exposes pronunciation modes `optional`, `required`, and `off`; non-blocking `optional` is the default.
+The default Japanese route uses project-owned MMS and Whisper paths. Explicit
+path overrides are available in the production CLI; they do not authorize
+network downloads. Pronunciation validation remains optional. The Japanese
+staged, direct, and batch CLIs expose
+`--pronunciation-validation {off,optional,required}`, with `optional` as the
+default; full-auto does not require the sidecar.
 
 ## Production order
+
+The public Japanese production order is:
 
 ```text
 manifest + song-id + frozen lyric source + new output directory
@@ -52,80 +118,88 @@ manifest + song-id + frozen lyric source + new output directory
 -> editable companion SUG -> current layout -> AV1 MP4
 ```
 
-The public Japanese one-command entry is
-`scripts/run_karaoke_japanese_full_auto.py`. Its default quality policy is
-`auto-fallback`, so manual or Agent timing alignment is optional after the
-companion SUG is created. The existing
-`scripts/run_karaoke_japanese_workflow.py` remains the direct rerender entry
-for an already adjusted or reviewed SUG; it does not run MMS.
+Every full-auto or staged run needs a new private output directory. Follow the
+installed command's `--help` output for the authoritative option set. The
+public runtime convention is `--device auto`; pass `--device cuda` or
+`--device cpu` only as an explicit override.
+
+## Full-auto Japanese entry
+
+Run the normal first command from the StrangeUtaGame project root:
+
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --output-dir .render-work/<new-run-dir> --device auto
+```
+
+The command prepares MSST vocals, creates a private initial SUG, runs Japanese
+MMS, creates an editable companion, prepares the current layout, and renders
+AV1 MP4. Its default quality policy is `auto-fallback` and its default visual
+style is `spectrum`. Low-confidence fallback evidence remains in the report;
+manual or Agent timing adjustment is optional.
 
 ## Staged Japanese MMS entry
 
-When the validated bundle includes `scripts/run_karaoke_japanese_mms_workflow.py`,
-use it as the lower-level stage/recovery entry for Japanese timing. Its
-required arguments are `--manifest`, `--song-id`, and a new, non-existent
-`--output-dir`:
+Use the staged wrapper for audit, recovery, or stage inspection:
 
 ```powershell
-uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
-  --manifest <existing-manifest> --song-id <song-id> `
-  --mms-model-path <project-mms-model> `
-  --quality-policy auto-fallback --output-dir <new-output-dir> `
-  --visual-style spectrum
+uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --mms-model-path models/mms/model.pt --quality-policy auto-fallback --output-dir <new-private-output-dir> --visual-style spectrum --device auto
 ```
 
-The current composition is generated inside the output by default. An explicit
-`--composition` is an advanced gated compatibility override. The manifest
-selection resolves the mix and canonical reviewed SUG. Frozen
-lyrics and the matching MSST `Vocals.wav` resolve from project defaults unless
-`--source` or `--vocals-root` overrides them. It accepts no separate SUG-path
-argument. Its optional arguments also cover visual, font, cover, and render policy.
-Vinyl generates a new record asset for the current run; spectrum creates none.
+The required options are `--manifest`, `--song-id`, and a new
+`--output-dir`. `--source`, `--sug`, and `--vocals-root` are optional overrides;
+without them, project manifest defaults resolve the selected inputs. The
+wrapper keeps audit, build, companion, and render artifacts separate. It does
+not replace the canonical SUG or silently download a missing MMS checkpoint.
 
-The contract is local-first. `--mms-model-path models/mms/model.pt` explicitly
-selects the project-owned checkpoint. `.cache` is reserved for derived runtime
-data and evidence, not model authority, and no model-download fallback is part
-of this contract. Keep resolved-model and cache provenance separate in reports.
+The separate `--allow-mms-network` help option is not a substitute for
+bootstrap and is not needed for the public local-model contract.
 
-The staged wrapper keeps audit, build, companion, and render artifacts
-separate. Use it for stage-by-stage handling, recovery, or gate inspection; a
-failed gate leaves review artifacts without replacing a release video.
+## Existing SUG rerender and batch
 
-The canonical editable timing source is the `.sug` project. Candidate generation fills missing ruby spans, review writes accepted corrections to the canonical SUG, and rendering reads that reviewed project without inferring new ruby.
+For an existing adjusted or reviewed SUG, use the direct rerender entry. It
+does not run MSST or MMS:
 
-When pitch shifting is requested, run `scripts/pitch_shift_audio.py` on the complete mix before timing and rendering. The verified shifted audio becomes the selected source for evidence, preview, and muxing.
+```powershell
+uv run --no-sync python scripts/run_karaoke_japanese_workflow.py --sug <adjusted-project.sug> --audio <post-mix-audio> --output-dir <new-output-dir> --title <title> --artist <artist> --album-title <album-title> --album-artist <album-artist> --visual-style spectrum
+```
 
-## Visual contract
+For batch rendering from reviewed timing:
 
-The current wide composition, vinyl/spectrum choices, and secondary-overlay
+```powershell
+uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py --manifest <manifest> --visual-style spectrum
+```
+
+The batch entry never invokes MMS or creates timing overrides. Validate any
+existing timing evidence before promotion.
+
+## Layout and delivery
+
+The current wide composition, spectrum/vinyl choices, and secondary-overlay
 rules are defined only in
-[`wide-visual-templates.md`](wide-visual-templates.md). Keep this integration
-guide linked to that single source; this guide intentionally keeps layout
-details high level.
+[wide-visual-templates.md](wide-visual-templates.md). Keep this integration
+reference high level and do not duplicate geometry constants.
 
-The full-auto route prepares the selected visual style and keeps its generated
-artwork with the run. Review representative frames before accepting the
-composition.
+The default delivery is an AV1 `yuv420p` MP4 with hard subtitles and AAC-LC.
+MKV/FLAC and full null decode are explicit opt-ins. Apply the subtitle, stream,
+duration, and representative-frame gates before promotion; see
+[av1-420-commands.md](av1-420-commands.md) and
+[batch-release-gates.md](batch-release-gates.md).
 
-The supported direct album entry is `render_karaoke_direct_av1_420_album.py`.
-It uses `karaoke_direct_album_planning.py` for manifest selection and task
-planning. The retired HEVC 4:4:4 entry is not installed.
+## Installed files and validation
 
-Batch rendering never invokes MMS or creates timing overrides. If the fixed-path `timing_overrides` artifact already exists, the batch entry automatically consumes its existing `visual_release_overrides_ms` and records the artifact identity. The renderer consumes the artifact but does not validate MMS provenance, so validate its source, generation identity, review status, and Japanese workflow gate before starting the batch.
+The installed Japanese/general bundle contains the authorized scripts,
+language-neutral shared modules, package files, requirements, and support
+tools listed by `dependency-manifest.json`. It does not install the public
+repository's tests into StrangeUtaGame.
 
-## Installed files
-
-The public Japanese automation entry is
-`scripts/run_karaoke_japanese_full_auto.py`. The existing
-`scripts/run_karaoke_japanese_workflow.py` is the direct SUG rerender entry,
-and `scripts/run_karaoke_japanese_mms_workflow.py` is the staged MMS/recovery
-entry. Shared code lives under `karaoke_common/`, while Japanese layout code
-lives under `karaoke_japanese/`.
-
-The compatibility checker remains in the Skill repository. Run it and the environment checker with the target checkout's project-local Python:
+Run compatibility and environment checks with the actual target:
 
 ```powershell
 Set-Location <StrangeUtaGame>
-uv run --no-sync python D:\path\to\skill\scripts\check_karaoke_environment.py --target .
-uv run --no-sync python <skill>\scripts\check_sug_compatibility.py --repo . --project <project.sug>
+uv run --no-sync python D:\path\to\skill\scripts/check_sug_compatibility.py --repo . --project <project.sug>
+python D:\path\to\skill\scripts/check_karaoke_environment.py --target .
 ```
+
+The environment check may return non-zero when `ffmpeg` or `ffprobe` is absent;
+that result is a diagnostic, not permission for production to download those
+tools.

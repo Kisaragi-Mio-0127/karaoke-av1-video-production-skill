@@ -7,10 +7,23 @@ TorchAudio. The model weights are not distributed by this repository.
 
 TorchAudio identifies the model as work published by the authors of *Scaling
 Speech Technology to 1,000+ Languages* under the
-[Creative Commons Attribution-NonCommercial 4.0 license](https://creativecommons.org/licenses/by-nc/4.0/).
+[Creative Commons Attribution-NonCommercial 4.0 license (CC-BY-NC-4.0)](https://creativecommons.org/licenses/by-nc/4.0/).
 Use of the model weights, including attribution and non-commercial limits, is
 governed by that license. See the
 [TorchAudio MMS_FA documentation](https://docs.pytorch.org/audio/2.7.0/generated/torchaudio.pipelines.MMS_FA.html).
+
+The bootstrap does not download these weights unless the user explicitly
+passes `--accept-mms-cc-by-nc-4-0`, acknowledging the attribution requirement
+and non-commercial restriction. A source-and-license sidecar is written beside
+weights downloaded by the bootstrap.
+
+## OpenAI Whisper model weights
+
+The optional recognition workflow can use OpenAI Whisper `base.pt`. The model
+weights are not distributed by this repository. OpenAI publishes Whisper code
+and model weights under the [MIT License](https://github.com/openai/whisper/blob/main/LICENSE).
+The bootstrap records the source URL, checksum, and license metadata beside a
+downloaded Whisper checkpoint.
 
 ## FFmpeg binaries
 

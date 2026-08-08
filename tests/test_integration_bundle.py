@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "integration" / "strangeutagame"
@@ -88,6 +90,14 @@ def test_dependency_manifest_exactly_covers_python_bundle() -> None:
         record.get("destination", "").strip() and record.get("reason", "").strip()
         for record in requirement_records
     )
+    assert manifest["bootstrap_assets"] == [
+        {
+            "path": "bootstrap-assets.json",
+            "category": "bootstrap-configuration",
+            "reason": manifest["bootstrap_assets"][0]["reason"],
+        }
+    ]
+    assert manifest["bootstrap_assets"][0]["reason"].strip()
 
 
 def test_all_bundled_python_parses_and_has_module_documentation() -> None:
@@ -131,6 +141,36 @@ def test_installer_dry_run_is_manifest_driven(tmp_path: Path) -> None:
     assert not list(target.glob(".karaoke-skill-stage-*"))
 
 
+@pytest.mark.parametrize(
+    ("path", "destination"),
+    [
+        (r"requirements\pinned.txt", "safe.txt"),
+        ("requirements/pinned.txt", r"..\escape.txt"),
+        ("C:/requirements/pinned.txt", "safe.txt"),
+        ("requirements/pinned.txt", r"\\?\C:\escape.txt"),
+    ],
+)
+def test_installer_rejects_windows_requirement_mapping_escapes(
+    monkeypatch, tmp_path: Path, path: str, destination: str
+) -> None:
+    installer = _load_installer()
+    manifest_path = tmp_path / "dependency-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "requirements": [
+                    {"path": path, "destination": destination}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(installer, "DEPENDENCY_MANIFEST", manifest_path)
+
+    with pytest.raises(SystemExit, match="Unsafe requirement mapping"):
+        installer._manifest_requirement_paths()
+
+
 def test_documentation_is_bilingual_and_focuses_on_current_routes() -> None:
     english = (ROOT / "README.md").read_text(encoding="utf-8")
     chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
@@ -164,6 +204,43 @@ def test_network_and_output_expansion_require_explicit_flags() -> None:
     assert "--lossless-companion" in workflow and "action=\"store_true\"" in workflow
     assert "--full-decode" in workflow and "action=\"store_true\"" in workflow
     assert "--full-decode" in direct and "action=\"store_true\"" in direct
+
+
+def test_bootstrap_license_and_network_boundaries_are_publicly_declared() -> None:
+    bootstrap = (ROOT / "scripts" / "bootstrap_karaoke_environment.py").read_text(
+        encoding="utf-8"
+    )
+    checker = (ROOT / "scripts" / "check_karaoke_environment.py").read_text(
+        encoding="utf-8"
+    )
+    notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    manifest = json.loads((BUNDLE / "bootstrap-assets.json").read_text(encoding="utf-8"))
+
+    for flag in (
+        "--accept-mms-cc-by-nc-4-0",
+        "--allow-custom-manifest",
+        "--allow-python-download",
+        "--redact-paths",
+    ):
+        assert flag in bootstrap
+    assert "non-commercial only" in bootstrap
+    assert "without actively initiating network requests" in checker
+    assert "CC-BY-NC-4.0" in notices
+    assert "OpenAI Whisper model weights" in notices
+    assert "MIT License" in notices
+    licenses = {record["name"]: record["license"] for record in manifest["models"]}
+    assert licenses["mms-forced-alignment"]["requires_acceptance"] is True
+    assert licenses["whisper-base"]["spdx"] == "MIT"
+
+
+def test_bootstrap_dependencies_are_named_version_pinned_not_lock() -> None:
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    requirement_names = {
+        Path(record["path"]).name for record in manifest["requirements"]
+    }
+    assert "requirements-karaoke.pinned.txt" in requirement_names
+    assert not any("lock" in name.casefold() for name in requirement_names)
+    assert all("reproducible installation" not in record["reason"] for record in manifest["requirements"])
 
 
 def test_manifest_driven_tools_have_no_import_time_private_manifest() -> None:

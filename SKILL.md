@@ -5,17 +5,40 @@ description: Produce, rerender, package, or debug Japanese karaoke videos and ed
 
 # Karaoke AV1 Video Production
 
-Use this Skill for the public Japanese/general StrangeUtaGame integration.
+Use this Skill only for the public Japanese/general StrangeUtaGame integration.
 Keep canonical inputs, private generated timing evidence, companion SUG files,
-and delivery media separate.
+and delivery media separate. Do not add or route Chinese/English workflows
+through this public Skill.
 
 Read these references when needed:
 
 - [full-auto and staged MMS contract](references/mms-workflows.md)
+- [StrangeUtaGame installation and environment](references/strangeutagame-integration.md)
 - [wide-layout contract](references/wide-visual-templates.md)
 - [subtitle and editable-project gates](references/subtitle-timing-quality.md)
 - [AV1/ffprobe guidance](references/av1-420-commands.md)
 - [batch release gates](references/batch-release-gates.md)
+
+## Runtime boundary
+
+- Run production commands from the StrangeUtaGame root with its existing
+  `.venv` through `uv run --no-sync`.
+- The public runtime follows bootstrap hardware detection with
+  `--device auto`. Override it explicitly with `--device cuda` or
+  `--device cpu` when the target policy requires a fixed backend.
+- Production commands use project-owned `models/mms/model.pt` and
+  `models/whisper` and do not implicitly download models.
+- The public `check_karaoke_environment.py` does not actively initiate network
+  requests. It checks model sizes by default and reads full model files only
+  with `--deep-verify`; a custom manifest requires `--allow-custom-manifest`.
+- Run `bootstrap_karaoke_environment.py` only as an explicit setup action. It
+  probes NVIDIA/CPU, reuses or creates the single `target/.venv`, installs the
+  version-pinned Python packages, and downloads missing MMS/Whisper files into
+  `target/models/`. MMS download requires
+  `--accept-mms-cc-by-nc-4-0`; a managed Python download requires
+  `--allow-python-download`; a custom manifest requires
+  `--allow-custom-manifest`. It does not manage git, uv, ffmpeg, ffprobe, or
+  GPU drivers. See the integration reference for exact commands and boundaries.
 
 ## Default: Japanese full-auto
 
@@ -36,6 +59,9 @@ reports. It defaults to `--quality-policy auto-fallback` and
 
 The MSST adapter is auto-discovered from supported local installations; an
 explicit `KARAOKE_MSST_PREPARATION_SCRIPT` path overrides discovery.
+
+The public runtime selection is `auto`, matching bootstrap's CUDA/CPU probe.
+Pass `--device cuda` or `--device cpu` to pin the backend explicitly.
 
 Treat `rendered-with-fallback` as successful automation with retained quality
 evidence, not as a human quality approval. Low-confidence units retain their
@@ -92,6 +118,9 @@ the exact contract.
   task-owned `.cache` locations.
 - Preserve reviewed Japanese ruby. Pure katakana receives no separate ruby;
   stale pure-katakana ruby is ignored without mutating the source SUG.
+- Pronunciation validation remains optional. The staged/direct CLIs expose
+  `--pronunciation-validation {off,optional,required}`; use `required` only
+  when that gate is explicitly requested.
 - Resolve singer colours from explicit SUG singer metadata and the shared
   ordered colour plan. Keep per-song decisions outside shared code.
 

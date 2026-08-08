@@ -16,6 +16,7 @@ try:
     from scripts import audit_karaoke_mms_alignment as mms_audit
     from scripts import build_karaoke_mms_overrides as mms_build
     from scripts.karaoke_album import AlbumManifest, AlbumTrack, load_album_manifest
+    from scripts.karaoke_common.device import DEFAULT_DEVICE, add_device_argument
     from scripts.karaoke_mms_editable import create_mms_editable_companion
     from scripts.karaoke_model_paths import resolve_mms_model_path
     from scripts.karaoke_review_preview import SHARED_FONT_DIR, SHARED_FONT_FILE
@@ -33,6 +34,10 @@ except ImportError:  # pragma: no cover - direct script execution
         AlbumManifest,
         AlbumTrack,
         load_album_manifest,
+    )
+    from karaoke_common.device import (  # type: ignore[no-redef]
+        DEFAULT_DEVICE,
+        add_device_argument,
     )
     from karaoke_mms_editable import (
         create_mms_editable_companion,  # type: ignore[no-redef]
@@ -412,6 +417,8 @@ def run_mms_workflow(
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "song_id": pre.track.song_id,
         "language": "ja",
+        "requested_device": getattr(args, "device", DEFAULT_DEVICE),
+        "resolved_device": None,
         "network": {
             "mms_allowed": bool(args.allow_mms_network),
             "cover_allowed": bool(args.allow_cover_network),
@@ -438,8 +445,10 @@ def run_mms_workflow(
             model_path=pre.mms_model,
             allow_network=bool(args.allow_mms_network),
             sug_path=pre.sug,
+            device=getattr(args, "device", DEFAULT_DEVICE),
         )
         audit = _load_stage_document(audit_path, returned_audit, "MMS audit")
+        report["resolved_device"] = audit.get("resolved_device")
         audit_validation = _validate_audit(audit, pre)
         report["stages"].append(
             {"name": "audit", "status": "ok", **audit_validation}
@@ -652,6 +661,7 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--source", type=Path)
     parser.add_argument("--vocals-root", type=Path)
+    add_device_argument(parser)
     parser.add_argument(
         "--mms-model-path",
         type=Path,

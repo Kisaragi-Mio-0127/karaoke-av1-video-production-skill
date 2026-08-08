@@ -34,6 +34,11 @@ from scripts.karaoke_album import (  # noqa: E402
     project_relative,
     sha256_file,
 )
+from scripts.karaoke_common.device import (  # noqa: E402
+    add_device_argument,
+    normalize_device,
+    resolve_device,
+)
 from scripts.karaoke_language import (  # noqa: E402
     DEFAULT_LANGUAGE,
     SUPPORTED_LANGUAGES,
@@ -710,7 +715,8 @@ def _resolve_model_path(
     model_name: str,
 ) -> Path | None:
     if model_path is not None:
-        return Path(model_path).expanduser().resolve()
+        candidate = Path(model_path).expanduser().resolve()
+        return candidate if candidate.is_file() else None
     root = (
         Path(model_cache).expanduser().resolve()
         if model_cache is not None
@@ -729,6 +735,8 @@ def _recognition_cache_key(
     model_name: str,
     model_hash: str | None,
     tolerance_ms: int,
+    requested_device: str | None = None,
+    resolved_device: str | None = None,
 ) -> str:
     return _sha256_bytes(
         json.dumps(
@@ -742,6 +750,8 @@ def _recognition_cache_key(
                 "model": model_name,
                 "model_sha256": model_hash,
                 "window_tolerance_ms": tolerance_ms,
+                "requested_device": requested_device,
+                "resolved_device": resolved_device,
             },
             sort_keys=True,
         ).encode("utf-8")
@@ -763,6 +773,7 @@ def run_recognition_audit(
     window_tolerance_ms: int = DEFAULT_WINDOW_TOLERANCE_MS,
     song_id: str = "direct",
     title: str = "",
+    device: str | None = None,
     audio_loader: Callable[[Path], tuple[Any, int]] | None = None,
     transcribe_fn: Callable[[Any, int, str, str, Path | None], Any] | None = None,
     model_loader: Callable[..., Any] | None = None,
@@ -770,6 +781,18 @@ def run_recognition_audit(
     """Run or load one cached independent recognition report."""
 
     language = normalize_language(language)
+    requested_device = normalize_device(device)
+    device_selection = (
+        resolve_device(requested_device) if transcribe_fn is None else None
+    )
+    device_evidence = (
+        device_selection.as_report()
+        if device_selection is not None
+        else {
+            "requested_device": requested_device,
+            "resolved_device": None,
+        }
+    )
     tolerance_ms = _window_tolerance(window_tolerance_ms)
     audio_kind = str(audio_kind).strip().lower()
     if audio_kind not in SUPPORTED_AUDIO_KINDS:
@@ -798,6 +821,8 @@ def run_recognition_audit(
         model_name=model_name,
         model_hash=model_hash,
         tolerance_ms=tolerance_ms,
+        requested_device=requested_device,
+        resolved_device=device_evidence["resolved_device"],
     )
     cache_path = (
         Path(cache_dir).expanduser().resolve() / f"{cache_key}.json"
@@ -817,6 +842,11 @@ def run_recognition_audit(
                 "key_algorithm": "sha256",
                 "path": str(cache_path),
             }
+            cached.update(device_evidence)
+            for song in cached.get("songs", []):
+                provenance = song.get("recognition_provenance")
+                if isinstance(provenance, dict):
+                    provenance.update(device_evidence)
             if output_path is not None:
                 _atomic_write(Path(output_path).resolve(), cached)
             return cached
@@ -841,7 +871,7 @@ def run_recognition_audit(
         except ImportError as exc:  # pragma: no cover - environment dependency
             raise RuntimeError("stable_whisper is required for ASR recognition audit") from exc
         load = model_loader or stable_whisper.load_model
-        model = load(str(resolved_model_path), device="cpu")
+        model = load(str(resolved_model_path), device=device_selection.resolved)
         result = model.transcribe(
             waveform,
             language=language,
@@ -868,6 +898,8 @@ def run_recognition_audit(
             model_name=model_name,
             model_hash=model_hash,
             tolerance_ms=tolerance_ms,
+            requested_device=requested_device,
+            resolved_device=device_evidence["resolved_device"],
         )
         cache_path = (
             Path(cache_dir).expanduser().resolve() / f"{cache_key}.json"
@@ -901,6 +933,7 @@ def run_recognition_audit(
         "language": language,
         "language_identity": language_identity(language),
         "audio_kind": audio_kind,
+        **device_evidence,
         "audio": {
             "path": str(audio_path),
             "sha256": audio_hash,
@@ -926,6 +959,7 @@ def run_recognition_audit(
                     "audio_path": str(audio_path),
                     "audio_sha256": audio_hash,
                     "audio_kind": audio_kind,
+                    **device_evidence,
                     "model": model_name,
                     "model_path": (
                         str(resolved_model_path)
@@ -1037,6 +1071,7 @@ def run_manifest_audit(
     force: bool = False,
     window_tolerance_ms: int = DEFAULT_WINDOW_TOLERANCE_MS,
     allow_partial_manifest: bool = False,
+    device: str | None = None,
 ) -> dict[str, Any]:
     album = load_album_manifest(
         manifest_path, require_five_tracks=not allow_partial_manifest
@@ -1058,6 +1093,7 @@ def run_manifest_audit(
             "use --song-id to split ja, zh, and en into separate runs"
         )
     selected_language = next(iter(selected_languages))
+    requested_device = normalize_device(device)
     resolved_vocals_root = (
         Path(vocals_root).resolve()
         if vocals_root is not None
@@ -1084,6 +1120,7 @@ def run_manifest_audit(
             window_tolerance_ms=window_tolerance_ms,
             song_id=track.song_id,
             title=track.title,
+            device=requested_device,
         )
         song_reports.extend(single["songs"])
         recognition_audits.append(
@@ -1093,6 +1130,8 @@ def run_manifest_audit(
                 "audio_path": single["audio"]["path"],
                 "audio_sha256": single["audio"]["sha256"],
                 "audio_kind": single["audio_kind"],
+                "requested_device": single.get("requested_device"),
+                "resolved_device": single.get("resolved_device"),
                 "model": single["model"],
                 "model_path": single["model_path"],
                 "model_sha256": single["model_sha256"],
@@ -1140,6 +1179,15 @@ def run_manifest_audit(
         "audio_kind": audio_kind,
         "language": selected_language,
         "language_identity": language_identity(selected_language),
+        "requested_device": requested_device,
+        "resolved_device": next(
+            (
+                item.get("resolved_device")
+                for item in recognition_audits
+                if item.get("resolved_device")
+            ),
+            None,
+        ),
         "model": model_name,
         "model_path": str(model_path.resolve()) if model_path is not None else None,
         "songs": song_reports,
@@ -1220,6 +1268,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--model-cache", type=Path, default=WHISPER_MODEL_DIR)
     parser.add_argument("--model-path", type=Path)
+    add_device_argument(parser)
     parser.add_argument("--vocals-root", type=Path)
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument(
@@ -1258,6 +1307,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_path=args.output,
             force=args.force,
             window_tolerance_ms=args.window_tolerance_ms,
+            device=args.device,
         )
     else:
         if args.manifest is None:
@@ -1276,6 +1326,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             force=args.force,
             window_tolerance_ms=args.window_tolerance_ms,
             allow_partial_manifest=args.allow_partial_manifest,
+            device=args.device,
         )
     disposition = str(report.get("disposition") or "unresolved")
     structural_ok = report.get("structural_gate_ok", report.get("gate_ok")) is True

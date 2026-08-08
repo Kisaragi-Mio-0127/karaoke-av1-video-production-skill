@@ -1,94 +1,46 @@
 #!/usr/bin/env python3
-"""Report core and optional karaoke production environment capabilities."""
+"""Check local karaoke state without actively initiating network requests."""
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
-
-def command_check(name: str, args: list[str]) -> dict[str, object]:
-    executable = shutil.which(name)
-    if executable is None:
-        return {"ok": False, "path": None, "detail": "not found on PATH"}
-    completed = subprocess.run(
-        [executable, *args], capture_output=True, text=True, errors="replace", check=False
-    )
-    output = (completed.stdout or completed.stderr).strip().splitlines()
-    return {
-        "ok": completed.returncode == 0,
-        "path": executable,
-        "detail": output[0] if output else f"exit {completed.returncode}",
-    }
-
-
-def module_check(import_name: str) -> dict[str, object]:
-    spec = importlib.util.find_spec(import_name)
-    return {"ok": spec is not None, "module": import_name}
+from karaoke_bootstrap import DEFAULT_MANIFEST, check, redact_report_paths
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", type=Path, help="StrangeUtaGame checkout")
-    args = parser.parse_args()
-    target = args.target.expanduser().resolve() if args.target else None
-    if target:
-        sys.path.insert(0, str(target / "src"))
-
-    commands = {
-        "git": command_check("git", ["--version"]),
-        "uv": command_check("uv", ["--version"]),
-        "ffmpeg": command_check("ffmpeg", ["-version"]),
-        "ffprobe": command_check("ffprobe", ["-version"]),
-        "rubberband_optional": command_check("rubberband", ["--version"]),
-    }
-    modules = {
-        name: module_check(name)
-        for name in (
-            "strange_uta_game",
-            "imageio_ffmpeg",
-            "mutagen",
-            "PIL",
-            "numpy",
-            "soundfile",
-            "pykakasi",
-            "stable_whisper",
-            "torch",
-            "torchaudio",
-        )
-    }
-    core_names = ("git", "uv", "ffmpeg", "ffprobe")
-    core_modules = (
-        "strange_uta_game",
-        "imageio_ffmpeg",
-        "mutagen",
-        "PIL",
-        "numpy",
-        "soundfile",
-        "pykakasi",
+    parser.add_argument("--target", type=Path, required=True, help="StrangeUtaGame checkout")
+    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument(
+        "--allow-custom-manifest",
+        action="store_true",
+        help="Authorize a non-built-in manifest; URL hosts remain strictly allowlisted",
     )
-    core_ok = sys.version_info >= (3, 10) and all(
-        bool(commands[name]["ok"]) for name in core_names
-    ) and all(bool(modules[name]["ok"]) for name in core_modules)
-    report = {
-        "schema_version": "karaoke-environment-check/v1",
-        "python": {
-            "ok": sys.version_info >= (3, 10),
-            "version": sys.version.split()[0],
-            "executable": sys.executable,
-        },
-        "target": str(target) if target else None,
-        "commands": commands,
-        "modules": modules,
-        "core_ok": core_ok,
-    }
+    parser.add_argument(
+        "--deep-verify",
+        action="store_true",
+        help="Read each complete model and verify SHA-256 (default checks exact size only)",
+    )
+    parser.add_argument(
+        "--redact-paths",
+        action="store_true",
+        help="Replace absolute local paths in the JSON report",
+    )
+    args = parser.parse_args()
+    report = check(
+        args.target,
+        args.manifest,
+        deep_verify=args.deep_verify,
+        allow_custom_manifest=args.allow_custom_manifest,
+    )
+    if args.redact_paths:
+        report = redact_report_paths(report)
+        report["paths_redacted"] = True
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0 if core_ok else 1
+    return 0 if report["core_ok"] else 1
 
 
 if __name__ == "__main__":

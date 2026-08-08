@@ -35,6 +35,11 @@ try:
         project_relative,
         sha256_file,
     )
+    from scripts.karaoke_common.device import (
+        DEFAULT_DEVICE,
+        add_device_argument,
+        resolve_device,
+    )
     from scripts.karaoke_language import (
         DEFAULT_LANGUAGE,
         contextual_pinyin_for_text,
@@ -55,6 +60,11 @@ except ImportError:  # pragma: no cover - direct execution fallback
         load_album_manifest,
         project_relative,
         sha256_file,
+    )
+    from karaoke_common.device import (  # type: ignore[no-redef]
+        DEFAULT_DEVICE,
+        add_device_argument,
+        resolve_device,
     )
     from karaoke_language import (  # type: ignore[no-redef]
         DEFAULT_LANGUAGE,
@@ -945,6 +955,9 @@ class MmsRuntime:
     allowed_units: frozenset[str]
     sample_rate: int
     model_path: Path
+    device: Any = "cpu"
+    requested_device: str = "cpu"
+    resolved_device: str = "cpu"
 
 
 def _validate_mms_model_access(
@@ -963,6 +976,7 @@ def load_mms_runtime(
     *,
     model_path: Path | None = None,
     allow_network: bool = False,
+    device: str | None = None,
 ) -> MmsRuntime:
     """Load one explicitly authorized or canonical repository-local MMS model."""
 
@@ -973,18 +987,25 @@ def load_mms_runtime(
 
     del project_root
     import torch
+
+    selection = resolve_device(device, torch_module=torch)
     import torchaudio
     from torchaudio.pipelines import MMS_FA
+
+    torch_device = torch.device(selection.resolved)
 
     download_options = {
         "model_dir": str(local_model_path.parent),
         "file_name": local_model_path.name,
     }
-    model = MMS_FA.get_model(dl_kwargs=download_options).eval()
+    model = MMS_FA.get_model(dl_kwargs=download_options).to(torch_device).eval()
     return MmsRuntime(
         torch=torch,
         torchaudio=torchaudio,
         model=model,
+        device=torch_device,
+        requested_device=selection.requested,
+        resolved_device=selection.resolved,
         tokenizer=MMS_FA.get_tokenizer(),
         aligner=MMS_FA.get_aligner(),
         allowed_units=frozenset(str(unit) for unit in MMS_FA.get_dict()),
@@ -1027,8 +1048,18 @@ def align_audio_units(
         sample_rate,
         runtime.sample_rate,
     )
+    runtime_device = getattr(
+        runtime,
+        "device",
+        getattr(runtime, "resolved_device", "cpu"),
+    )
+    tensor = tensor.to(runtime_device)
     with runtime.torch.inference_mode():
         emission = runtime.model(tensor)[0][0]
+    if hasattr(emission, "detach"):
+        emission = emission.detach()
+    if hasattr(emission, "cpu"):
+        emission = emission.cpu()
     frame_total = int(emission.size(0))
     if frame_total <= 0:
         raise RuntimeError("MMS returned an empty emission")
@@ -1415,6 +1446,7 @@ def run_audit(
     allow_partial_manifest: bool = False,
     model_path: Path | None = None,
     allow_network: bool = False,
+    device: str | None = None,
 ) -> dict[str, Any]:
     """Load the manifest, audit selected tracks, and write the report."""
 
@@ -1443,11 +1475,13 @@ def run_audit(
     )
     if resolved_sug_path is not None and len(tracks) != 1:
         raise ValueError("explicit sug_path requires exactly one selected song")
-    runtime = load_mms_runtime(
-        project_root,
-        model_path=model_path,
-        allow_network=allow_network,
-    )
+    runtime_kwargs: dict[str, Any] = {
+        "model_path": model_path,
+        "allow_network": allow_network,
+    }
+    if device is not None:
+        runtime_kwargs["device"] = device
+    runtime = load_mms_runtime(project_root, **runtime_kwargs)
     resolved_vocals_root = (
         Path(vocals_root).expanduser().resolve()
         if vocals_root is not None
@@ -1487,6 +1521,8 @@ def run_audit(
         ),
         "model": MODEL_NAME,
         "model_path": _report_path(runtime.model_path, project_root),
+        "requested_device": getattr(runtime, "requested_device", device or DEFAULT_DEVICE),
+        "resolved_device": getattr(runtime, "resolved_device", None),
         "model_sha256": sha256_file(runtime.model_path),
         "model_network_allowed": bool(allow_network),
         "language_codes": {track.song_id: track.language for track in tracks},
@@ -1507,6 +1543,13 @@ def run_audit(
             for track in tracks
         ],
     }
+    report_device = {
+        "requested_device": report["requested_device"],
+        "resolved_device": report["resolved_device"],
+    }
+    for song in report["songs"]:
+        if isinstance(song, dict):
+            song.update(report_device)
     if requested_schema == SCHEMA_VERSION_V2:
         report["alignment_contract"] = {
             "alignment_type": "supplied-known-token-forced-alignment",
@@ -1599,6 +1642,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="existing local MMS checkpoint; validated before model loading",
     )
+    add_device_argument(parser)
     parser.add_argument(
         "--allow-network",
         action="store_true",
@@ -1632,6 +1676,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         allow_partial_manifest=args.allow_partial_manifest,
         model_path=args.model_path,
         allow_network=args.allow_network,
+        device=args.device,
     )
     return 0
 

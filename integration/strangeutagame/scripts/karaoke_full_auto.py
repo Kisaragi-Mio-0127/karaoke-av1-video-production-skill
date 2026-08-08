@@ -18,6 +18,7 @@ try:
     from . import karaoke_timing
     from . import prepare_karaoke_msst_vocals as msst
     from .karaoke_album import AlbumManifest, AlbumTrack, load_album_manifest
+    from .karaoke_common.device import DEFAULT_DEVICE, add_device_argument
 except ImportError:  # pragma: no cover - direct script execution
     import audit_karaoke_asr_recognition as asr  # type: ignore[no-redef]
     import karaoke_timing  # type: ignore[no-redef]
@@ -26,6 +27,10 @@ except ImportError:  # pragma: no cover - direct script execution
         AlbumManifest,
         AlbumTrack,
         load_album_manifest,
+    )
+    from karaoke_common.device import (  # type: ignore[no-redef]
+        DEFAULT_DEVICE,
+        add_device_argument,
     )
 
 SUPPORTED_LANGUAGES = frozenset({"ja", "zh", "en"})
@@ -198,6 +203,8 @@ def _timing_arguments(plan: FullAutoPlan, args: argparse.Namespace) -> list[str]
         str(plan.whisper_models),
         "--vocal-stems-dir",
         str(plan.vocals_root),
+        "--device",
+        getattr(args, "device", DEFAULT_DEVICE),
     ]
     if args.timing_alignment:
         values.extend(("--alignment", args.timing_alignment))
@@ -221,6 +228,8 @@ def _wrapper_args(plan: FullAutoPlan, args: argparse.Namespace) -> argparse.Name
         str(plan.vocals_root),
         "--visual-style",
         args.visual_style,
+        "--device",
+        getattr(args, "device", DEFAULT_DEVICE),
     ]
     values.extend(("--quality-policy", args.quality_policy))
     if plan.track.language != "ja":
@@ -243,6 +252,8 @@ def run_full_auto(
         "song_id": plan.track.song_id,
         "language": plan.track.language,
         "quality_policy": args.quality_policy,
+        "requested_device": getattr(args, "device", DEFAULT_DEVICE),
+        "resolved_device": None,
         "stages": [],
         "outputs": {},
     }
@@ -285,6 +296,7 @@ def run_full_auto(
                     cache_dir=plan.asr_cache,
                     output_path=output,
                     allow_partial_manifest=True,
+                    device=getattr(args, "device", DEFAULT_DEVICE),
                 )
                 _require_file(output, f"{lane} recognition report")
                 recognition_paths.append(output)
@@ -298,6 +310,8 @@ def run_full_auto(
         workflow_report = module.run_mms_workflow(wrapper_args)
         report["stages"].append({"name": "mms-render", "status": "ok"})
         report["outputs"]["workflow"] = workflow_report
+        report["requested_device"] = getattr(args, "device", DEFAULT_DEVICE)
+        report["resolved_device"] = workflow_report.get("resolved_device")
         report["status"] = (
             "rendered-with-fallback"
             if workflow_report.get("status") == "rendered-with-fallback"
@@ -327,6 +341,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mms-model-path", type=Path)
     parser.add_argument("--whisper-models", type=Path)
     parser.add_argument("--asr-model", default="base")
+    add_device_argument(parser)
     parser.add_argument(
         "--timing-alignment",
         choices=("auto", "forced", "deterministic"),

@@ -46,6 +46,12 @@ try:
         load_album_manifest,
         project_relative,
     )
+    from .karaoke_common.device import (
+        DEFAULT_DEVICE,
+        add_device_argument,
+        normalize_device,
+        resolve_device,
+    )
     from .karaoke_language import (
         DEFAULT_LANGUAGE,
         english_word_spans,
@@ -63,6 +69,12 @@ except ImportError:  # pragma: no cover - direct script execution
         AlbumTrack,
         load_album_manifest,
         project_relative,
+    )
+    from karaoke_common.device import (  # type: ignore[no-redef]
+        DEFAULT_DEVICE,
+        add_device_argument,
+        normalize_device,
+        resolve_device,
     )
     from karaoke_language import (  # type: ignore[no-redef]
         DEFAULT_LANGUAGE,
@@ -1218,7 +1230,10 @@ def model_cache_path(model_name: str, model_cache: Path) -> Path:
 
 
 def run_alignment_worker(
-    request_path: Path, model_name: str, model_cache: Path
+    request_path: Path,
+    model_name: str,
+    model_cache: Path,
+    device: str = DEFAULT_DEVICE,
 ) -> None:
     """Worker entry point; stdout contains one ASCII-safe JSON marker."""
 
@@ -1228,17 +1243,28 @@ def run_alignment_worker(
         "error": None,
         "language": DEFAULT_LANGUAGE,
         "stable_ts_language": stable_ts_language(DEFAULT_LANGUAGE),
+        "requested_device": normalize_device(device),
+        "resolved_device": None,
     }
     try:
         request = json.loads(request_path.read_text(encoding="utf-8"))
+        requested_device = normalize_device(request.get("device", device))
+        response["requested_device"] = requested_device
+        selection = resolve_device(requested_device)
+        response.update(selection.as_report())
         language = normalize_language(request.get("language"), default=DEFAULT_LANGUAGE)
         response["language"] = language
         response["stable_ts_language"] = stable_ts_language(language)
         import stable_whisper
 
+        model_path = model_cache_path(model_name, model_cache)
+        if not model_path.is_file():
+            raise FileNotFoundError(
+                f"Whisper model checkpoint does not exist: {model_path}"
+            )
         model = stable_whisper.load_model(
-            str(model_cache_path(model_name, model_cache)),
-            device="cpu",
+            str(model_path),
+            device=selection.resolved,
         )
         audio = str(request["audio"])
         line_inputs = list(request["lines"])
@@ -1298,6 +1324,7 @@ def run_forced_alignment(
     model_cache: Path,
     timeout_seconds: float,
     language: str = DEFAULT_LANGUAGE,
+    device: str = DEFAULT_DEVICE,
 ) -> tuple[dict[int, list[dict[str, Any]]], dict[str, Any]]:
     """Run one batch alignment in a killable subprocess.
 
@@ -1306,6 +1333,8 @@ def run_forced_alignment(
     """
 
     language = normalize_language(language)
+    selection = resolve_device(device)
+    device_evidence = selection.as_report()
     empty: dict[int, list[dict[str, Any]]] = {}
     if importlib.util.find_spec("stable_whisper") is None:
         return empty, {
@@ -1314,9 +1343,10 @@ def run_forced_alignment(
             "error": "stable_whisper is not importable in the active Python",
             "language": language,
             "stable_ts_language": stable_ts_language(language),
+            **device_evidence,
         }
     model_file = model_cache_path(model_name, model_cache)
-    if not model_file.exists():
+    if not model_file.is_file():
         return empty, {
             "attempted": False,
             "status": "model-missing",
@@ -1324,6 +1354,7 @@ def run_forced_alignment(
             "model_path": str(model_file),
             "language": language,
             "stable_ts_language": stable_ts_language(language),
+            **device_evidence,
         }
 
     request = {
@@ -1338,6 +1369,7 @@ def run_forced_alignment(
             for line in lines
         ],
         "language": language,
+        "device": selection.requested,
     }
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", suffix=".json", delete=False
@@ -1356,6 +1388,8 @@ def run_forced_alignment(
             model_name,
             "--model-cache",
             str(model_cache),
+            "--device",
+            selection.requested,
         ]
         try:
             completed = subprocess.run(
@@ -1377,6 +1411,7 @@ def run_forced_alignment(
                 "stderr_tail": _decode_bytes(exc.stderr)[-1000:] if exc.stderr else "",
                 "language": language,
                 "stable_ts_language": stable_ts_language(language),
+                **device_evidence,
             }
         stdout = _decode_bytes(completed.stdout)
         stderr = _decode_bytes(completed.stderr)
@@ -1399,6 +1434,7 @@ def run_forced_alignment(
                 "stderr_tail": stderr[-1000:],
                 "language": language,
                 "stable_ts_language": stable_ts_language(language),
+                **device_evidence,
             }
         payload = json.loads(marker[len("ALIGNMENT_JSON:") :])
         if payload.get("status") != "ok":
@@ -1412,6 +1448,12 @@ def run_forced_alignment(
                 "stderr_tail": stderr[-1000:],
                 "language": language,
                 "stable_ts_language": stable_ts_language(language),
+                "requested_device": payload.get(
+                    "requested_device", selection.requested
+                ),
+                "resolved_device": payload.get(
+                    "resolved_device", selection.resolved
+                ),
             }
 
         line_words: dict[int, list[dict[str, Any]]] = {
@@ -1440,6 +1482,7 @@ def run_forced_alignment(
             "ffmpeg_path": ffmpeg_path,
             "language": language,
             "stable_ts_language": stable_ts_language(language),
+            **device_evidence,
             "segment_count": len(payload.get("segments", [])),
             "word_count": sum(len(words) for words in line_words.values()),
             "model_sha256": sha256_file(model_file),
@@ -2779,8 +2822,10 @@ def build_song(
     timing_overrides: dict[str, Any] | None = None,
     singer_color: str = "#FF6B6B",
     role_colors: Mapping[str, Any] | None = None,
+    device: str = DEFAULT_DEVICE,
 ) -> dict[str, Any]:
     language = normalize_language(spec.language)
+    requested_device = normalize_device(device)
     fallback_method = (
         "deterministic-mora-interpolation"
         if language == "ja"
@@ -2814,6 +2859,8 @@ def build_song(
             "method": fallback_method,
             "language": language,
             "stable_ts_language": stable_ts_language(language),
+            "requested_device": requested_device,
+            "resolved_device": None,
         }
     else:
         aligned_words, alignment_meta = run_forced_alignment(
@@ -2823,6 +2870,7 @@ def build_song(
             model_cache,
             alignment_timeout,
             language=language,
+            device=requested_device,
         )
     alignment_meta["audio_kind"] = alignment_audio_kind
     project_root = spec.project_root or ROOT
@@ -2842,6 +2890,7 @@ def build_song(
             model_cache,
             alignment_timeout,
             language=language,
+            device=requested_device,
         )
         helper = ReadingHelper()
         comparisons: list[dict[str, Any]] = []
@@ -3139,6 +3188,15 @@ def build_report(
         song_id: identity["code"]
         for song_id, identity in language_identities.items()
     }
+    requested_device = normalize_device(
+        getattr(args, "device", DEFAULT_DEVICE)
+    )
+    resolved_devices = {
+        song.get("alignment", {}).get("resolved_device")
+        for song in songs
+        if song.get("alignment", {}).get("resolved_device")
+    }
+    resolved_device = next(iter(resolved_devices)) if len(resolved_devices) == 1 else None
     return {
         "schema_version": "karaoke-timing-report/v1",
         "evidence_contract": ALIGNMENT_EVIDENCE_CONTRACT,
@@ -3151,6 +3209,8 @@ def build_report(
             "alignment_mode": args.alignment,
             "model": args.model,
             "model_cache": project_relative(args.model_cache, project_root),
+            "requested_device": requested_device,
+            "resolved_device": resolved_device,
             "fixed_ass": {
                 "play_res_x": 1920,
                 "play_res_y": 1080,
@@ -3169,6 +3229,8 @@ def build_report(
             },
         },
         "source_path": report_source,
+        "requested_device": requested_device,
+        "resolved_device": resolved_device,
         "font_verification": normalized_font_verification,
         "language_codes": language_codes,
         "language_identities": language_identities,
@@ -3250,6 +3312,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--model", default="base")
     parser.add_argument("--model-cache", type=Path, default=DEFAULT_MODEL_CACHE)
+    add_device_argument(parser)
     parser.add_argument("--alignment-timeout", type=float, default=180.0)
     parser.add_argument(
         "--vocal-stems-dir",
@@ -3274,7 +3337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.alignment_worker:
         if args.request is None:
             raise SystemExit("--request is required in alignment worker mode")
-        run_alignment_worker(args.request, args.model, args.model_cache)
+        run_alignment_worker(args.request, args.model, args.model_cache, args.device)
         return 0
 
     album = load_album_manifest(
@@ -3358,6 +3421,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             song_overrides.get("lines", {}),
             singer_color=song_overrides.get("highlight_color", "#FF6B6B"),
             role_colors=song_overrides.get("role_colors"),
+            device=args.device,
         )
         song_report["source"]["lyric_corrections"] = applied_corrections
         song_reports.append(song_report)

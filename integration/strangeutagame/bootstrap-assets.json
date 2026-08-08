@@ -1,0 +1,49 @@
+{
+  "schema_version": "karaoke-bootstrap/v1",
+  "python": {
+    "minimum": "3.11",
+    "required_modules": [
+      "imageio_ffmpeg",
+      "mutagen",
+      "PIL",
+      "numpy",
+      "soundfile",
+      "pykakasi",
+      "stable_whisper",
+      "torch",
+      "torchaudio",
+      "strange_uta_game"
+    ]
+  },
+  "requirements": "requirements/requirements-karaoke.pinned.txt",
+  "models": [
+    {
+      "name": "mms-forced-alignment",
+      "destination": "models/mms/model.pt",
+      "url": "https://dl.fbaipublicfiles.com/mms/torchaudio/ctc_alignment_mling_uroman/model.pt",
+      "sha256": "20ef12963ab4924bef49ac4fc7f58ad5da2ee43b2c11bc8c853c9b90ecdbc680",
+      "size": 1262047414,
+      "license": {
+        "spdx": "CC-BY-NC-4.0",
+        "url": "https://creativecommons.org/licenses/by-nc/4.0/",
+        "notice": "Attribution is required and use is limited to non-commercial purposes under CC BY-NC 4.0.",
+        "source_url": "https://docs.pytorch.org/audio/stable/generated/torchaudio.pipelines.MMS_FA.html",
+        "requires_acceptance": true
+      }
+    },
+    {
+      "name": "whisper-base",
+      "destination": "models/whisper/base.pt",
+      "url": "https://openaipublic.azureedge.net/main/whisper/models/ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e/base.pt",
+      "sha256": "ed3a0b6b1c0edf879ad9b11b1af5a0e6ab5db9205f891f668f8b0e6c6326e34e",
+      "size": 145262807,
+      "license": {
+        "spdx": "MIT",
+        "url": "https://github.com/openai/whisper/blob/main/LICENSE",
+        "notice": "OpenAI Whisper code and published model weights are provided under the MIT License.",
+        "source_url": "https://github.com/openai/whisper",
+        "requires_acceptance": false
+      }
+    }
+  ]
+}

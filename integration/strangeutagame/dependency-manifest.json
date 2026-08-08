@@ -69,6 +69,11 @@
       "reason": "Builds the current composition and style-owned visual assets inside each new workflow output."
     },
     {
+      "path": "karaoke_common/device.py",
+      "category": "package-file",
+      "reason": "Selects the runtime ML device for public Japanese/general workflows, defaulting to hardware-aware auto detection with explicit CUDA or CPU overrides."
+    },
+    {
       "path": "karaoke_japanese/__init__.py",
       "category": "package-file",
       "reason": "Japanese layout package initializer for the selectable wide-visual workflow."
@@ -214,17 +219,34 @@
       "reason": "Human-readable dependencies for the installed karaoke integration."
     },
     {
-      "path": "requirements/requirements-karaoke.lock.txt",
-      "destination": "requirements-karaoke.skill.lock.txt",
+      "path": "requirements/requirements-karaoke.pinned.txt",
+      "destination": "requirements-karaoke.skill.pinned.txt",
       "category": "dependency-file",
-      "reason": "Locked dependencies for reproducible installation in the target checkout."
+      "reason": "Version-pinned dependencies plus an explicit local editable target-project install; this is not a cross-platform hash lock."
+    }
+  ],
+  "bootstrap_assets": [
+    {
+      "path": "bootstrap-assets.json",
+      "category": "bootstrap-configuration",
+      "reason": "Public HTTPS model URLs, exact sizes, SHA-256 checksums, license metadata, target models paths, required modules, and the version-pinned dependency source for Japanese/general bootstrap."
     }
   ],
   "support_tools": [
     {
+      "path": "scripts/bootstrap_karaoke_environment.py",
+      "category": "integration-tool",
+      "reason": "Explicit-only bootstrap for the target uv environment and checksum-pinned Japanese/general models; MMS download requires CC BY-NC 4.0 acceptance, while dry-run and offline modes do not actively initiate network requests."
+    },
+    {
       "path": "scripts/check_karaoke_environment.py",
       "category": "integration-tool",
-      "reason": "Checks a StrangeUtaGame checkout and its project-local runtime."
+      "reason": "Performs a repeatable check of local target state without actively initiating network requests, including uv runtime, CUDA/CPU backend, commands, and project-owned models."
+    },
+    {
+      "path": "scripts/karaoke_bootstrap.py",
+      "category": "shared-internal-tool",
+      "reason": "Shared validated manifest, environment probing, atomic download, and SHA-256 implementation for public bootstrap commands."
     },
     {
       "path": "scripts/check_sug_compatibility.py",

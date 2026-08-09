@@ -2,18 +2,19 @@
 
 [中文说明](README.zh-CN.md)
 
-This repository packages a reusable Codex Skill and a guarded StrangeUtaGame
-integration for Japanese karaoke timing and AV1 video production. The public
-bundle is Japanese and language-neutral only; Chinese/English workflows stay
-in the separate local Skill. Track-specific data remains in external manifests
-and frozen lyric sources.
+Karaoke AV1 Video Production provides Japanese karaoke timing, editable SUG
+projects, wide subtitle rendering, and AV1 delivery workflows for
+StrangeUtaGame. Song metadata comes from album manifests, while lyric text
+comes from frozen JSON or manually supplied LRC/TXT inputs.
 
-## Version baseline
+## Compatibility check
 
-Main targets StrangeUtaGame 1.5.0 with SUG 0.3.0; `sug-1.4.5` retains 1.4.5.
-Gate compatibility on runtime `__version__` and the `SugMigrator` schema. The
-official 1.5.0 tag still has `pyproject.toml` 1.2.6; that difference is
-diagnostic only. The main installer rejects targets other than 1.5.0.
+Run the compatibility check and installer dry run against the target
+StrangeUtaGame workspace. Compatibility is determined from the application
+runtime version, the `SugMigrator` schema, and a representative SUG parser
+load. A successful parser load does not bypass the installer's exact
+application-version and SUG-format checks; unsupported targets are reported
+before files are copied.
 
 ## What is automatic
 
@@ -22,7 +23,7 @@ The recommended Japanese entry is the single-command
 lyrics, and a new output directory, it:
 
 - prepares the selected MSST vocal stem;
-- builds a private initial SUG;
+- builds a working initial SUG;
 - runs Japanese MMS and creates an editable companion SUG;
 - prepares the current layout and renders the AV1 MP4 delivery;
 - exports a relocatable editable SUG with a verified media path.
@@ -59,7 +60,7 @@ Set-Location <StrangeUtaGame>
 uv run --no-sync python --version
 ```
 
-The public runtime follows bootstrap hardware detection with `--device auto`.
+Production follows bootstrap hardware detection with `--device auto`.
 Override it explicitly with `--device cuda` or `--device cpu` when a fixed
 backend is required. Production commands use project-owned
 `models/mms/model.pt` and `models/whisper` and do not implicitly download
@@ -72,7 +73,7 @@ better than the default. It reads the fixed local
 `models/hf/nextfire-mms-ja-latn` snapshot, never downloads at runtime, uses no
 general Hugging Face cache, and executes no remote code.
 
-The public environment tools have distinct boundaries:
+The environment tools have distinct responsibilities:
 
 1. `check_karaoke_environment.py` does not actively initiate network requests.
    It probes local commands, the target `.venv`, the selected CUDA/CPU backend,
@@ -126,8 +127,8 @@ and models are already available locally. If a custom manifest is used, add
 `--allow-custom-manifest`; if a managed Python must be downloaded, add
 `--allow-python-download`. The bootstrap manifest selects CUDA-oriented Torch
 packages when `nvidia-smi` detects NVIDIA hardware and the official CPU index
-otherwise. This selection does not install a driver. The public production
-runtime still follows `--device auto` unless `--device cuda` or
+otherwise. This selection does not install a driver. Production still follows
+`--device auto` unless `--device cuda` or
 `--device cpu` is supplied.
 
 ## Install the integration
@@ -139,9 +140,8 @@ git clone https://github.com/Kisaragi-Mio-0127/karaoke-av1-video-production-skil
   "$env:USERPROFILE\.codex\skills\karaoke-av1-video-production"
 ```
 
-Install the bundled integration into a StrangeUtaGame 1.5.0 checkout. The main
-installer rejects every other target. Review the dry run before allowing
-replacements:
+Install the bundled integration into a compatible StrangeUtaGame workspace.
+Review the compatibility result and dry run before allowing replacements:
 
 ```powershell
 python scripts/install_strangeutagame_integration.py --target <project> --dry-run
@@ -152,28 +152,25 @@ The installer copies only paths authorized by
 [`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json)
 and keeps rollback backups for replaced files.
 
-## Dependency on upstream StrangeUtaGame
+## StrangeUtaGame dependencies
 
-This repository does not contain or replace the upstream StrangeUtaGame
-application. The integration bundle is installed into a compatible checkout
-because several production scripts use its SUG domain model, parser, exporters,
-and editor/audio interfaces:
+The workflow uses StrangeUtaGame's SUG domain model, parser, exporters, and
+editor/audio interfaces:
 
 - `karaoke_timing.py`, `render_karaoke_track.py`, `sug_ruby.py`, and
-  `karaoke_mms_editable.py` import upstream Python modules directly.
+  `karaoke_mms_editable.py` import StrangeUtaGame Python modules directly.
 - Full-auto, staged MMS, direct rerender, and batch entry scripts depend on
   those modules transitively and must run from the target checkout through its
   existing `.venv`.
 - Media inspection, artwork, palette, pitch-shift, packaging, snapshot, and
-  transcoding helpers do not import upstream code, but some still consume the
+  transcoding helpers do not import application code, but some still consume the
   manifest, SUG, font, media, or directory conventions of the target project.
-- Repository-side installer and environment tools run outside the target, but
-  receive the StrangeUtaGame checkout through `--target` and never substitute
-  for the application itself.
+- Installer and environment tools receive the StrangeUtaGame workspace through
+  `--target` and validate its required layout.
 
-The complete per-script dependency and installation map is in
+The workspace dependency and installation overview is in
 [StrangeUtaGame integration](references/strangeutagame-integration.md). The
-machine-readable source is
+machine-readable installation source is
 [`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json).
 
 ## Main commands
@@ -185,7 +182,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
   --manifest <manifest> `
   --song-id <song-id> `
   --source <frozen-lyrics.json> `
-  --output-dir <new-private-output-dir> `
+  --output-dir <new-output-dir> `
   --quality-policy auto-fallback
 ```
 
@@ -202,7 +199,7 @@ Japanese staged MMS/recovery:
 uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
   --manifest <manifest> --song-id <song-id> `
   --mms-model-path models/mms/model.pt `
-  --quality-policy auto-fallback --output-dir <new-private-output-dir> `
+  --quality-policy auto-fallback --output-dir <new-output-dir> `
   --visual-style spectrum
 ```
 
@@ -240,8 +237,8 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
   --manifest <manifest> --visual-style spectrum
 ```
 
-Use a new output directory for every full-auto or staged run. In the public
-runtime, use `--device auto` to follow the bootstrap probe, or explicitly pass
+Use a new output directory for every full-auto or staged run. Use
+`--device auto` to follow the bootstrap probe, or explicitly pass
 `--device cuda`/`--device cpu` to pin the backend. The exact option set is
 authoritative in each command's `--help` output. Pronunciation
 validation remains optional: the staged, direct, and batch Japanese CLIs

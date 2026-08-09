@@ -5,15 +5,15 @@ description: Produce, rerender, package, or debug Japanese karaoke videos and ed
 
 # Karaoke AV1 Video Production
 
-Use this Skill only for the public Japanese/general StrangeUtaGame integration.
-Keep canonical inputs, private generated timing evidence, companion SUG files,
-and delivery media separate. Do not add or route Chinese/English workflows
-through this public Skill.
+Use this Skill for Japanese karaoke timing, editable SUG projects, rendering,
+and general AV1 packaging in a compatible StrangeUtaGame workspace. Keep
+source lyrics, working timing evidence, companion SUG files, and delivery
+media as separate workflow artifacts.
 
-Main targets StrangeUtaGame 1.5.0 with SUG 0.3.0; `sug-1.4.5` retains 1.4.5.
-Gate compatibility on runtime `__version__` and the `SugMigrator` schema: the
-official 1.5.0 tag still has `pyproject.toml` 1.2.6, which is diagnostic only.
-The main installer rejects targets other than 1.5.0.
+Before installation, run the compatibility check against the target runtime.
+Treat the application runtime version, `SugMigrator` schema, and representative
+SUG parser result as authoritative. Parser success does not bypass the
+installer's exact application-version and SUG-format checks.
 
 Read these references when needed:
 
@@ -28,7 +28,7 @@ Read these references when needed:
 
 - Run production commands from the StrangeUtaGame root with its existing
   `.venv` through `uv run --no-sync`.
-- The public runtime follows bootstrap hardware detection with
+- Production follows bootstrap hardware detection with
   `--device auto`. Override it explicitly with `--device cuda` or
   `--device cpu` when the target policy requires a fixed backend.
 - Production commands use project-owned `models/mms/model.pt` and
@@ -41,7 +41,7 @@ Read these references when needed:
 - Use the matched FFmpeg 8.x project tools under `tools/ffmpeg/bin`; install
   and verify them with the StrangeUtaGame integration reference. Treat 9.x as
   an explicit compatibility migration, not the default.
-- The public `check_karaoke_environment.py` does not actively initiate network
+- `check_karaoke_environment.py` does not actively initiate network
   requests. It checks model sizes by default and reads full model files only
   with `--deep-verify`; a custom manifest requires `--allow-custom-manifest`.
 - Run `bootstrap_karaoke_environment.py` only as an explicit setup action. It
@@ -65,7 +65,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
 ```
 
 The output directory must be new. The command prepares one MSST vocal stem,
-builds a private initial SUG, runs Japanese MMS, creates a separate editable
+builds a working initial SUG, runs Japanese MMS, creates a separate editable
 companion SUG, generates the current layout, renders AV1 MP4, and writes stage
 reports. Every successful render also exports a relocatable SUG under
 `render/editable-project` and verifies its media path. It defaults to
@@ -105,7 +105,7 @@ tagless delivery audio.
 The MSST adapter is auto-discovered from supported local installations; an
 explicit `KARAOKE_MSST_PREPARATION_SCRIPT` path overrides discovery.
 
-The public runtime selection is `auto`, matching bootstrap's CUDA/CPU probe.
+Runtime selection defaults to `auto`, matching bootstrap's CUDA/CPU probe.
 Pass `--device cuda` or `--device cpu` to pin the backend explicitly.
 
 Treat `rendered-with-fallback` as successful automation with retained quality
@@ -171,7 +171,7 @@ the full-auto and staged Japanese entries.
 ## Staged MMS and recovery
 
 Use `scripts/run_karaoke_japanese_mms_workflow.py` for stage-level recovery,
-evidence inspection, or rerunning from an explicit private SUG. This lower
+evidence inspection, or rerunning from an explicit working SUG. This lower
 level route performs:
 
 ```text

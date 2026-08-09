@@ -41,7 +41,7 @@ source lyrics -> candidate ruby fill -> canonical SUG
 
 ## 显式日文MMS工作流、编辑器与独立ASR
 
-`run_karaoke_japanese_full_auto.py`是默认的首次运行入口，`run_karaoke_japanese_mms_workflow.py`是分阶段MMS/恢复入口。它仅限日文，且与批量渲染分离。Full-auto要求`--manifest`、`--song-id`、`--source`和新的`--output-dir`；它在调用分阶段包装器前准备私有初始SUG。分阶段包装器也可以接收单个显式`--sug`用于恢复或重新渲染。两条路径都在`render/artwork-current`中构建当前构图，而显式`--composition`仍是高级门控覆盖。任何一条路径都不得重新获取歌词或修改已解析的输入。
+`run_karaoke_japanese_full_auto.py`是默认的首次运行入口，`run_karaoke_japanese_mms_workflow.py`是分阶段MMS/恢复入口。它仅限日文，且与批量渲染分离。Full-auto要求`--manifest`、`--song-id`、`--source`和新的`--output-dir`；它在调用分阶段包装器前准备工作初始SUG。分阶段包装器也可以接收单个显式`--sug`用于恢复或重新渲染。两条路径都在`render/artwork-current`中构建当前构图，而显式`--composition`仍是高级门控覆盖。任何一条路径都不得重新获取歌词或修改已解析的输入。
 
 工作流通过`--mms-model-path`使用项目自有的`models/mms/model.pt`检查点。`.cache`保留给派生运行时数据和证据；它不是模型权威来源，本契约也不包含下载回退。封面访问仍是独立的策略决定。这两项策略都不授权远程歌词、音频或输入替换。在不暴露不必要绝对路径的前提下，记录解析后的模型身份和缓存来源。
 

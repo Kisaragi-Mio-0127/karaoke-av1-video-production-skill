@@ -229,6 +229,34 @@ def test_compact_japanese_line_that_fits_keeps_soft_character_overrun(monkeypatc
     assert [phrase.text for phrase in phrases] == [sentence.text]
 
 
+def test_seventeen_character_japanese_line_that_fits_splits_into_balanced_phrases(
+    monkeypatch,
+):
+    sentence = _sentence("来週予定カレンダー共同編集確認事項")
+    monkeypatch.setattr(
+        renderer,
+        "_measured_text_span",
+        lambda *args, **kwargs: renderer.WIDE_LAYOUT.slot_width - 20,
+    )
+
+    phrases = renderer.split_sentence_for_display(
+        sentence,
+        max_chars=renderer.WIDE_LAYOUT.max_phrase_chars,
+        language="ja",
+        font_file=Path("synthetic-font.ttf"),
+        layout=renderer.WIDE_LAYOUT,
+    )
+
+    assert [phrase.text for phrase in phrases] == [
+        "来週予定カレンダー",
+        "共同編集確認事項",
+    ]
+    assert "".join(phrase.text for phrase in phrases) == sentence.text
+    assert all(
+        len(phrase.text) >= renderer.MIN_DISPLAY_PHRASE_CHARS for phrase in phrases
+    )
+
+
 def test_long_japanese_line_that_fits_still_splits_at_semantic_boundary(monkeypatch):
     sentence = _sentence("聞いたってきっと朝にはいつもいないんだろう")
     monkeypatch.setattr(

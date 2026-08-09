@@ -2,18 +2,18 @@
 
 [English](README.md)
 
-本仓库提供可复用的Codex Skill，以及受保护的StrangeUtaGame日文卡拉OK时间轴和AV1视频制作集成。公开包仅包含日文与通用流程；中文和英文工作流保留在独立的本地Skill中。逐曲数据仍放在外部清单和冻结歌词源中。
+Karaoke AV1 Video Production为StrangeUtaGame提供日文卡拉OK时间轴、可编辑SUG工程、宽屏字幕渲染和AV1交付流程。歌曲元数据来自专辑清单，歌词文本来自冻结JSON或手工提供的LRC/TXT输入。
 
-## 版本基线
+## 兼容性检查
 
-main面向StrangeUtaGame 1.5.0和SUG 0.3.0；`sug-1.4.5`分支保留1.4.5。兼容门以运行时`__version__`和`SugMigrator` schema为准。官方1.5.0 tag中的`pyproject.toml`仍为1.2.6，此差异仅用于诊断。main安装器拒绝非1.5.0目标。
+安装前对目标StrangeUtaGame工作区运行兼容性检查与安装器dry run。兼容性依据应用运行时版本、`SugMigrator` schema和代表性SUG解析结果判断。解析成功仍须通过安装器内置的应用版本与SUG格式精确检查；安装器会在复制文件前报告不受支持的目标。
 
 ## 可以自动完成什么
 
 推荐的日文入口是单命令`scripts/run_karaoke_japanese_full_auto.py`。给定清单、歌曲ID、歌词输入和新的输出目录后，它会：
 
 - 准备选中歌曲的MSST人声分轨；
-- 生成私有初始SUG；
+- 生成工作初始SUG；
 - 运行日文MMS并生成可编辑的companion SUG；
 - 准备当前布局并渲染AV1 MP4交付物；
 - 导出一份媒体路径已经校验、移动后仍可继续调轴的SUG。
@@ -35,11 +35,11 @@ Set-Location <StrangeUtaGame>
 uv run --no-sync python --version
 ```
 
-公开运行时跟随Bootstrap的硬件探测，默认使用`--device auto`。需要固定后端时显式覆盖为`--device cuda`或`--device cpu`。生产命令使用项目自有的`models/mms/model.pt`和`models/whisper`，不会隐式下载模型。缺少输入时会直接失败，请单独准备环境。
+生产流程跟随Bootstrap的硬件探测，默认使用`--device auto`。需要固定后端时显式覆盖为`--device cuda`或`--device cpu`。生产命令使用项目自有的`models/mms/model.pt`和`models/whisper`，不会隐式下载模型。缺少输入时会直接失败，请单独准备环境。
 
 `local-mms-fa`仍是默认对齐后端。实验性、仅限日文的`NextFire/mms-300m-ForcedAligner-karaoke-ja-Latn`只能通过`--mms-backend nextfire-ja-latn`显式选择，不宣称优于默认后端。它只读取固定本地快照`models/hf/nextfire-mms-ja-latn`，运行时不下载、不使用通用Hugging Face缓存，也不执行远程代码。
 
-公开环境工具的边界不同：
+环境工具各自承担以下职责：
 
 1. `check_karaoke_environment.py`不会主动发起网络请求。它探测本地命令、目标`.venv`、选定的CUDA/CPU后端和项目自有模型文件。默认只检查模型精确大小；`--deep-verify`才会读取完整模型文件并做SHA-256校验。自定义清单必须加`--allow-custom-manifest`；需要隐藏绝对本地路径时可加`--redact-paths`。
 2. `bootstrap_karaoke_environment.py`只有在显式调用时才执行设置。它探测NVIDIA/CPU，复用或创建唯一的`target/.venv`，安装固定版本的Python包，并把缺失的MMS/Whisper文件下载到`target/models/`。自定义清单必须加`--allow-custom-manifest`。MMS模型下载必须加`--accept-mms-cc-by-nc-4-0`，该选项确认必须署名且仅限非商业用途；托管Python下载必须加`--allow-python-download`。
@@ -68,7 +68,7 @@ python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> `
 
 可选NextFire安装必须同时传入两项许可确认。权重只保存在本地，不提交到本仓库；许可摘要见MMS工作流和第三方组件说明。
 
-当所需包和模型都已在本地时，可在显式Bootstrap命令上使用`--offline`。使用自定义清单时追加`--allow-custom-manifest`；需要下载托管Python时追加`--allow-python-download`。当`nvidia-smi`探测到NVIDIA硬件时，Bootstrap清单选择CUDA取向的Torch包，否则选择官方CPU索引。这种选择不会安装驱动。公开生产运行时仍默认使用`--device auto`，需要固定时显式写`--device cuda`或`--device cpu`。
+当所需包和模型都已在本地时，可在显式Bootstrap命令上使用`--offline`。使用自定义清单时追加`--allow-custom-manifest`；需要下载托管Python时追加`--allow-python-download`。当`nvidia-smi`探测到NVIDIA硬件时，Bootstrap清单选择CUDA取向的Torch包，否则选择官方CPU索引。这种选择不会安装驱动。生产流程默认使用`--device auto`，需要固定时显式写`--device cuda`或`--device cpu`。
 
 ## 安装集成
 
@@ -79,7 +79,7 @@ git clone https://github.com/Kisaragi-Mio-0127/karaoke-av1-video-production-skil
   "$env:USERPROFILE\.codex\skills\karaoke-av1-video-production"
 ```
 
-把集成安装到StrangeUtaGame 1.5.0工作区。main安装器拒绝其他目标。允许替换前先检查dry run：
+把集成安装到兼容的StrangeUtaGame工作区。允许替换前查看兼容性结果和dry run：
 
 ```powershell
 python scripts/install_strangeutagame_integration.py --target <project> --dry-run
@@ -88,16 +88,16 @@ python scripts/install_strangeutagame_integration.py --target <project> --force
 
 安装器只复制[`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json)授权的路径，并为被替换文件保留回滚备份。
 
-## 对上游StrangeUtaGame的依赖
+## StrangeUtaGame依赖
 
-本仓库不包含也不替代上游StrangeUtaGame应用。集成包必须安装到兼容工作区，因为部分制作脚本会使用其SUG领域模型、解析器、导出器以及编辑器和音频接口：
+制作流程会使用StrangeUtaGame的SUG领域模型、解析器、导出器以及编辑器和音频接口：
 
-- `karaoke_timing.py`、`render_karaoke_track.py`、`sug_ruby.py`和`karaoke_mms_editable.py`直接导入上游Python模块。
+- `karaoke_timing.py`、`render_karaoke_track.py`、`sug_ruby.py`和`karaoke_mms_editable.py`直接导入StrangeUtaGame Python模块。
 - Full-auto、分阶段MMS、直接重渲染和批量入口会间接使用这些模块，因此必须从目标工作区通过其现有`.venv`运行。
-- 媒体检查、美术图、取色、变调、打包、快照和转码工具不导入上游代码，但其中一部分仍会读取目标项目的清单、SUG、字体、媒体或目录约定。
-- 仓库侧安装器和环境工具在目标工作区外运行，但会通过`--target`接收StrangeUtaGame路径，并不会替代应用本身。
+- 媒体检查、美术图、取色、变调、打包、快照和转码工具不导入应用代码，但其中一部分仍会读取目标项目的清单、SUG、字体、媒体或目录约定。
+- 安装器和环境工具通过`--target`接收StrangeUtaGame工作区，并验证所需目录结构。
 
-完整的逐脚本依赖与安装位置见[StrangeUtaGame集成说明](references/strangeutagame-integration.zh-CN.md)，机器可读的事实源是[`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json)。
+工作区依赖与安装说明见[StrangeUtaGame集成说明](references/strangeutagame-integration.zh-CN.md)，机器可读的安装清单是[`dependency-manifest.json`](integration/strangeutagame/dependency-manifest.json)。
 
 ## 主要命令
 
@@ -108,7 +108,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
   --manifest <manifest> `
   --song-id <song-id> `
   --source <frozen-lyrics.json> `
-  --output-dir <new-private-output-dir> `
+  --output-dir <new-output-dir> `
   --quality-policy auto-fallback
 ```
 
@@ -122,7 +122,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
 uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
   --manifest <manifest> --song-id <song-id> `
   --mms-model-path models/mms/model.pt `
-  --quality-policy auto-fallback --output-dir <new-private-output-dir> `
+  --quality-policy auto-fallback --output-dir <new-output-dir> `
   --visual-style spectrum
 ```
 
@@ -151,7 +151,7 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
   --manifest <manifest> --visual-style spectrum
 ```
 
-每次full-auto或分阶段运行都使用新的输出目录。公开运行时使用`--device auto`跟随Bootstrap探测，也可以显式传入`--device cuda`或`--device cpu`固定后端。每个命令的`--help`输出是参数的最终依据。注音验证仍是可选项：日文分阶段、直接渲染和批量CLI提供`--pronunciation-validation {off,optional,required}`，默认是`optional`；full-auto不要求这个sidecar。
+每次full-auto或分阶段运行都使用新的输出目录。使用`--device auto`跟随Bootstrap探测，也可以显式传入`--device cuda`或`--device cpu`固定后端。每个命令的`--help`输出是参数的最终依据。注音验证仍是可选项：日文分阶段、直接渲染和批量CLI提供`--pronunciation-validation {off,optional,required}`，默认是`optional`；full-auto不要求这个sidecar。
 
 ## 布局与交付
 

@@ -2,7 +2,7 @@
 
 [English integration reference](strangeutagame-integration.md) | 中文
 
-本参考说明兼容StrangeUtaGame工作区使用的公开日文/通用集成，覆盖安装器、不会主动发起网络请求的环境检查和显式Bootstrap边界。公开包不添加中文或英文工作流入口。
+本参考说明兼容StrangeUtaGame工作区的安装、环境准备、生产入口、工作区依赖和验证流程。
 
 ## 安装
 
@@ -18,7 +18,7 @@ python "$skillRoot/scripts/install_strangeutagame_integration.py" --target <Stra
 
 ## 运行时选择
 
-通过`uv run --no-sync`使用目标工作区唯一的`.venv`。公开运行时约定使用`--device auto`，使工作流跟随Bootstrap选出的CUDA/CPU能力。目标策略需要固定后端时，显式使用`--device cuda`或`--device cpu`。
+通过`uv run --no-sync`使用目标工作区唯一的`.venv`。使用`--device auto`，使工作流跟随Bootstrap选出的CUDA/CPU能力。目标策略需要固定后端时，显式使用`--device cuda`或`--device cpu`。
 
 生产命令使用项目自有的`models/mms/model.pt`和`models/whisper`，不会隐式下载模型文件。缺少运行时输入时，请先执行下方的显式Bootstrap，不要让生产渲染兼任安装器。
 
@@ -44,13 +44,11 @@ tools\ffmpeg\bin\ffmpeg.exe -hide_banner -encoders | Select-String 'av1_nvenc|li
 
 统一解析顺序为：显式`--ffmpeg`/`--ffprobe`、`FFMPEG`/`FFPROBE`环境变量、项目专用工具、系统`PATH`，最后才把imageio-ffmpeg作为仅FFmpeg的兼容回退。imageio-ffmpeg不提供FFprobe。FFprobe只读取容器与媒体流信息，不负责渲染、编码或修改文件。
 
-公开运行时仅包含日文和通用流程。中文或英文工作流请使用独立的本地Skill。
-
 ## 不主动发起网络请求的检查
 
 `scripts/check_karaoke_environment.py`检查本地状态，但不会主动发起网络请求。这不等同于操作系统级断网保证：它会探测本地命令、目标`.venv`、NVIDIA/CPU能力、Python模块和项目自有模型文件。
 
-从公开Skill仓库运行：
+从集成仓库运行：
 
 ```powershell
 python scripts/check_karaoke_environment.py --target <StrangeUtaGame>
@@ -93,22 +91,24 @@ python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --next
 
 ## 项目配置
 
-使用已授权的清单和一种显式歌词输入。选定歌曲、音频、字体、模型路径和新的私有输出位置必须在生产开始前有效。除非显式使用`--refresh-source`授权单曲刷新，否则歌词源文件必须已经存在；省略`--netease-song-id`时，脚本会读取受支持的音频内嵌网易歌曲ID。手工UTF-8歌词可用`--lyrics-file <lyrics.lrc|lyrics.txt>`替代`--source`；纯文本会生成均匀粗时间锚点并进入时间复核状态。保持规范SUG、冻结歌词、私有证据、companion SUG和交付媒体彼此分离。
+使用已授权的清单和一种显式歌词输入。选定歌曲、音频、字体、模型路径和新的输出位置必须在生产开始前有效。除非显式使用`--refresh-source`授权单曲刷新，否则歌词源文件必须已经存在；省略`--netease-song-id`时，脚本会读取受支持的音频内嵌网易歌曲ID。手工UTF-8歌词可用`--lyrics-file <lyrics.lrc|lyrics.txt>`替代`--source`；纯文本会生成均匀粗时间锚点并进入时间复核状态。保持源SUG、冻结歌词、工作证据、companion SUG和交付媒体彼此分离。
+
+仅在已显式授权查询专辑详情时运行`scripts/karaoke_netease_metadata.py <audio> --identity --fetch-album`。该命令会访问网易专辑接口，并将专辑作者与音频中的曲目歌手分开报告。
 
 默认日文流程使用项目自有的MMS和Whisper路径。生产CLI可以显式覆盖路径，但覆盖不授权网络下载。注音验证仍是可选项。日文分阶段、直接渲染和批量CLI提供`--pronunciation-validation {off,optional,required}`，默认是`optional`；full-auto不要求这个sidecar。
 
 ## 生产顺序
 
-公开日文生产顺序如下：
+日文生产顺序如下：
 
 ```text
 manifest + song-id + one lyric source + new output directory
--> MSST -> private initial SUG -> Japanese MMS
+-> MSST -> working initial SUG -> Japanese MMS
 -> editable companion SUG -> current layout -> AV1 MP4
 -> relocatable editable SUG
 ```
 
-每次full-auto或分阶段运行都需要新的私有输出目录。以已安装命令的`--help`输出为最终参数依据。公开运行时约定使用`--device auto`；只有需要固定后端时才显式传入`--device cuda`或`--device cpu`。
+每次full-auto或分阶段运行都需要新的输出目录。以已安装命令的`--help`输出为最终参数依据。运行时约定使用`--device auto`；只有需要固定后端时才显式传入`--device cuda`或`--device cpu`。
 
 ## 日文Full-auto入口
 
@@ -122,7 +122,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py --manifest <ma
 
 需要选择实验性、仅限日文的后端时，加入`--mms-backend nextfire-ja-latn`。常规双音轨审核以及`auto-fallback`/`strict`策略仍然生效。
 
-该命令准备MSST人声，生成私有初始SUG，运行日文MMS，生成可编辑companion，准备当前布局并渲染AV1 MP4。默认质量策略是`auto-fallback`，默认视觉样式是`spectrum`。低置信度回退证据会保留在报告中；人工或Agent校轴是可选项。
+该命令准备MSST人声，生成工作初始SUG，运行日文MMS，生成可编辑companion，准备当前布局并渲染AV1 MP4。默认质量策略是`auto-fallback`，默认视觉样式是`spectrum`。低置信度回退证据会保留在报告中；人工或Agent校轴是可选项。
 
 Full-auto或分阶段MMS命令可加入`--output-mode subtitle-overlay`，MMS各阶段保持原有流程，仅更改最终渲染。省略视频素材时生成无音频、带透明通道的ProRes 4444 MOV；加入`--background-video <视频素材>`时由FFmpeg直接合成为AV1/AAC，较长素材裁剪到歌曲区间，较短素材的剩余区间显示黑幕。背景视频路径依次探测`av1_nvenc`和`libaom-av1`，硬件初始化或渲染失败时自动改用软件编码器。
 
@@ -133,14 +133,14 @@ Full-auto或分阶段MMS命令可加入`--output-mode subtitle-overlay`，MMS各
 需要审计、恢复或检查阶段时使用分阶段包装器：
 
 ```powershell
-uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --mms-model-path models/mms/model.pt --quality-policy auto-fallback --output-dir <new-private-output-dir> --visual-style spectrum --device auto
+uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --mms-model-path models/mms/model.pt --quality-policy auto-fallback --output-dir <new-output-dir> --visual-style spectrum --device auto
 ```
 
 需要显式使用实验性后端时，以`--mms-backend nextfire-ja-latn`代替`--mms-model-path`。双音轨审核和质量策略不变。
 
 必需参数是`--manifest`、`--song-id`和新的`--output-dir`。`--source`、`--sug`和`--vocals-root`是可选覆盖项；省略时由项目清单默认值解析选定输入。包装器分离保存审计、构建、companion和渲染产物，不替换规范SUG，也不会静默下载缺失的MMS检查点。
 
-`--allow-mms-network`虽然出现在帮助中，但它不是Bootstrap的替代品，也不是公开本地模型契约所需的选项。模型准备必须保持显式且本地化。
+`--allow-mms-network`虽然出现在帮助中，但它不是Bootstrap的替代品，也不是本地模型契约所需的选项。模型准备必须保持显式且本地化。
 
 ## 已有SUG重新渲染与批量入口
 
@@ -168,63 +168,17 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py --manifes
 
 默认交付是带硬字幕和AAC-LC音频的AV1`yuv420p`MP4。MKV/FLAC和完整空解码都是显式选项。提升交付前执行字幕、流、时长和代表帧门禁；详见[AV1 4:2:0命令](av1-420-commands.zh-CN.md)和[批量发布门禁](batch-release-gates.zh-CN.md)。
 
-## 各脚本对上游StrangeUtaGame的依赖
+## 工作区依赖与兼容性
 
-这些集成文件是在StrangeUtaGame之外后续开发的，不属于其上游Git历史，本仓库也不拥有或包含上游`strange_uta_game`源码。下表中的“可独立运行”是指不依赖上游StrangeUtaGame代码和工作区资源，并不表示不依赖本集成自己的Python包、输入媒体、字体、FFmpeg、模型或其他明确列出的工具。
+安装器只复制[`dependency-manifest.json`](../integration/strangeutagame/dependency-manifest.json)列出的路径：生产脚本和共享包进入`<target>/scripts/`，requirements文件进入目标根目录。安装与生产流程统一使用目标工作区的`.venv`。
 
-安装器把清单授权的所有Python路径安装到`<target>/scripts/`，包括`karaoke_common`和`karaoke_japanese`包目录；两份requirements文件安装到目标根目录。上游包仍位于`<target>/src/strange_uta_game/`，固定版本requirements中的本地`-e .`条目使其可从目标唯一的`.venv`导入。MMS和Whisper资产是位于`<target>/models/`下的独立项目自有运行时文件。
+Full-auto、分阶段MMS、直接重渲染和批量渲染需要目标应用运行时、SUG领域模型、`SugMigrator`、解析与持久化支持，以及选定的清单、媒体、字体、FFmpeg/FFprobe和声明的MMS/Whisper模型。媒体、美术、打包与模型路径辅助模块即使不导入应用代码，也需要各自文档列出的输入和外部工具。
 
-### 直接或传递依赖上游代码
-
-| 脚本/模块 | 依赖的上游模块、资源或运行时 | 安装位置 | 可脱离上游独立运行？ |
-|---|---|---|---|
-| `karaoke_timing.py` | 直接导入`backend.application.auto_check_service`、`backend.domain`、`backend.infrastructure.exporters`和`backend.infrastructure.persistence.sug_io`；还使用SUG项目、字体、Whisper/stable-ts和FFmpeg。 | `<target>/scripts/karaoke_timing.py` | 否。 |
-| `render_karaoke_track.py` | 构建ASS并渲染单曲；直接导入上游`Character`、`Sentence`和`SugProjectParser`，黑胶与频谱FFmpeg图由`karaoke_common/visuals.py`负责。 | `<target>/scripts/render_karaoke_track.py` | 否。 |
-| `karaoke_mms_editable.py` | 直接从上游SUG持久化模块导入`SugProjectParser`，读取并写入SUG companion。 | `<target>/scripts/karaoke_mms_editable.py` | 否。 |
-| `sug_ruby.py` | 对象回写路径动态导入上游`Ruby`和`RubyPart`；仅检查和验证原始JSON的路径不需要该导入。 | `<target>/scripts/sug_ruby.py` | 部分可以：仅JSON验证可脱离上游，对象回写不可。 |
-| `audit_karaoke_asr_recognition.py` | 从`karaoke_timing.py`导入LRC/修正辅助函数，因此加载这些函数会初始化上游导入；此外需要项目自有Whisper权重和stable-whisper/torch运行时。 | `<target>/scripts/audit_karaoke_asr_recognition.py` | 受支持的审计路径不可。 |
-| `audit_karaoke_mms_alignment.py` | 导入`karaoke_timing.py`和规范ruby辅助函数；读取SUG时间、原始/MSST音频，并通过torchaudio MMS_FA加载本地`models/mms/model.pt`。 | `<target>/scripts/audit_karaoke_mms_alignment.py` | 否。 |
-| `build_karaoke_mms_overrides.py` | 从`karaoke_timing.py`导入时间结构/辅助函数，并读取SUG/MMS审计产物。 | `<target>/scripts/build_karaoke_mms_overrides.py` | 否。 |
-| `sync_karaoke_editable_ruby.py` | 针对SUG项目数据使用`sug_ruby.py`；规范对象回写路径依赖上游领域类。 | `<target>/scripts/sync_karaoke_editable_ruby.py` | 受支持的集成回写流程不可。 |
-| `karaoke_workflow.py` | 使用同一Python解释器导入并启动`render_karaoke_track.py`，因此继承其SUG/时间模块上游导入；还使用目标项目根目录、资产、FFmpeg和发布辅助模块。 | `<target>/scripts/karaoke_workflow.py` | 否。 |
-| `render_karaoke_direct_av1_420_album.py` | 每个渲染任务都执行`render_karaoke_track.py`，因此继承其直接上游解析器/领域依赖；还使用SUG文件、图稿/字体资产和FFmpeg AV1编码器。 | `<target>/scripts/render_karaoke_direct_av1_420_album.py` | 否。 |
-| `run_karaoke_japanese_workflow.py` | `karaoke_workflow.py`的轻量入口，继承其预览、SUG、项目布局和FFmpeg依赖。 | `<target>/scripts/run_karaoke_japanese_workflow.py` | 否。 |
-| `run_karaoke_japanese_mms_workflow.py` | 导入MMS审计/构建、`karaoke_mms_editable.py`、`render_karaoke_track.py`和`karaoke_workflow.py`；需要规范/companion SUG、本地MMS模型、音频stem、字体和FFmpeg。 | `<target>/scripts/run_karaoke_japanese_mms_workflow.py` | 否。 |
-| `karaoke_full_auto.py` | 导入`karaoke_timing.py`、ASR和MSST准备模块，然后延迟导入日文MMS工作流；需要目标清单/布局、上游SUG运行时、本地MMS/Whisper模型、MSST适配器和FFmpeg。 | `<target>/scripts/karaoke_full_auto.py` | 否。 |
-| `run_karaoke_japanese_full_auto.py` | `karaoke_full_auto.py`的日文限定入口，继承完整的时间、MMS、SUG、MSST、模型和渲染依赖链。 | `<target>/scripts/run_karaoke_japanese_full_auto.py` | 否。 |
-
-### 不导入上游代码但依赖工件或布局
-
-| 脚本/模块 | 依赖的上游模块、资源或运行时 | 安装位置 | 可脱离上游独立运行？ |
-|---|---|---|---|
-| `finalize_karaoke_release.py` | 不导入上游代码，但会验证预期的规范/companion `.sug`工件和集成发布布局；使用统一FFmpeg解析器。 | `<target>/scripts/finalize_karaoke_release.py` | 有条件可以：不依赖上游代码，但依赖已有SUG工件/布局。 |
-| `build_karaoke_wide_artwork.py`<br>`karaoke_cover_palette.py`<br>`karaoke_color_plan.py`<br>`karaoke_common/artwork.py` | 不导入上游代码，使用Pillow和本集成输入生成确定性图稿/调色板。 | `<target>/scripts/`下对应路径 | 可以，但需要声明的图片、字体和元数据。 |
-| `inspect_karaoke_media.py`<br>`transcode_karaoke_av1.py`<br>`render_vinyl_karaoke.py`<br>`pitch_shift_audio.py` | 不导入上游代码，使用媒体/清单元数据和外部运行时：FFmpeg，以及所选路径中的FFprobe；移调还需要Rubber Band 3.x。 | `<target>/scripts/`下对应路径 | 可以，但需要相应媒体和外部命令。 |
-| `prepare_karaoke_msst_vocals.py` | 不导入上游代码；加载外部本地`prepare_sovits41_msst_stems.py`适配器及其MSST运行时/模型文件，这些内容由本集成之外的组件拥有。 | `<target>/scripts/prepare_karaoke_msst_vocals.py` | 相对于StrangeUtaGame可以；相对于独立MSST适配器/运行时不可以。 |
-| `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | 不导入上游代码，处理集成清单、路径、快照或发布文件；专辑规划通过统一FFmpeg解析器检查媒体。 | `<target>/scripts/`下对应路径 | 可以，但需要声明的集成输入。 |
-| `karaoke_model_paths.py` | 不导入上游代码，只解析项目自有`models/mms/model.pt`和`models/whisper/`路径。 | `<target>/scripts/karaoke_model_paths.py` | 相对于上游代码可以；调用方仍需要模型文件。 |
-| `karaoke_netease_metadata.py` | 不导入上游代码；默认读取受支持的本地音频标签，只有显式使用`--fetch-album`时才访问网易专辑接口。 | `<target>/scripts/karaoke_netease_metadata.py` | 相对于上游代码可以；专辑详情需要显式网络访问。 |
-| `karaoke_common/layout.py`<br>`karaoke_japanese/layout.py` | 不导入上游代码，是公开通用和日文布局定义；本仓库不包含中英文布局。 | `<target>/scripts/`下对应包路径 | 可以；这些是模块，不是独立命令。 |
-| `karaoke_common/visuals.py` | 不导入上游代码，集中构建单曲渲染器使用的黑胶与频谱FFmpeg图。 | `<target>/scripts/karaoke_common/visuals.py` | 可以；这是模块，不是独立命令。 |
-| `karaoke_common/device.py` | 不导入上游代码，动态加载`torch`选择CPU/CUDA。 | `<target>/scripts/karaoke_common/device.py` | 可以；这是模块，不是独立命令。 |
-| `karaoke_common/pronunciation.py` | 不直接导入上游代码，使用`sug_ruby.py`中支持JSON的部分执行注音策略。 | `<target>/scripts/karaoke_common/pronunciation.py` | 验证路径可以；这是模块，不是独立命令。 |
-| `karaoke_common/__init__.py`<br>`karaoke_japanese/__init__.py` | 仅为包初始化文件，依赖取决于其导出的包成员。 | `<target>/scripts/`下对应包路径 | 相对于上游代码可以；不是独立命令。 |
-
-### Skill侧安装与兼容性工具
-
-这些工具保留在Skill工作区，集成安装器不会把它们复制到目标工作区。
-
-| 工具 | 依赖的上游模块、资源或运行时 | 位置 | 可脱离上游独立运行？ |
-|---|---|---|---|
-| `install_strangeutagame_integration.py` | 要求兼容目标布局包含`pyproject.toml`、`src/strange_uta_game/`和`scripts/`，只复制清单授权的集成文件。 | `<skill>/scripts/` | 否：需要目标工作区，但不导入上游代码。 |
-| `check_sug_compatibility.py` | 从`<target>/src`直接导入上游版本、`SugMigrator`和`SugProjectParser`，读取代表性SUG项目但不保存。 | `<skill>/scripts/` | 否。 |
-| `open_editable_project_with_audio_probe.py` | 动态导入上游GUI/应用目录、时间加载器/接口、项目存储、SUG持久化和目标`main`模块；还探测上游音频转换钩子和媒体。 | `<skill>/scripts/` | 否。 |
-| `check_karaoke_environment.py`<br>`bootstrap_karaoke_environment.py`<br>`karaoke_bootstrap.py` | 需要兼容目标布局和目标`.venv`；探测或安装清单内Python模块（包括目标自身的可编辑`strange_uta_game`），并管理项目自有模型文件；还探测`git`、`uv`、FFmpeg/FFprobe和硬件运行时。 | `<skill>/scripts/` | 否：用途就是检查/设置目标工作区。 |
-| Skill侧`pitch_shift_audio.py` | 无上游依赖，是独立的FFmpeg/FFprobe/Rubber Band 3.x工具。 | `<skill>/scripts/pitch_shift_audio.py` | 可以。 |
+`install_strangeutagame_integration.py`、`check_karaoke_environment.py`和`bootstrap_karaoke_environment.py`保留在集成仓库，并通过`--target`操作目标工作区。兼容性检查会导入目标运行时的`__version__`、`SugMigrator`和`SugProjectParser`，随后读取代表性SUG工程且不保存。实际解析结果还须与安装器内置的应用版本和SUG格式精确检查共同通过；单独解析成功不授权安装。
 
 ## 已安装文件与验证
 
-日文/通用包包含`dependency-manifest.json`列出的授权脚本、语言中立共享模块、包文件、依赖和支持工具。公开仓库的测试不会安装到StrangeUtaGame。
+已安装集成包含[`dependency-manifest.json`](../integration/strangeutagame/dependency-manifest.json)列出的授权脚本、共享模块、包文件、依赖和支持工具。仓库测试不会安装到StrangeUtaGame。
 
 使用实际目标运行兼容性和环境检查：
 

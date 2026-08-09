@@ -1,4 +1,4 @@
 interface:
   display_name: "Karaoke AV1 Video Production"
   short_description: "Run Japanese karaoke from JSON, LRC, TXT, or reviewed SUG files."
-  default_prompt: "Use $karaoke-av1-video-production to run the Japanese full-auto MSST, private timing, MMS, companion-SUG, automatic-layout, and AV1 workflow from frozen JSON or manual LRC/TXT lyrics, or rerender an existing reviewed SUG."
+  default_prompt: "Use $karaoke-av1-video-production to run the Japanese full-auto MSST, working timing, MMS, companion-SUG, automatic-layout, and AV1 workflow from frozen JSON or manual LRC/TXT lyrics, or rerender an existing reviewed SUG."

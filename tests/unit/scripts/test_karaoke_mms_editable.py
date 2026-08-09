@@ -246,6 +246,46 @@ def test_companion_allows_shared_onsets_and_equal_checkpoints(tmp_path: Path):
     ] == [[30135], [30135], [30135]]
 
 
+def test_companion_without_sidecar_preserves_completed_destination_on_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    canonical = tmp_path / "canonical.sug"
+    audio = tmp_path / "mix.flac"
+    audio.write_bytes(b"audio")
+    _write_shared_checkpoint_project(canonical)
+    build = tmp_path / "build"
+
+    companion = create_mms_editable_companion(
+        canonical_sug=canonical,
+        audio=audio,
+        build_dir=build,
+        song_id="song-ja",
+        overrides={"songs": {"song-ja": {"lines": {"0": {}}}}},
+    )
+    published_bytes = companion.read_bytes()
+    assert companion.is_file()
+    assert not companion.with_suffix(".ruby-review.json").exists()
+
+    real_unlink = Path.unlink
+
+    def reject_destination_unlink(path: Path, *args, **kwargs) -> None:
+        if path == companion:
+            raise AssertionError("completed destination must not be unlinked")
+        real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", reject_destination_unlink)
+    with pytest.raises(FileExistsError, match="already exists"):
+        create_mms_editable_companion(
+            canonical_sug=canonical,
+            audio=audio,
+            build_dir=build,
+            song_id="song-ja",
+            overrides={"songs": {"song-ja": {"lines": {"0": {}}}}},
+        )
+
+    assert companion.read_bytes() == published_bytes
+
+
 def test_companion_allows_equal_checkpoints_within_one_token(tmp_path: Path):
     canonical = tmp_path / "canonical.sug"
     audio = tmp_path / "mix.flac"

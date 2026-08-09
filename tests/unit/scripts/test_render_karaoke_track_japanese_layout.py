@@ -501,6 +501,24 @@ def test_required_split_never_starts_next_phrase_with_particle_when_other_candid
     )
 
 
+def test_fifteen_character_split_keeps_particle_before_short_tail_and_preserves_ruby_span():
+    sentence = _sentence("春夏秋冬東西南北空を歩いて帰る")
+    ruby_start = 5
+    _set_single_character_ruby(sentence, ruby_start, "にしみなみきたそら")
+    for index in range(ruby_start, 8):
+        sentence.characters[index].linked_to_next = True
+
+    runs = renderer._split_character_run(sentence.characters, max_chars=8)
+    rendered_runs = ["".join(character.char for character in run) for run in runs]
+
+    assert len(sentence.characters) == 15
+    assert rendered_runs == ["春夏秋冬東西南北空を", "歩いて帰る"]
+    assert len(runs[-1]) == 5
+    assert runs[0][-1].char == "を"
+    assert sentence.characters[len(runs[0]) - 1].linked_to_next is False
+    assert "".join(rendered_runs) == sentence.text
+
+
 def test_display_override_never_cuts_a_canonical_word_span():
     sentence = _sentence("明日もずっと信じ続けて歩いていく")
     sentence.characters[7].linked_to_next = True

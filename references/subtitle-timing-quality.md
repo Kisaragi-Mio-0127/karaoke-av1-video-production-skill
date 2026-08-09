@@ -19,29 +19,47 @@ source lyrics -> candidate ruby fill -> canonical SUG
 ```
 
 Record a generation ID or equivalent evidence at every layer. For dedicated
-Japanese MMS, any `*_sha256` value is report-only and never a check,
-gate, exception, or exit input. The canonical SUG is the editable source of
-truth: candidate generation fills missing ruby, optional review may write accepted
-corrections, and rendering reads the selected project. The display phrases
-must recompose each normalized source line exactly. Identify overrides by
-complete source line plus stable segment or occurrence identity, assert their
-hit counts, and reject unreachable, duplicate, or overly broad rules.
+Japanese MMS, any `*_sha256` value is report-only and never a check, gate,
+exception, or exit input. The canonical SUG is the editable source of truth:
+candidate generation fills missing ruby, optional review may write accepted
+corrections, and rendering reads the selected project. Display phrases must
+recompose each normalized source line exactly.
 
-Record long but semantically complete phrases as reviewed exceptions and verify visual fit at the target font and size. Add semantic spacing only at approved breath or semantic boundaries, recording the character index and one pixel or em increment.
+The current render-only override is a mapping from normalized complete source
+text to an ordered phrase tuple. The renderer validates exact recomposition,
+the supported phrase length, protected word/ruby boundaries, and paired-
+punctuation kinsoku. A caller that needs occurrence-specific overrides or hit
+accounting must resolve repeated identical source lines before calling the
+renderer; the current override mapping does not persist occurrence identity,
+reviewer identity, rationale, or hit counts. Keep any reviewed long-phrase
+exception evidence in the calling workflow and verify visual fit at the target
+font and size.
 
-For Japanese wide layout, treat whitespace inside one timed source line as an
-explicit semantic or breathing boundary, not as a source-line break. When the
-visible line exceeds the normal display-length target, group those whitespace
-segments into balanced phrases before the measured-width fast path; merge
-avoidable fragments shorter than the minimum phrase length. A compact line may
-retain each source-space boundary as a subtle semantic gap, but the whitespace
-character itself must never become a timed or highlighted glyph event. For a
-source line without usable whitespace, measure the complete line before
-applying the character-count fallback. Never split inside a continuous
-katakana run or across a canonical `linked_to_next` word span. Short-run
-rebalancing and explicit display overrides must preserve the same word-span
-boundary. These are language
-rules, not song-specific display overrides.
+For the current Japanese wide layout, use this display decision order:
+
+1. Keep source whitespace in the canonical SUG. During display layout, omit the
+   whitespace glyph itself but retain its position as a semantic or breathing
+   boundary and, when phrases remain joined, as subtle semantic spacing.
+2. Use `12` visible characters as the normal phrase target. If a line has
+   internal source whitespace and exceeds `12`, group those whitespace-delimited
+   segments before the measured-width shortcut.
+3. Measure the compact full line. Keep it on one line only when it fits the
+   slot and contains at most `14` visible characters (`12` plus the `2`-
+   character soft overrun). A line of `15` or more visible characters therefore
+   enters semantic splitting even when its measured width fits.
+4. Split near semantic, grammatical, or acoustic boundaries and rebalance
+   avoidable short phrases toward at least `6` visible characters. The
+   automatic target remains `12`; a protected semantic unit may exceed it.
+5. Never split a continuous katakana run, canonical `linked_to_next` word span,
+   or canonical ruby span. Paired punctuation follows kinsoku: an opening mark
+   cannot end a line and a closing mark cannot start the next line. Long
+   parenthetical text may split at a legal internal boundary.
+
+Protected units, intentional particle tails, or source-space blocks that
+cannot be merged safely may remain shorter than `6`; preserving text and
+linguistic boundaries takes priority over manufacturing a six-character line.
+Explicit display-override phrases are validated separately at `6..16` visible
+characters each. These are language rules, not song-specific defaults.
 
 Sentence-level Japanese ruby analysis may normalize a run of repeated source
 spaces internally, but the canonical SUG must restore the exact frozen

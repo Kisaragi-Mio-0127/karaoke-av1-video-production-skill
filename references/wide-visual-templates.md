@@ -56,6 +56,9 @@ when the renderer or canvas changes.
 - Main-lane separation: `210 px`; ruby-to-main anchor gap: `35 px`.
 - Japanese/Chinese wide main font target: `108 px`; shared ruby font target:
   `51 px`; cue text target: `39 px`.
+- Wide release validation rejects a main lyric line that would require silent
+  font shrinking. Japanese long-line handling must follow the segmentation
+  flow in `subtitle-timing-quality.md` while retaining the `108 px` target.
 - English wide main font target: `96 px`; exceptional minimum: `54 px`.
 - English word runs use `0 em` added intra-word tracking, `0.85` Pillow-to-
   libass advance positioning, and a `0.18 em` total word-gap target.

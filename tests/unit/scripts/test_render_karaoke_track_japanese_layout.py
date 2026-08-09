@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts import render_karaoke_track as renderer
-from scripts.sug_ruby import is_pure_katakana
+from scripts.sug_ruby import is_pure_katakana, iter_sug_ruby_spans
 from strange_uta_game.backend.domain import Ruby, RubyPart, Sentence
 
 
@@ -18,6 +18,21 @@ def _sentence(text: str) -> Sentence:
 
 def _set_single_character_ruby(sentence: Sentence, index: int, reading: str) -> None:
     sentence.characters[index].set_ruby(Ruby(parts=[RubyPart(text=reading)]))
+
+
+def _machine_ruby_sidecar(sentence: Sentence) -> dict[str, object]:
+    return {
+        "records": [
+            {
+                "sentence_id": span.sentence_id,
+                "start": span.start,
+                "end": span.end,
+                "source": "project-auto-check",
+                "review_status": "machine-fill",
+            }
+            for span in iter_sug_ruby_spans(sentence)
+        ]
+    }
 
 
 def test_legacy_per_kanji_ruby_keeps_compound_on_one_display_line():
@@ -53,6 +68,34 @@ def test_legacy_per_kanji_ruby_projects_as_one_word_level_ruby_span():
     assert [(token.text, token.reading, token.start, token.end) for token in tokens] == [
         ("線路", "せんろ", 0, 2),
     ]
+
+
+@pytest.mark.parametrize(
+    ("text", "readings", "expected"),
+    [
+        ("今年来年", ("こと", "し", "らい", "ねん"), ("今", "年", "来", "年")),
+        ("一番好き", ("いち", "ばん", "す", None), ("一", "番", "好")),
+    ],
+)
+def test_machine_generated_adjacent_kanji_ruby_remains_separate(
+    text: str,
+    readings: tuple[str | None, ...],
+    expected: tuple[str, ...],
+):
+    sentence = _sentence(text)
+    for index, reading in enumerate(readings):
+        if reading is not None:
+            _set_single_character_ruby(sentence, index, reading)
+
+    tokens = renderer._canonical_tokens_for_phrase(
+        sentence,
+        sentence,
+        sidecar=_machine_ruby_sidecar(sentence),
+    )
+
+    assert tuple(token.text for token in tokens) == expected
+    assert all(token.source == "project-auto-check" for token in tokens)
+    assert all(token.review_status == "machine-fill" for token in tokens)
 
 
 @pytest.mark.parametrize("reading", ["^", "^pause^"])
@@ -167,8 +210,8 @@ def test_display_override_allows_a_source_whitespace_between_ruby_kanji():
     ]
 
 
-def test_japanese_line_that_fits_is_not_split_by_character_count(monkeypatch):
-    sentence = _sentence("来週予定カレンダー共同編集確認事項")
+def test_compact_japanese_line_that_fits_keeps_soft_character_overrun(monkeypatch):
+    sentence = _sentence("来週予定カレンダー共同編集")
     monkeypatch.setattr(
         renderer,
         "_measured_text_span",
@@ -184,6 +227,29 @@ def test_japanese_line_that_fits_is_not_split_by_character_count(monkeypatch):
     )
 
     assert [phrase.text for phrase in phrases] == [sentence.text]
+
+
+def test_long_japanese_line_that_fits_still_splits_at_semantic_boundary(monkeypatch):
+    sentence = _sentence("聞いたってきっと朝にはいつもいないんだろう")
+    monkeypatch.setattr(
+        renderer,
+        "_measured_text_span",
+        lambda *args, **kwargs: renderer.WIDE_LAYOUT.slot_width - 20,
+    )
+
+    phrases = renderer.split_sentence_for_display(
+        sentence,
+        max_chars=renderer.WIDE_LAYOUT.max_phrase_chars,
+        language="ja",
+        font_file=Path("synthetic-font.ttf"),
+        layout=renderer.WIDE_LAYOUT,
+    )
+
+    assert [phrase.text for phrase in phrases] == [
+        "聞いたってきっと朝には",
+        "いつもいないんだろう",
+    ]
+    assert "".join(phrase.text for phrase in phrases) == sentence.text
 
 
 def test_long_japanese_line_prefers_internal_spaces_even_when_width_fits(monkeypatch):

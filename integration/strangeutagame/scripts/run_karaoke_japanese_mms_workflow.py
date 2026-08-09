@@ -550,11 +550,19 @@ def run_mms_workflow(
                 f"MMS companion structure failed: {error}"
             ) from error
         companion_identity = _identity(companion)
+        companion_ruby_sidecar = companion.with_suffix(".ruby-review.json")
+        ruby_sidecar_output = (
+            _identity(companion_ruby_sidecar)
+            if companion_ruby_sidecar.is_file()
+            else None
+        )
         companion_output = {
             **companion_identity,
             "paired_timing_overrides": override_identity,
+            "ruby_review_sidecar": ruby_sidecar_output,
         }
         report["outputs"]["mms_editable_sug"] = companion_output
+        report["outputs"]["ruby_review_sidecar"] = ruby_sidecar_output
 
         quality_gate = {
             "audit": audit_validation["quality_gate_ok"],
@@ -600,6 +608,7 @@ def run_mms_workflow(
                 if use_visual_release
                 else "companion-preserved-canonical-sentence-end"
             ),
+            "ruby_review_sidecar": ruby_sidecar_output,
         }
 
         default_cover = (

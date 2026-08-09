@@ -385,15 +385,16 @@ def _canonical_tokens_for_phrase(
         source_index: phrase_index
         for phrase_index, source_index in enumerate(concrete_indices)
     }
+    source_tokens = canonical_ruby_tokens(source_sentence, sidecar=sidecar)
     legacy_single_spans = frozenset(
-        (span.start, span.end)
-        for span in iter_sug_ruby_spans(source_sentence)
-        if span.source == "legacy-existing"
-        and span.review_status == "human-locked"
-        and span.end - span.start == 1
+        (token.start, token.end)
+        for token in source_tokens
+        if token.source == "legacy-existing"
+        and token.review_status == "human-locked"
+        and token.end - token.start == 1
     )
     source_tokens = _merge_legacy_adjacent_kanji_ruby_tokens(
-        canonical_ruby_tokens(source_sentence, sidecar=sidecar),
+        source_tokens,
         eligible_spans=legacy_single_spans,
     )
     projected: list[RubyToken] = []
@@ -1312,6 +1313,16 @@ _PREFERRED_PHRASE_ENDINGS = (
     "と",
     "も",
 )
+_BAD_DISPLAY_BOUNDARY_START_TOKENS = (
+    "は",
+    "が",
+    "を",
+    "に",
+    "へ",
+    "で",
+    "と",
+    "も",
+)
 
 
 def _normalize_display_text(text: str) -> str:
@@ -1424,15 +1435,18 @@ def _is_protected_display_boundary(
     )
 
 
-def _legacy_reviewed_single_ruby_character_ids(sentence: Sentence) -> frozenset[int]:
+def _legacy_reviewed_single_ruby_character_ids(
+    sentence: Sentence,
+    sidecar: Mapping[str, Any] | None = None,
+) -> frozenset[int]:
     """Return source-character identities eligible for legacy word projection."""
 
     return frozenset(
-        id(sentence.characters[span.start])
-        for span in iter_sug_ruby_spans(sentence)
-        if span.source == "legacy-existing"
-        and span.review_status == "human-locked"
-        and span.end - span.start == 1
+        id(sentence.characters[token.start])
+        for token in canonical_ruby_tokens(sentence, sidecar=sidecar)
+        if token.source == "legacy-existing"
+        and token.review_status == "human-locked"
+        and token.end - token.start == 1
     )
 
 
@@ -1588,13 +1602,16 @@ def _split_character_run(
     soft_max = max_chars + DISPLAY_PHRASE_SOFT_OVERRUN
     if len(characters) <= soft_max:
         return [characters]
-    target = max(min_chars, int(round(max_chars * 0.75)))
     minimum = min(min_chars, max(1, len(characters) - 1))
     # Permit a small semantic overrun.  A 13- or 14-character grammatical
     # phrase is preferable to cutting a conjugation such as ``しま｜う``.
     maximum = min(soft_max, len(characters) - min_chars)
     if maximum < minimum:
         maximum = min(max_chars, len(characters) - 1)
+    target = max(
+        minimum,
+        min(maximum, (len(characters) + 1) // 2),
+    )
 
     best_position: int | None = None
     best_score = float("-inf")
@@ -1617,11 +1634,14 @@ def _split_character_run(
         )
         ending_bonus = 0
         prefix = run_text[:position]
+        suffix = run_text[position:]
         if any(prefix.endswith(ending) for ending in _PREFERRED_PHRASE_ENDINGS):
             ending_bonus = 320
         if prefix.endswith(("、", "。", "？", "！", "…")):
             ending_bonus += 600
         score = min(acoustic_gap, 1_500) * 0.35 + ending_bonus
+        if suffix.startswith(_BAD_DISPLAY_BOUNDARY_START_TOKENS):
+            score -= 500
         score -= abs(position - target) * 70
         if score > best_score:
             best_score = score
@@ -2108,6 +2128,7 @@ def split_sentence_for_display(
     font_file: Path | None = None,
     layout: SubtitleLayout | None = None,
     display_phrase_overrides: Mapping[str, Sequence[str]] | None = None,
+    ruby_sidecar: Mapping[str, Any] | None = None,
 ) -> list[Sentence]:
     """Create display-only phrases without changing the editable SUG.
 
@@ -2122,7 +2143,7 @@ def split_sentence_for_display(
             f"max_chars must be at least {MIN_DISPLAY_PHRASE_CHARS}, got {max_chars}"
         )
     eligible_ruby_character_ids = (
-        _legacy_reviewed_single_ruby_character_ids(sentence)
+        _legacy_reviewed_single_ruby_character_ids(sentence, ruby_sidecar)
         if language == "ja"
         else frozenset()
     )
@@ -2220,7 +2241,11 @@ def split_sentence_for_display(
             letter_spacing_em=layout.letter_spacing_em,
             word_gap_em=layout.word_gap_em,
         ) + 2 * layout.fit_outline_px
-        if measured_width <= layout.slot_width:
+        if (
+            measured_width <= layout.slot_width
+            and visible_character_count
+            <= max_chars + DISPLAY_PHRASE_SOFT_OVERRUN
+        ):
             return [compact_sentence]
     runs = _split_sentence_character_runs(
         sentence,
@@ -2903,6 +2928,7 @@ def build_karaoke_ass(
             font_file=font_file,
             layout=layout,
             display_phrase_overrides=display_phrase_overrides,
+            ruby_sidecar=ruby_sidecar,
         )
         source_sentence_to_display[source_line_index] = {
             "source_sentence": source_sentence.text,

@@ -63,6 +63,10 @@ try:
         uses_ruby,
     )
     from .karaoke_model_paths import WHISPER_MODEL_DIR
+    from .karaoke_netease_metadata import (
+        NeteaseMetadataError,
+        read_netease_song_id,
+    )
 except ImportError:  # pragma: no cover - direct script execution
     from karaoke_album import (  # type: ignore[no-redef]
         AlbumManifest,
@@ -90,6 +94,10 @@ except ImportError:  # pragma: no cover - direct script execution
         uses_ruby,
     )
     from karaoke_model_paths import WHISPER_MODEL_DIR  # type: ignore[no-redef]
+    from karaoke_netease_metadata import (  # type: ignore[no-redef]
+        NeteaseMetadataError,
+        read_netease_song_id,
+    )
 
 try:
     from .sug_ruby import (
@@ -3226,7 +3234,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--manifest",
         type=Path,
-        required=True,
         help="album.json manifest that owns the complete track collection",
     )
     parser.add_argument(
@@ -3250,7 +3257,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--refresh-source", action="store_true")
     parser.add_argument(
         "--netease-song-id",
-        help="NetEase numeric song id for a selected single-song refresh",
+        help=(
+            "explicit NetEase numeric song id for a selected single-song refresh; "
+            "otherwise read it from the selected audio metadata"
+        ),
     )
     parser.add_argument(
         "--alignment",
@@ -3304,6 +3314,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise SystemExit("--request is required in alignment worker mode")
         run_alignment_worker(args.request, args.model, args.model_cache, args.device)
         return 0
+    if args.manifest is None:
+        raise SystemExit("--manifest is required")
 
     album = load_album_manifest(
         args.manifest,
@@ -3324,6 +3336,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("--netease-song-id requires --refresh-source")
     if args.netease_song_id and len(selected_tracks) != 1:
         raise SystemExit("--netease-song-id requires exactly one selected song")
+    netease_song_id = args.netease_song_id
+    if args.refresh_source and len(selected_tracks) == 1 and not netease_song_id:
+        try:
+            netease_song_id = read_netease_song_id(selected_tracks[0].audio_path)
+        except NeteaseMetadataError as error:
+            raise SystemExit(
+                "could not infer a NetEase song id from the selected audio; "
+                "pass --netease-song-id explicitly"
+            ) from error
+    if netease_song_id and not netease_song_id.isdigit():
+        raise SystemExit("NetEase song id must contain digits only")
     output_root = album.deliverable_dir.resolve()
     if args.output_root is not None:
         output_root = args.output_root.expanduser().resolve()
@@ -3356,8 +3379,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         album.deliverable_dir / "artwork" / "fonts" / "HarmonyOS_Sans_SC_Regular.ttf"
     )
     source_ids = (
-        {specs[0].song_id: args.netease_song_id}
-        if args.netease_song_id
+        {specs[0].song_id: netease_song_id}
+        if netease_song_id
         else None
     )
     source, source_mode = load_or_fetch_source(

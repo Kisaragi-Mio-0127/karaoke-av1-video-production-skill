@@ -68,6 +68,7 @@ def test_dependency_manifest_exactly_covers_python_bundle() -> None:
         "karaoke_common/subtitle_video.py",
         "karaoke_common/visuals.py",
         "karaoke_full_auto.py",
+        "karaoke_netease_metadata.py",
         "karaoke_mms_editable.py",
         "karaoke_model_paths.py",
         "run_karaoke_japanese_full_auto.py",
@@ -131,6 +132,7 @@ def test_full_auto_keeps_zh_en_route_import_lazy() -> None:
         "--background",
         "--composition",
         "--cover-source-audio",
+        "--netease-song-id",
         "--output-mode",
         "--background-video",
     ):

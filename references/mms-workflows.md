@@ -33,8 +33,9 @@ present, followed by an embedded-cover lookup in the selected cover audio.
 explicit overrides.
 
 The source is frozen by default. To explicitly refresh the selected song from
-NetEase, add `--refresh-source --netease-song-id <numeric-id>`; `--source`
-becomes the destination for the refreshed JSON. Without the refresh flag, the
+NetEase, add `--refresh-source`; `--source` becomes the destination for the
+refreshed JSON. The workflow reads a supported embedded song ID unless
+`--netease-song-id <numeric-id>` is supplied. Without the refresh flag, the
 full-auto route performs no lyric network request.
 
 Album display metadata is read from audio tags by default and falls back to

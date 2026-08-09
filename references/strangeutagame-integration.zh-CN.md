@@ -93,7 +93,7 @@ python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --next
 
 ## 项目配置
 
-使用已授权的清单和冻结歌词源。选定歌曲、音频、字体、模型路径和新的私有输出位置必须在生产开始前有效。除非显式使用`--refresh-source --netease-song-id`授权单曲刷新，否则歌词源文件必须已经存在。保持规范SUG、冻结歌词、私有证据、companion SUG和交付媒体彼此分离。
+使用已授权的清单和冻结歌词源。选定歌曲、音频、字体、模型路径和新的私有输出位置必须在生产开始前有效。除非显式使用`--refresh-source`授权单曲刷新，否则歌词源文件必须已经存在；省略`--netease-song-id`时，脚本会读取受支持的音频内嵌网易歌曲ID。保持规范SUG、冻结歌词、私有证据、companion SUG和交付媒体彼此分离。
 
 默认日文流程使用项目自有的MMS和Whisper路径。生产CLI可以显式覆盖路径，但覆盖不授权网络下载。注音验证仍是可选项。日文分阶段、直接渲染和批量CLI提供`--pronunciation-validation {off,optional,required}`，默认是`optional`；full-auto不要求这个sidecar。
 
@@ -201,6 +201,7 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py --manifes
 | `prepare_karaoke_msst_vocals.py` | 不导入上游代码；加载外部本地`prepare_sovits41_msst_stems.py`适配器及其MSST运行时/模型文件，这些内容由本集成之外的组件拥有。 | `<target>/scripts/prepare_karaoke_msst_vocals.py` | 相对于StrangeUtaGame可以；相对于独立MSST适配器/运行时不可以。 |
 | `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | 不导入上游代码，处理集成清单、路径、快照或发布文件；专辑规划通过统一FFmpeg解析器检查媒体。 | `<target>/scripts/`下对应路径 | 可以，但需要声明的集成输入。 |
 | `karaoke_model_paths.py` | 不导入上游代码，只解析项目自有`models/mms/model.pt`和`models/whisper/`路径。 | `<target>/scripts/karaoke_model_paths.py` | 相对于上游代码可以；调用方仍需要模型文件。 |
+| `karaoke_netease_metadata.py` | 不导入上游代码；默认读取受支持的本地音频标签，只有显式使用`--fetch-album`时才访问网易专辑接口。 | `<target>/scripts/karaoke_netease_metadata.py` | 相对于上游代码可以；专辑详情需要显式网络访问。 |
 | `karaoke_common/layout.py`<br>`karaoke_japanese/layout.py` | 不导入上游代码，是公开通用和日文布局定义；本仓库不包含中英文布局。 | `<target>/scripts/`下对应包路径 | 可以；这些是模块，不是独立命令。 |
 | `karaoke_common/visuals.py` | 不导入上游代码，集中构建单曲渲染器使用的黑胶与频谱FFmpeg图。 | `<target>/scripts/karaoke_common/visuals.py` | 可以；这是模块，不是独立命令。 |
 | `karaoke_common/device.py` | 不导入上游代码，动态加载`torch`选择CPU/CUDA。 | `<target>/scripts/karaoke_common/device.py` | 可以；这是模块，不是独立命令。 |

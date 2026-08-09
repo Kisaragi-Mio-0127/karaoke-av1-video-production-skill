@@ -68,9 +68,20 @@ reports. Every successful render also exports a relocatable SUG under
 `--visual-style spectrum`.
 
 Keep the frozen source by default. To explicitly refresh one song from
-NetEase, add `--refresh-source --netease-song-id <numeric-id>` and use
-`--source` as the new JSON destination. Without the refresh flag, no lyric
-network request is made.
+NetEase, add `--refresh-source` and use `--source` as the new JSON destination.
+The workflow reads a numeric song ID from supported NetEase audio metadata;
+`--netease-song-id <numeric-id>` remains an explicit override. Without the
+refresh flag, no lyric network request is made.
+
+Inspect local song, track-artist, and album identity without a network request:
+
+```powershell
+uv run --no-sync python scripts/karaoke_netease_metadata.py <audio> --identity
+```
+
+Add `--fetch-album` to that identity command only when an explicit NetEase
+album-detail request is wanted. It adds album artists and album size while
+keeping track artists separate.
 
 The four command inputs above are required. Artwork options are optional:
 `--cover` selects an explicit image; otherwise the workflow reuses the standard

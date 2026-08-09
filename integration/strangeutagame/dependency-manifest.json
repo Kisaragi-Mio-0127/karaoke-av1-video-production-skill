@@ -17,6 +17,12 @@
       "reason": "Deterministic offline cover-palette extraction and palette identity validation shared by artwork and render planning."
     },
     {
+      "path": "karaoke_netease_metadata.py",
+      "category": "shared-internal-module",
+      "upstream_dependency": "no-upstream-code-import",
+      "reason": "Reads NetEase song and album IDs from local audio tags and performs only explicitly requested album-detail network queries."
+    },
+    {
       "path": "karaoke_color_plan.py",
       "category": "shared-internal-module",
       "upstream_dependency": "no-upstream-code-import",

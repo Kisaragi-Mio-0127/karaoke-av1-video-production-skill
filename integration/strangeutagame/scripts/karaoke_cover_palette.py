@@ -15,12 +15,12 @@ from typing import Any
 from PIL import Image, ImageOps
 
 SCHEMA_VERSION = "karaoke-cover-palette/v1"
-METHOD = "fixed-grid-rgb5-lab-neighborhood-readable-hsv-fallback/v2"
+METHOD = "fixed-grid-rgb5-lab-neighborhood-readable-hsv-fallback/v3"
 _HEX_COLOR = re.compile(r"^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")
 _MAX_COLOR_COUNT = 32
 _MAX_SAMPLE_AXIS = 256
-_MIN_SOURCE_SATURATION = 0.16
-_MIN_SOURCE_CHROMA = 0.06
+_MIN_SOURCE_SATURATION = 0.10
+_MIN_SOURCE_CHROMA = 15 / 255
 _MIN_LAB_DISTANCE = 28.0
 _PRIMARY_NEIGHBOR_LAB_DISTANCE = 18.0
 

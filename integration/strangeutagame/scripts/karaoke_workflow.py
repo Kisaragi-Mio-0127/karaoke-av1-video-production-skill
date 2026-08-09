@@ -51,11 +51,15 @@ except ImportError:  # pragma: no cover - direct script entry points
         parse_video_stream,
     )
     from karaoke_common.artwork import prepare_auto_artwork  # type: ignore[no-redef]
-    from karaoke_common.editable_sug import export_editable_sug  # type: ignore[no-redef]
+    from karaoke_common.editable_sug import (
+        export_editable_sug,  # type: ignore[no-redef]
+    )
     from karaoke_common.ffmpeg_tools import (  # type: ignore[no-redef]
         resolve_ffmpeg as resolve_ffmpeg_tool,
     )
-    from karaoke_common.media_metadata import resolve_display_metadata  # type: ignore[no-redef]
+    from karaoke_common.media_metadata import (
+        resolve_display_metadata,  # type: ignore[no-redef]
+    )
     from karaoke_common.subtitle_video import (  # type: ignore[no-redef]
         build_av1_encoder_list_command,
         build_av1_encoder_smoke_command,
@@ -418,6 +422,7 @@ def build_render_command(
     output_path: Path,
     duration: float,
     lossless_output: Path | None = None,
+    video_encoder: str = "av1_nvenc",
 ) -> list[str]:
     if config.lossless_companion and lossless_output is None:
         raise KaraokeWorkflowError(
@@ -436,7 +441,7 @@ def build_render_command(
         duration=duration,
     )
     command.remove("--ass-only")
-    command.extend(["--video-encoder", "av1_nvenc", "--av1-cq", "38"])
+    command.extend(["--video-encoder", video_encoder, "--av1-cq", "38"])
     if lossless_output is not None:
         command.extend(["--lossless-output", str(lossless_output.resolve())])
     return command
@@ -539,6 +544,86 @@ def render_background_with_av1_fallback(
 
     raise KaraokeWorkflowError(
         "all background AV1 encoder attempts failed: "
+        + json.dumps(attempts, ensure_ascii=False)
+    )
+
+
+def render_standard_with_av1_fallback(
+    *,
+    ffmpeg: Path,
+    config: WorkflowConfig,
+    generated_vinyl: Path | None,
+    ass_path: Path,
+    report_path: Path,
+    output_path: Path,
+    duration_seconds: float,
+    lossless_output: Path | None,
+    runner: Callable[[Sequence[str]], subprocess.CompletedProcess[str]],
+) -> tuple[subprocess.CompletedProcess[str], str, list[dict[str, Any]]]:
+    """Run the standard renderer with hardware-first AV1 fallback."""
+
+    encoder_list = runner(build_av1_encoder_list_command(ffmpeg))
+    diagnostic = (encoder_list.stdout or "") + "\n" + (encoder_list.stderr or "")
+    if encoder_list.returncode != 0:
+        raise KaraokeWorkflowError(
+            f"FFmpeg encoder discovery failed: {diagnostic[-1200:]}"
+        )
+    candidates = parse_available_av1_encoders(diagnostic)
+    if not candidates:
+        raise KaraokeWorkflowError(
+            "FFmpeg provides neither av1_nvenc nor libaom-av1"
+        )
+    declared_outputs = [output_path, report_path]
+    if lossless_output is not None:
+        declared_outputs.append(lossless_output)
+    existing = [str(path) for path in declared_outputs if path.exists()]
+    if existing:
+        raise KaraokeWorkflowError(
+            "standard render outputs already exist: " + ", ".join(existing)
+        )
+
+    attempts: list[dict[str, Any]] = []
+    for video_encoder in candidates:
+        smoke = runner(
+            build_av1_encoder_smoke_command(
+                ffmpeg,
+                video_encoder=video_encoder,
+            )
+        )
+        attempt: dict[str, Any] = {
+            "video_encoder": video_encoder,
+            "probe_returncode": smoke.returncode,
+            "probe_stderr_tail": (smoke.stderr or "")[-1200:],
+            "render_returncode": None,
+            "render_stderr_tail": None,
+        }
+        attempts.append(attempt)
+        if smoke.returncode != 0:
+            continue
+
+        command = build_render_command(
+            config,
+            generated_vinyl=generated_vinyl,
+            ass_path=ass_path,
+            report_path=report_path,
+            output_path=output_path,
+            duration=duration_seconds,
+            lossless_output=lossless_output,
+            video_encoder=video_encoder,
+        )
+        rendered = runner(command)
+        attempt["render_returncode"] = rendered.returncode
+        attempt["render_stderr_tail"] = (rendered.stderr or "")[-1200:]
+        if rendered.returncode == 0 and all(
+            path.is_file() and path.stat().st_size > 0 for path in declared_outputs
+        ):
+            return rendered, video_encoder, attempts
+        for path in declared_outputs:
+            if path.exists():
+                path.unlink()
+
+    raise KaraokeWorkflowError(
+        "all standard AV1 encoder attempts failed: "
         + json.dumps(attempts, ensure_ascii=False)
     )
 
@@ -1055,6 +1140,8 @@ def run_workflow(
         report["timing_override"] = timing_override_identity
     background_video_encoder: str | None = None
     background_video_attempts: list[dict[str, Any]] = []
+    standard_video_encoder: str | None = None
+    standard_video_attempts: list[dict[str, Any]] = []
     try:
         composition_gate: dict[str, Any] | None = None
         if is_overlay:
@@ -1324,20 +1411,21 @@ def run_workflow(
                     runner=runner,
                 )
         else:
-            render_command = build_render_command(
-                config,
+            (
+                rendered,
+                standard_video_encoder,
+                standard_video_attempts,
+            ) = render_standard_with_av1_fallback(
+                ffmpeg=ffmpeg,
+                config=config,
                 generated_vinyl=generated_vinyl,
                 ass_path=ass_path,
                 report_path=render_report_path,
                 output_path=output_path,
-                duration=duration,
+                duration_seconds=duration,
                 lossless_output=lossless_output,
+                runner=runner,
             )
-            rendered = runner(render_command)
-            if rendered.returncode != 0:
-                raise KaraokeWorkflowError(
-                    f"AV1 render failed: {rendered.stderr[-2000:]}"
-                )
         if (
             not output_path.is_file()
             or not ass_path.is_file()
@@ -1420,6 +1508,9 @@ def run_workflow(
                     else None
                 ),
             }
+        elif not is_overlay:
+            render_stage["video_encoder"] = standard_video_encoder
+            render_stage["encoder_attempts"] = standard_video_attempts
         if generated_vinyl is not None:
             render_stage["vinyl_sha256"] = sha256_file(generated_vinyl)
         report["stages"].append(render_stage)

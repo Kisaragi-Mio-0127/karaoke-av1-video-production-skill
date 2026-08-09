@@ -27,8 +27,9 @@ optional after the companion SUG exists; it is not a prerequisite for the
 automated run.
 
 The frozen lyric source remains the default. Add
-`--refresh-source --netease-song-id <numeric-id>` only to explicitly refresh
-one selected song from NetEase into the `--source` destination. Album display
+`--refresh-source` only to explicitly refresh one selected song from NetEase
+into the `--source` destination. The command reads a supported embedded song
+ID unless `--netease-song-id <numeric-id>` is supplied. Album display
 metadata defaults to audio tags and then the song title/artist; use
 `--metadata-source-audio` for transformed or tagless delivery audio.
 

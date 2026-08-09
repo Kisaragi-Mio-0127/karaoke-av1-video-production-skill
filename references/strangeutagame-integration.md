@@ -148,7 +148,8 @@ drivers.
 Use an authorized manifest and frozen lyric source. The selected track, audio,
 fonts, model paths, and new private output location must be valid before
 production starts. The source file must already exist unless an explicit
-`--refresh-source --netease-song-id` pair authorizes a single-song refresh.
+`--refresh-source` authorizes a single-song refresh. When
+`--netease-song-id` is omitted, the command reads a supported embedded song ID.
 Keep canonical SUG, frozen lyrics, private evidence,
 companion SUG, and delivery media separate.
 
@@ -203,6 +204,9 @@ initialization or render failure.
 
 Album display metadata defaults to audio tags, then the track title and artist.
 Use `--metadata-source-audio` when the delivery file is transformed or tagless.
+Run `scripts/karaoke_netease_metadata.py <audio> --identity --fetch-album` only
+for an explicit album-detail network query; it reports album artists separately
+from the track artists embedded in the audio.
 
 ## Staged Japanese MMS entry
 
@@ -309,6 +313,7 @@ assets are separate project-owned runtime files under `<target>/models/`.
 | `prepare_karaoke_msst_vocals.py` | No upstream import. It loads an external local `prepare_sovits41_msst_stems.py` adapter and its MSST runtime/model files, owned outside this integration. | `<target>/scripts/prepare_karaoke_msst_vocals.py` | Yes with respect to StrangeUtaGame; no with respect to the separate MSST adapter/runtime. |
 | `karaoke_album.py`<br>`karaoke_language.py`<br>`karaoke_release_snapshot.py`<br>`karaoke_direct_album_planning.py`<br>`package_karaoke_numbered_archives.py` | No upstream import. They operate on integration manifests, paths, snapshots, or release files; album planning uses the shared FFmpeg resolver for media validation. | Corresponding paths under `<target>/scripts/` | Yes, with their declared integration inputs. |
 | `karaoke_model_paths.py` | No upstream import; resolves only project-owned `models/mms/model.pt` and `models/whisper/` paths. | `<target>/scripts/karaoke_model_paths.py` | Yes with respect to upstream code; model files are still required by callers. |
+| `karaoke_netease_metadata.py` | No upstream import; reads supported local audio tags by default and uses the NetEase album endpoint only with an explicit `--fetch-album`. | `<target>/scripts/karaoke_netease_metadata.py` | Yes, with optional explicit network access for album detail. |
 | `karaoke_common/layout.py`<br>`karaoke_japanese/layout.py` | No upstream import; these are the public general and Japanese layout definitions. Chinese/English layouts are not part of this repository. | Corresponding package paths under `<target>/scripts/` | Yes; modules, not standalone commands. |
 | `karaoke_common/visuals.py` | No upstream import; owns the vinyl and spectrum FFmpeg filter graphs used by the track renderer. | `<target>/scripts/karaoke_common/visuals.py` | Yes; module, not a standalone command. |
 | `karaoke_common/device.py` | No upstream import; dynamically loads `torch` to select CPU/CUDA. | `<target>/scripts/karaoke_common/device.py` | Yes; module, not a standalone command. |

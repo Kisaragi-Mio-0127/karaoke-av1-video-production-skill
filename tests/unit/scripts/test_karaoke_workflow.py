@@ -232,6 +232,57 @@ def test_commands_pass_pronunciation_layout_and_regenerated_vinyl(tmp_path: Path
     ] == ["lead=#112233", "harmony=#AABBCC"]
 
 
+def test_standard_render_retries_libaom_after_nvenc_failure(tmp_path: Path):
+    config = _config(tmp_path, language="ja", visual_style="spectrum")
+    output = tmp_path / "out.mp4"
+    report = tmp_path / "render-report.json"
+    ass = tmp_path / "karaoke.ass"
+    render_encoders: list[str] = []
+
+    def runner(command):
+        command = list(command)
+        if "-encoders" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                " V....D av1_nvenc\n V....D libaom-av1\n",
+                "",
+            )
+        if command[-1] == "-":
+            return subprocess.CompletedProcess(command, 0, "", "")
+        encoder = command[command.index("--video-encoder") + 1]
+        render_encoders.append(encoder)
+        output_path = Path(command[command.index("--output") + 1])
+        report_path = Path(command[command.index("--report-output") + 1])
+        output_path.write_bytes(b"failed" if encoder == "av1_nvenc" else b"av1")
+        if encoder == "libaom-av1":
+            report_path.write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess(
+            command,
+            1 if encoder == "av1_nvenc" else 0,
+            "",
+            "nvenc failed" if encoder == "av1_nvenc" else "",
+        )
+
+    _completed, selected, attempts = workflow.render_standard_with_av1_fallback(
+        ffmpeg=tmp_path / "ffmpeg.exe",
+        config=config,
+        generated_vinyl=None,
+        ass_path=ass,
+        report_path=report,
+        output_path=output,
+        duration_seconds=2.0,
+        lossless_output=None,
+        runner=runner,
+    )
+
+    assert selected == "libaom-av1"
+    assert render_encoders == ["av1_nvenc", "libaom-av1"]
+    assert [attempt["render_returncode"] for attempt in attempts] == [1, 0]
+    assert output.read_bytes() == b"av1"
+    assert report.is_file()
+
+
 def test_preflight_and_final_commands_share_explicit_singer_colors(tmp_path: Path):
     config = replace(
         _config(tmp_path),
@@ -707,6 +758,12 @@ def test_workflow_regenerates_vinyl_passes_it_and_records_rotate(tmp_path: Path)
     def runner(command):
         command = [str(value) for value in command]
         commands.append(command)
+        if "-encoders" in command:
+            return subprocess.CompletedProcess(
+                command, 0, " V....D av1_nvenc\n V....D libaom-av1\n", ""
+            )
+        if command[-1] == "-":
+            return subprocess.CompletedProcess(command, 0, "", "")
         if "-hide_banner" in command and "-i" in command:
             target = Path(command[command.index("-i") + 1])
             if target.suffix == ".mp4":
@@ -841,6 +898,12 @@ def test_mocked_spectrum_workflow_skips_artwork_and_passes_spectrum_report_gate(
     def runner(command):
         command = [str(value) for value in command]
         commands.append(command)
+        if "-encoders" in command:
+            return subprocess.CompletedProcess(
+                command, 0, " V....D av1_nvenc\n V....D libaom-av1\n", ""
+            )
+        if command[-1] == "-":
+            return subprocess.CompletedProcess(command, 0, "", "")
         if "-hide_banner" in command and "-i" in command:
             target = Path(command[command.index("-i") + 1])
             stderr = (
@@ -947,10 +1010,16 @@ def test_opt_in_lossless_companion_is_created_verified_and_reported(
     def runner(command):
         command = [str(value) for value in command]
         commands.append(command)
+        if "-encoders" in command:
+            return subprocess.CompletedProcess(
+                command, 0, " V....D av1_nvenc\n V....D libaom-av1\n", ""
+            )
         if "-f" in command and command[command.index("-f") + 1] == "hash":
             return subprocess.CompletedProcess(
                 command, 0, f"SHA256={'A' * 64}\n", ""
             )
+        if command[-1] == "-":
+            return subprocess.CompletedProcess(command, 0, "", "")
         if "-hide_banner" in command and "-i" in command:
             target = Path(command[command.index("-i") + 1])
             if target.suffix == ".mp4":

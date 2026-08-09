@@ -107,7 +107,7 @@ def build_av1_encoder_smoke_command(
         "-f",
         "lavfi",
         "-i",
-        "color=c=black:s=64x64:r=1:d=0.1",
+        f"color=c=black:s={CANVAS_WIDTH}x{CANVAS_HEIGHT}:r=1:d=0.1",
         "-frames:v",
         "1",
         "-pix_fmt",

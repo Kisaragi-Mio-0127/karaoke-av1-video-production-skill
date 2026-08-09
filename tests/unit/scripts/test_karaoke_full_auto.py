@@ -220,3 +220,19 @@ def test_refresh_source_allows_missing_destination_and_forwards_netease_id(
 
     assert timing_args[timing_args.index("--netease-song-id") + 1] == "123456"
     assert "--refresh-source" in timing_args
+
+
+def test_refresh_source_infers_netease_id_from_audio_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    env = _environment(tmp_path, monkeypatch, "ja")
+    env.source.unlink()
+    env.args.refresh_source = True
+    monkeypatch.setattr(full_auto, "read_netease_song_id", lambda _path: "559880")
+
+    plan = full_auto.build_plan(env.args, allowed_languages=frozenset({"ja"}))
+    timing_args = full_auto._timing_arguments(plan, env.args)
+
+    assert plan.netease_song_id == "559880"
+    assert plan.netease_song_id_source == "audio-metadata"
+    assert timing_args[timing_args.index("--netease-song-id") + 1] == "559880"

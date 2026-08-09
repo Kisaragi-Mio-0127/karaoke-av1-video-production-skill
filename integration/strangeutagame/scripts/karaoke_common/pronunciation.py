@@ -7,8 +7,23 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from scripts.karaoke_language import DEFAULT_LANGUAGE, normalize_language
-from scripts.sug_ruby import RubyValidationError, iter_sug_ruby_spans, validate_sug_ruby
+try:
+    from ..karaoke_language import DEFAULT_LANGUAGE, normalize_language
+    from ..sug_ruby import (
+        RubyValidationError,
+        iter_sug_ruby_spans,
+        validate_sug_ruby,
+    )
+except ImportError:  # pragma: no cover - direct script entry points
+    from karaoke_language import (  # type: ignore[no-redef]
+        DEFAULT_LANGUAGE,
+        normalize_language,
+    )
+    from sug_ruby import (  # type: ignore[no-redef]
+        RubyValidationError,
+        iter_sug_ruby_spans,
+        validate_sug_ruby,
+    )
 
 PRONUNCIATION_VALIDATION_MODES = ("optional", "required", "off")
 

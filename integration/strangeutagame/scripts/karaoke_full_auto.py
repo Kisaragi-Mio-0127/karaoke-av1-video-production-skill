@@ -26,6 +26,10 @@ try:
         NEXTFIRE_JA_LATN_MODEL_RELATIVE_DIR,
         resolve_nextfire_ja_latn_model_path,
     )
+    from .karaoke_netease_metadata import (
+        NeteaseMetadataError,
+        read_netease_song_id,
+    )
     from .karaoke_workflow import (
         KaraokeWorkflowError,
         validate_output_mode_options,
@@ -49,6 +53,10 @@ except ImportError:  # pragma: no cover - direct script execution
         MMS_BACKENDS,
         NEXTFIRE_JA_LATN_MODEL_RELATIVE_DIR,
         resolve_nextfire_ja_latn_model_path,
+    )
+    from karaoke_netease_metadata import (  # type: ignore[no-redef]
+        NeteaseMetadataError,
+        read_netease_song_id,
     )
     from karaoke_workflow import (  # type: ignore[no-redef]
         KaraokeWorkflowError,
@@ -99,6 +107,8 @@ class FullAutoPlan:
     mms_backend: str
     whisper_models: Path
     asr_cache: Path
+    netease_song_id: str | None
+    netease_song_id_source: str | None
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
@@ -175,6 +185,19 @@ def build_plan(
             raise FullAutoError("frozen lyric source must contain the selected song-id")
     if args.netease_song_id and not args.refresh_source:
         raise FullAutoError("--netease-song-id requires --refresh-source")
+    netease_song_id = args.netease_song_id
+    netease_song_id_source = "cli" if netease_song_id else None
+    if args.refresh_source and not netease_song_id:
+        try:
+            netease_song_id = read_netease_song_id(track.audio_path)
+        except NeteaseMetadataError as error:
+            raise FullAutoError(
+                "could not infer a NetEase song id from the selected audio; "
+                "pass --netease-song-id explicitly"
+            ) from error
+        netease_song_id_source = "audio-metadata"
+    if netease_song_id and not netease_song_id.isdigit():
+        raise FullAutoError("NetEase song id must contain digits only")
 
     project_root = album.project_root.resolve()
     private_root = (project_root / ".render-work").resolve()
@@ -236,6 +259,8 @@ def build_plan(
         mms_backend=args.mms_backend,
         whisper_models=whisper_models,
         asr_cache=(project_root / ".cache" / "asr-recognition").resolve(),
+        netease_song_id=netease_song_id,
+        netease_song_id_source=netease_song_id_source,
     )
 
 
@@ -275,8 +300,8 @@ def _timing_arguments(plan: FullAutoPlan, args: argparse.Namespace) -> list[str]
         values.extend(("--alignment", args.timing_alignment))
     if args.refresh_source:
         values.append("--refresh-source")
-    if args.netease_song_id:
-        values.extend(("--netease-song-id", args.netease_song_id))
+    if plan.netease_song_id:
+        values.extend(("--netease-song-id", plan.netease_song_id))
     return values
 
 
@@ -342,6 +367,8 @@ def run_full_auto(
         "quality_policy": args.quality_policy,
         "requested_device": getattr(args, "device", DEFAULT_DEVICE),
         "resolved_device": None,
+        "netease_song_id": plan.netease_song_id,
+        "netease_song_id_source": plan.netease_song_id_source,
         "stages": [],
         "outputs": {},
     }
@@ -427,7 +454,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--netease-song-id",
-        help="NetEase numeric song id when it differs from the manifest song-id",
+        help=(
+            "explicit NetEase numeric song id; refresh-source otherwise reads "
+            "the id from the selected audio metadata"
+        ),
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(

@@ -16,7 +16,7 @@
 
 默认质量策略是`auto-fallback`。流程采用可用的高置信度MMS时间，同时让低置信度或未解决单元保留规范时间，并在报告中保留证据。companion SUG生成后，人工或Agent校轴是可选后续，不是自动流程的前置条件。
 
-默认使用冻结歌词源。只有显式加入`--refresh-source --netease-song-id <数字ID>`时，才会从网易刷新所选歌曲并写入`--source`指定的新JSON；不带刷新参数时不会请求在线歌词。专辑显示信息默认读取音频标签，缺失时回退到歌曲名和歌手。变调或无标签的交付音频可用`--metadata-source-audio`指定原始带标签音频。
+默认使用冻结歌词源。只有显式加入`--refresh-source`时，才会从网易刷新所选歌曲并写入`--source`指定的新JSON；脚本会从受支持的网易音频标签读取歌曲ID，也可用`--netease-song-id <数字ID>`覆盖。不带刷新参数时不会请求在线歌词。`karaoke_netease_metadata.py <音频> --identity --fetch-album`会在显式要求时查询专辑详情，补充专辑作者与专辑规模，并与曲目歌手分开保存。专辑显示信息默认读取音频标签，缺失时回退到歌曲名和歌手。变调或无标签的交付音频可用`--metadata-source-audio`指定原始带标签音频。
 
 现有的`scripts/run_karaoke_japanese_workflow.py`用途不同：它直接重新渲染已有的调整后或复核后的SUG，不运行MSST或MMS。底层的`scripts/run_karaoke_japanese_mms_workflow.py`用于分阶段审计、恢复和门禁检查。
 

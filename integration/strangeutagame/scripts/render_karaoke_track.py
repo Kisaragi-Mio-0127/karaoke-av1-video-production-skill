@@ -4154,7 +4154,7 @@ def render_karaoke_video(
             "bt709",
         ]
     elif video_encoder == "libaom-av1":
-        pixel_format = "gbrp"
+        pixel_format = "yuv420p"
         video_codec_args = [
             "-c:v",
             "libaom-av1",
@@ -4175,13 +4175,13 @@ def render_karaoke_video(
             "-tag:v",
             "av01",
             "-color_range",
-            "pc",
+            "tv",
             "-colorspace",
-            "rgb",
+            "bt709",
             "-color_primaries",
             "bt709",
             "-color_trc",
-            "iec61966-2-1",
+            "bt709",
         ]
     elif video_encoder == "hevc_nvenc_444":
         pixel_format = "yuv444p"
@@ -4601,7 +4601,7 @@ def make_parser() -> argparse.ArgumentParser:
         default="libx264",
         help=(
             "video encoder; hevc_nvenc_444 emits full-range YUV 4:4:4 HEVC, "
-            "while libaom-av1 emits true RGB gbrp AV1"
+            "while libaom-av1 emits release-compatible YUV 4:2:0 AV1"
         ),
     )
     parser.add_argument("--offset-ms", type=int, default=0)

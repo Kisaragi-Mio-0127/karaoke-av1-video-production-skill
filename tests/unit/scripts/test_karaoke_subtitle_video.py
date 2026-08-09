@@ -152,6 +152,7 @@ def test_encoder_smoke_command_uses_selected_encoder(tmp_path: Path):
     )
 
     assert command[command.index("-c:v") + 1] == "libaom-av1"
+    assert "color=c=black:s=1920x1080:r=1:d=0.1" in command
     assert command[-2:] == ["null", "-"]
 
 

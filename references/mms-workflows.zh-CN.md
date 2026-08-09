@@ -25,7 +25,7 @@ preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
 
 命令中展示的四项输入是必需项，美术参数是可选项。`--cover`可显式指定图片；否则流程会优先复用标准交付目录中的`cover.jpg`，不存在时再读取所选封面音频的内嵌图片。`--background`、`--composition`和`--cover-source-audio`是显式的高级覆盖项。
 
-默认沿用冻结歌词源。需要主动从网易刷新当前单曲时，显式加入`--refresh-source --netease-song-id <数字ID>`，此时`--source`是刷新后JSON的写入位置；不带刷新参数时不发起歌词网络请求。
+默认沿用冻结歌词源。需要主动从网易刷新当前单曲时，显式加入`--refresh-source`，此时`--source`是刷新后JSON的写入位置；脚本会读取受支持的音频内嵌歌曲ID，也可用`--netease-song-id <数字ID>`覆盖。不带刷新参数时不发起歌词网络请求。
 
 专辑显示信息默认读取音频标签，缺失时回退到歌曲名和歌手。变调或无标签的交付音频可用`--metadata-source-audio`指定原始带标签音频。每次成功渲染还会在`render/editable-project`下写出媒体路径已校验的可编辑SUG。
 

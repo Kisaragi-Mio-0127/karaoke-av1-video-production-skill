@@ -81,6 +81,26 @@ def test_grayscale_cover_still_produces_readable_unique_colours(tmp_path: Path):
         assert max(red, green, blue) - min(red, green, blue) >= 55
 
 
+def test_low_saturation_cover_uses_warm_and_muted_cover_colours(tmp_path: Path):
+    cover = tmp_path / "muted-illustration.png"
+    image = Image.new("RGB", (100, 100), (220, 203, 196))
+    for y in range(image.height):
+        for x in range(30):
+            image.putpixel((x, y), (61, 59, 74))
+    image.save(cover)
+
+    report = extract_cover_palette(cover)
+
+    _assert_palette_contract(report)
+    assert report["primary"] == "#DC9E84"
+    assert report["secondary"] == "#756BB2"
+    assert report["fallback_used"] is True
+    assert [candidate["eligible"] for candidate in report["candidates"]] == [
+        True,
+        True,
+    ]
+
+
 def test_pale_peach_gradient_beats_tiny_near_black_hue_noise(tmp_path: Path):
     cover = tmp_path / "peach-gradient-with-dark-noise.png"
     image = Image.new("RGB", (128, 128))

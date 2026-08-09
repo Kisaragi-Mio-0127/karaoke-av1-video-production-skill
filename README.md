@@ -8,6 +8,13 @@ bundle is Japanese and language-neutral only; Chinese/English workflows stay
 in the separate local Skill. Track-specific data remains in external manifests
 and frozen lyric sources.
 
+## Version baseline
+
+Main targets StrangeUtaGame 1.5.0 with SUG 0.3.0; `sug-1.4.5` retains 1.4.5.
+Gate compatibility on runtime `__version__` and the `SugMigrator` schema. The
+official 1.5.0 tag still has `pyproject.toml` 1.2.6; that difference is
+diagnostic only. The main installer rejects targets other than 1.5.0.
+
 ## What is automatic
 
 The recommended Japanese entry is the single-command
@@ -132,8 +139,9 @@ git clone https://github.com/Kisaragi-Mio-0127/karaoke-av1-video-production-skil
   "$env:USERPROFILE\.codex\skills\karaoke-av1-video-production"
 ```
 
-Install the bundled integration into an existing StrangeUtaGame checkout.
-Review the dry run before allowing replacements:
+Install the bundled integration into a StrangeUtaGame 1.5.0 checkout. The main
+installer rejects every other target. Review the dry run before allowing
+replacements:
 
 ```powershell
 python scripts/install_strangeutagame_integration.py --target <project> --dry-run

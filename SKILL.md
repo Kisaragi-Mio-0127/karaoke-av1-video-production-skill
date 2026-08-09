@@ -10,6 +10,11 @@ Keep canonical inputs, private generated timing evidence, companion SUG files,
 and delivery media separate. Do not add or route Chinese/English workflows
 through this public Skill.
 
+Main targets StrangeUtaGame 1.5.0 with SUG 0.3.0; `sug-1.4.5` retains 1.4.5.
+Gate compatibility on runtime `__version__` and the `SugMigrator` schema: the
+official 1.5.0 tag still has `pyproject.toml` 1.2.6, which is diagnostic only.
+The main installer rejects targets other than 1.5.0.
+
 Read these references when needed:
 
 - [full-auto and staged MMS contract](references/mms-workflows.md)

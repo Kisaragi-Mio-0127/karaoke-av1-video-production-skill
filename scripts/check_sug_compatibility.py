@@ -94,13 +94,12 @@ def inspect_checkout(
 
     checks = {
         "application_version_matches_expected": __version__ == expected_app_version,
-        "package_version_matches_application": package_version == __version__,
         "parser_format_matches_expected": parser_version == expected_sug_version,
         "all_projects_loaded": len(records) == len(projects),
         "all_projects_unchanged": all(item["unchanged"] for item in records),
     }
     return {
-        "schema_version": "karaoke-sug-compatibility/v1",
+        "schema_version": "karaoke-sug-compatibility/v2",
         "application_version": __version__,
         "package_version": package_version,
         "expected_application_version": expected_app_version,
@@ -108,6 +107,9 @@ def inspect_checkout(
         "expected_sug_format_version": expected_sug_version,
         "projects": records,
         "checks": checks,
+        "diagnostics": {
+            "package_version_matches_application": package_version == __version__,
+        },
         "ok": all(checks.values()),
     }
 
@@ -118,8 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project", type=Path, action="append", default=[])
     parser.add_argument(
         "--expected-app-version",
-        default="1.4.5",
-        help="required application/package version (default: 1.4.5)",
+        default="1.5.0",
+        help="required application version (default: 1.5.0)",
     )
     parser.add_argument("--expected-sug-version", default="0.3.0")
     parser.add_argument("--output", type=Path)

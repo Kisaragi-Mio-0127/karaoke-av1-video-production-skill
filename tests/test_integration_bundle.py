@@ -31,10 +31,18 @@ def _load_installer():
 
 def _fake_target(root: Path) -> Path:
     target = root / "StrangeUtaGame"
-    (target / "src" / "strange_uta_game").mkdir(parents=True)
+    package = target / "src" / "strange_uta_game"
+    persistence = package / "backend" / "infrastructure" / "persistence"
+    persistence.mkdir(parents=True)
     (target / "scripts").mkdir()
     (target / "pyproject.toml").write_text(
         '[project]\nname = "strange-uta-game"\n', encoding="utf-8"
+    )
+    (package / "__version__.py").write_text(
+        '__version__ = "1.5.0"\n', encoding="utf-8"
+    )
+    (persistence / "sug_io.py").write_text(
+        'class SugMigrator:\n    CURRENT_VERSION = "0.3.0"\n', encoding="utf-8"
     )
     return target
 
@@ -86,6 +94,8 @@ def test_dependency_manifest_exactly_covers_python_bundle() -> None:
     assert records_by_path["run_karaoke_japanese_full_auto.py"]["category"] == (
         "transitive-runtime"
     )
+    assert "Ruby and RubyPart" in records_by_path["sug_ruby.py"]["reason"]
+    assert "AutoCheckService" in records_by_path["karaoke_timing.py"]["reason"]
     assert all(record.get("reason", "").strip() for record in records)
     requirement_records = manifest["requirements"]
     assert {record["path"] for record in requirement_records} == {
@@ -156,8 +166,92 @@ def test_installer_dry_run_is_manifest_driven(tmp_path: Path) -> None:
 
     assert declared == destinations
     assert all(record["action"] == "install" for record in report["files"])
+    assert report["target_application_version"] == "1.5.0"
+    assert report["target_sug_format_version"] == "0.3.0"
     assert not (target / ".karaoke-skill-backup").exists()
     assert not list(target.glob(".karaoke-skill-stage-*"))
+
+
+def test_installer_rejects_wrong_application_version(tmp_path: Path) -> None:
+    installer = _load_installer()
+    target = _fake_target(tmp_path)
+    (target / "src" / "strange_uta_game" / "__version__.py").write_text(
+        '__version__ = "1.4.5"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit, match=r"1\.4\.5; expected 1\.5\.0"):
+        installer.install(target, force=False, dry_run=True)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        '__version__ = "1.5.0"\n__version__ = "1.5.0"\n',
+        "__version__ = detect_version()\n",
+        'APPLICATION_VERSION = "1.5.0"\n',
+    ],
+)
+def test_installer_rejects_invalid_application_version(
+    tmp_path: Path, source: str
+) -> None:
+    installer = _load_installer()
+    target = _fake_target(tmp_path)
+    (target / "src" / "strange_uta_game" / "__version__.py").write_text(
+        source, encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit, match="exactly one literal __version__"):
+        installer.install(target, force=False, dry_run=True)
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        (None, "Cannot parse StrangeUtaGame SUG schema source"),
+        (
+            'class SugMigrator:\n    CURRENT_VERSION = "0.2.0"\n',
+            r"0\.2\.0; expected 0\.3\.0",
+        ),
+        (
+            "class SugMigrator:\n"
+            '    CURRENT_VERSION = "0.3.0"\n'
+            '    CURRENT_VERSION = "0.3.0"\n',
+            "exactly one literal CURRENT_VERSION",
+        ),
+        (
+            "class SugMigrator:\n    CURRENT_VERSION = detect_version()\n",
+            "exactly one literal CURRENT_VERSION",
+        ),
+        (
+            "class SugMigrator:\n"
+            '    CURRENT_VERSION = "0.3.0"\n\n'
+            "class SugMigrator:\n"
+            '    CURRENT_VERSION = "0.3.0"\n',
+            "exactly one SugMigrator class",
+        ),
+    ],
+)
+def test_installer_rejects_invalid_sug_schema(
+    tmp_path: Path, source: str | None, message: str
+) -> None:
+    installer = _load_installer()
+    target = _fake_target(tmp_path)
+    schema_path = (
+        target
+        / "src"
+        / "strange_uta_game"
+        / "backend"
+        / "infrastructure"
+        / "persistence"
+        / "sug_io.py"
+    )
+    if source is None:
+        schema_path.unlink()
+    else:
+        schema_path.write_text(source, encoding="utf-8")
+
+    with pytest.raises(SystemExit, match=message):
+        installer.install(target, force=False, dry_run=True)
 
 
 @pytest.mark.parametrize(

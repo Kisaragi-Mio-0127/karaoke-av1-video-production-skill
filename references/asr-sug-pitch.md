@@ -5,7 +5,9 @@
 ## SUG version gate
 
 - Read the application version from `src/strange_uta_game/__version__.py` and the storage format from `SugMigrator.CURRENT_VERSION`. Do not use a stale packaging version or README badge as the parser contract.
-- The current tested baseline is StrangeUtaGame 1.4.5 and SUG format 0.3.0. A newer application may keep the same storage format.
+- The main tested baseline is StrangeUtaGame 1.5.0 and SUG format 0.3.0; `sug-1.4.5` retains 1.4.5.
+- The official 1.5.0 tag still lists `pyproject.toml` 1.2.6. Gate compatibility on runtime `__version__` and the `SugMigrator` schema; the packaging difference is diagnostic only.
+- On main, the installer rejects targets other than 1.5.0.
 - Run `scripts/check_sug_compatibility.py` with the target repository's project-local Python for normal non-MMS SUG compatibility checks. Loading is read-only; require parser/schema compatibility and a focused render test. Japanese MMS does not use before/after hashes as checks or gates; record any `*_sha256` only in reports.
 - Unknown SUG versions are not automatically compatible merely because their JSON shape looks similar. Require a real parser load and a focused render test before release.
 

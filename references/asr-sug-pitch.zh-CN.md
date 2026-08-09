@@ -5,7 +5,9 @@
 ## SUG版本门禁
 
 - 从`src/strange_uta_game/__version__.py`读取应用版本，从`SugMigrator.CURRENT_VERSION`读取存储格式。不要使用过时的打包版本或README徽章作为解析器契约。
-- 当前经过测试的基线是StrangeUtaGame1.4.5和SUG格式0.3.0。较新的应用可能仍保持相同的存储格式。
+- main经过测试的基线是StrangeUtaGame 1.5.0和SUG格式0.3.0；`sug-1.4.5`分支保留1.4.5。
+- 官方1.5.0 tag中的`pyproject.toml`仍标为1.2.6。兼容门以运行时`__version__`和`SugMigrator` schema为准；打包版本差异仅用于诊断。
+- 在main中，安装器拒绝非1.5.0目标。
 - 对于普通非MMS的SUG兼容性检查，使用目标仓库项目本地的Python运行`scripts/check_sug_compatibility.py`。加载是只读的；要求解析器/Schema兼容性，并执行针对性的渲染测试。日文MMS不使用前后哈希作为检查或门禁；任何`*_sha256`只记录在报告中。
 - 未知SUG版本不会仅因JSON结构看起来相似就自动兼容。发布前必须进行真实的解析器加载和针对性渲染测试。
 

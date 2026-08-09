@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -19,6 +20,8 @@ from pathlib import PurePosixPath
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = SKILL_ROOT / "integration" / "strangeutagame"
 DEPENDENCY_MANIFEST = BUNDLE_ROOT / "dependency-manifest.json"
+EXPECTED_APPLICATION_VERSION = "1.5.0"
+EXPECTED_SUG_FORMAT_VERSION = "0.3.0"
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 
@@ -73,6 +76,70 @@ def validate_target(target: Path) -> None:
     backup_parent = target / ".karaoke-skill-backup"
     if _is_reparse_point(backup_parent):
         raise SystemExit(f"Refusing backup directory reparse point: {backup_parent}")
+
+
+def _parse_target_source(path: Path, description: str) -> ast.Module:
+    try:
+        return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeError) as error:
+        raise SystemExit(f"Cannot parse StrangeUtaGame {description}: {path}") from error
+
+
+def _target_contains_name(target: ast.expr, name: str) -> bool:
+    return any(isinstance(node, ast.Name) and node.id == name for node in ast.walk(target))
+
+
+def _read_unique_literal_assignment(
+    statements: list[ast.stmt], name: str, path: Path
+) -> str:
+    values: list[ast.expr | None] = []
+    for node in statements:
+        if isinstance(node, ast.Assign):
+            for assignment_target in node.targets:
+                if _target_contains_name(assignment_target, name):
+                    values.append(
+                        node.value if isinstance(assignment_target, ast.Name) else None
+                    )
+        elif isinstance(node, ast.AnnAssign) and _target_contains_name(node.target, name):
+            values.append(node.value if isinstance(node.target, ast.Name) else None)
+        elif isinstance(node, ast.AugAssign) and _target_contains_name(node.target, name):
+            values.append(None)
+
+    if len(values) != 1 or not isinstance(values[0], ast.Constant):
+        raise SystemExit(f"Expected exactly one literal {name} assignment in: {path}")
+    value = values[0].value
+    if not isinstance(value, str):
+        raise SystemExit(f"Expected exactly one literal {name} assignment in: {path}")
+    return value
+
+
+def _read_target_application_version(target: Path) -> str:
+    version_path = target / "src" / "strange_uta_game" / "__version__.py"
+    tree = _parse_target_source(version_path, "application version source")
+    return _read_unique_literal_assignment(tree.body, "__version__", version_path)
+
+
+def _read_target_sug_format_version(target: Path) -> str:
+    schema_path = (
+        target
+        / "src"
+        / "strange_uta_game"
+        / "backend"
+        / "infrastructure"
+        / "persistence"
+        / "sug_io.py"
+    )
+    tree = _parse_target_source(schema_path, "SUG schema source")
+    migrator_classes = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "SugMigrator"
+    ]
+    if len(migrator_classes) != 1:
+        raise SystemExit(f"Expected exactly one SugMigrator class in: {schema_path}")
+    return _read_unique_literal_assignment(
+        migrator_classes[0].body, "CURRENT_VERSION", schema_path
+    )
 
 
 def _manifest_python_paths() -> list[Path]:
@@ -206,6 +273,18 @@ def install(target: Path, *, force: bool, dry_run: bool) -> dict[str, object]:
         raise SystemExit(f"Refusing target checkout reparse point: {requested_target}")
     target = requested_target.resolve()
     validate_target(target)
+    application_version = _read_target_application_version(target)
+    if application_version != EXPECTED_APPLICATION_VERSION:
+        raise SystemExit(
+            "Unsupported StrangeUtaGame application version: "
+            f"{application_version}; expected {EXPECTED_APPLICATION_VERSION}"
+        )
+    sug_format_version = _read_target_sug_format_version(target)
+    if sug_format_version != EXPECTED_SUG_FORMAT_VERSION:
+        raise SystemExit(
+            "Unsupported StrangeUtaGame SUG format version: "
+            f"{sug_format_version}; expected {EXPECTED_SUG_FORMAT_VERSION}"
+        )
     mapping = _mapping(target)
 
     planned: list[tuple[Path, Path, str]] = []
@@ -238,6 +317,8 @@ def install(target: Path, *, force: bool, dry_run: bool) -> dict[str, object]:
         "schema_version": "karaoke-skill-install/v1",
         "dry_run": dry_run,
         "target": str(target),
+        "target_application_version": application_version,
+        "target_sug_format_version": sug_format_version,
         "files": [
             {
                 "source": source.relative_to(SKILL_ROOT).as_posix(),

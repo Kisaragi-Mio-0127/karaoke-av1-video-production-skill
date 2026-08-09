@@ -32,7 +32,7 @@
       "path": "sug_ruby.py",
       "category": "shared-internal-module",
       "upstream_dependency": "direct-upstream-import",
-      "reason": "Shared canonical SUG ruby module; object writeback dynamically imports StrangeUtaGame Character and Sentence. It is not a standalone command."
+      "reason": "Shared canonical SUG ruby module; object writeback dynamically imports StrangeUtaGame Ruby and RubyPart. It is not a standalone command."
     },
     {
       "path": "karaoke_mms_editable.py",
@@ -174,7 +174,7 @@
     {
       "path": "karaoke_timing.py",
       "category": "direct-upstream-import",
-      "reason": "Imports StrangeUtaGame domain entities, exporters, and SugProjectParser."
+      "reason": "Imports StrangeUtaGame AutoCheckService, domain entities, exporters, and SugProjectParser."
     },
     {
       "path": "package_karaoke_numbered_archives.py",

@@ -4,6 +4,10 @@
 
 本仓库提供可复用的Codex Skill，以及受保护的StrangeUtaGame日文卡拉OK时间轴和AV1视频制作集成。公开包仅包含日文与通用流程；中文和英文工作流保留在独立的本地Skill中。逐曲数据仍放在外部清单和冻结歌词源中。
 
+## 版本基线
+
+main面向StrangeUtaGame 1.5.0和SUG 0.3.0；`sug-1.4.5`分支保留1.4.5。兼容门以运行时`__version__`和`SugMigrator` schema为准。官方1.5.0 tag中的`pyproject.toml`仍为1.2.6，此差异仅用于诊断。main安装器拒绝非1.5.0目标。
+
 ## 可以自动完成什么
 
 推荐的日文入口是单命令`scripts/run_karaoke_japanese_full_auto.py`。给定清单、歌曲ID、歌词输入和新的输出目录后，它会：
@@ -75,7 +79,7 @@ git clone https://github.com/Kisaragi-Mio-0127/karaoke-av1-video-production-skil
   "$env:USERPROFILE\.codex\skills\karaoke-av1-video-production"
 ```
 
-把集成安装到已有的StrangeUtaGame工作区。允许替换前先检查dry run：
+把集成安装到StrangeUtaGame 1.5.0工作区。main安装器拒绝其他目标。允许替换前先检查dry run：
 
 ```powershell
 python scripts/install_strangeutagame_integration.py --target <project> --dry-run

@@ -122,7 +122,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
 
 分阶段入口还接受可选的`--source`、`--sug`和`--vocals-root`覆盖参数。生产过程中不会下载缺失的MMS检查点。
 
-Full-auto、分阶段MMS和已有SUG重渲染命令都接受`--output-mode subtitle-overlay`。省略`--background-video`时输出无音频、带透明通道的ProRes 4444 MOV，供剪辑软件合成。提供`--background-video <视频素材>`时由FFmpeg直接生成常规AV1/AAC MP4：较长素材裁至歌曲区间，较短素材的剩余区间显示黑幕。
+Full-auto、分阶段MMS和已有SUG重渲染命令都接受`--output-mode subtitle-overlay`。省略`--background-video`时输出无音频、带透明通道的ProRes 4444 MOV，供剪辑软件合成。提供`--background-video <视频素材>`时由FFmpeg直接生成常规AV1/AAC MP4：较长素材裁至歌曲区间，较短素材的剩余区间显示黑幕。编码会依次探测`av1_nvenc`和`libaom-av1`；NVENC不可用或渲染失败时自动改用软件AV1编码器。
 
 从已有调整后SUG重新渲染日文视频：
 

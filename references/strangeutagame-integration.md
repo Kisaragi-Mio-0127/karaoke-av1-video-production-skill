@@ -197,7 +197,9 @@ Add `--output-mode subtitle-overlay` to full-auto or the staged MMS command to
 retain every MMS stage and change the final render only. With no supplied
 footage, the result is a silent transparent ProRes 4444 MOV. Add
 `--background-video <footage>` for direct FFmpeg AV1/AAC composition; long
-footage is trimmed and short footage is followed by black.
+footage is trimmed and short footage is followed by black. The background path
+probes `av1_nvenc` and automatically retries `libaom-av1` after a hardware
+initialization or render failure.
 
 Album display metadata defaults to audio tags, then the track title and artist.
 Use `--metadata-source-audio` when the delivery file is transformed or tagless.

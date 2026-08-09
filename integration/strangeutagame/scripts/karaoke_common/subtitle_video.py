@@ -11,6 +11,7 @@ from scripts.render_vinyl_karaoke import escape_filter_path
 CANVAS_WIDTH = 1920
 CANVAS_HEIGHT = 1080
 FRAME_RATE = 30
+AV1_ENCODER_PREFERENCE = ("av1_nvenc", "libaom-av1")
 
 
 def create_transparent_canvas(path: Path) -> None:
@@ -27,6 +28,95 @@ def _subtitle_filter(ass_path: Path, fonts_dir: Path) -> str:
         f"ass=filename='{escape_filter_path(ass_path)}'"
         f":fontsdir='{escape_filter_path(fonts_dir)}':alpha=1"
     )
+
+
+def build_av1_encoder_list_command(ffmpeg: Path) -> list[str]:
+    """Return the command used to discover AV1 encoders in the selected FFmpeg."""
+
+    return [str(ffmpeg), "-hide_banner", "-encoders"]
+
+
+def parse_available_av1_encoders(output: str) -> tuple[str, ...]:
+    """Return supported AV1 encoders in the workflow preference order."""
+
+    tokens_by_line = [set(line.split()) for line in output.splitlines()]
+    return tuple(
+        encoder
+        for encoder in AV1_ENCODER_PREFERENCE
+        if any(encoder in tokens for tokens in tokens_by_line)
+    )
+
+
+def _av1_codec_args(video_encoder: str) -> list[str]:
+    if video_encoder == "av1_nvenc":
+        return [
+            "-c:v",
+            video_encoder,
+            "-preset",
+            "p7",
+            "-tune",
+            "hq",
+            "-rc",
+            "vbr",
+            "-cq",
+            "38",
+            "-b:v",
+            "0",
+            "-multipass",
+            "fullres",
+            "-rc-lookahead",
+            "32",
+            "-spatial-aq",
+            "1",
+            "-temporal-aq",
+            "1",
+            "-aq-strength",
+            "8",
+            "-g",
+            "240",
+        ]
+    if video_encoder == "libaom-av1":
+        return [
+            "-c:v",
+            video_encoder,
+            "-crf",
+            "30",
+            "-b:v",
+            "0",
+            "-cpu-used",
+            "4",
+            "-row-mt",
+            "1",
+            "-g",
+            "240",
+        ]
+    raise ValueError(f"unsupported AV1 encoder: {video_encoder}")
+
+
+def build_av1_encoder_smoke_command(
+    ffmpeg: Path, *, video_encoder: str
+) -> list[str]:
+    """Build a one-frame initialization probe for one AV1 encoder."""
+
+    return [
+        str(ffmpeg),
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=64x64:r=1:d=0.1",
+        "-frames:v",
+        "1",
+        "-pix_fmt",
+        "yuv420p",
+        *_av1_codec_args(video_encoder),
+        "-f",
+        "null",
+        "-",
+    ]
 
 
 def build_transparent_overlay_command(
@@ -77,6 +167,8 @@ def build_transparent_overlay_command(
         "bt709",
         "-color_trc",
         "bt709",
+        "-movflags",
+        "+write_colr",
         str(output_path),
     ]
 
@@ -91,6 +183,7 @@ def build_background_composite_command(
     output_path: Path,
     start_seconds: float,
     duration_seconds: float,
+    video_encoder: str,
 ) -> list[str]:
     """Return an AV1 command that trims long video and pads short video with black."""
 
@@ -128,30 +221,9 @@ def build_background_composite_command(
         str(FRAME_RATE),
         "-pix_fmt",
         "yuv420p",
-        "-c:v",
-        "av1_nvenc",
-        "-preset",
-        "p7",
-        "-tune",
-        "hq",
-        "-rc",
-        "vbr",
-        "-cq",
-        "38",
-        "-b:v",
-        "0",
-        "-multipass",
-        "fullres",
-        "-rc-lookahead",
-        "32",
-        "-spatial-aq",
-        "1",
-        "-temporal-aq",
-        "1",
-        "-aq-strength",
-        "8",
-        "-g",
-        "240",
+        *_av1_codec_args(video_encoder),
+        "-tag:v",
+        "av01",
         "-colorspace",
         "bt709",
         "-color_primaries",

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
+from scripts import finalize_karaoke_release as release
 from scripts.finalize_karaoke_release import (
     PROFILES,
     validate_alignment_audit,
@@ -14,6 +16,32 @@ from scripts.finalize_karaoke_release import (
     validate_hevc444_delivery,
     validate_timing_report,
 )
+
+
+@pytest.mark.parametrize(
+    "video_descriptor",
+    ("av1 (Main)", "av1 (libaom-av1) (Main)"),
+)
+def test_inspect_av1_420_media_accepts_ffmpeg_main_profile_order(
+    monkeypatch, video_descriptor
+):
+    details = f"""
+Stream #0:0: Video: {video_descriptor} (av01 / 0x31307661), yuv420p(tv, bt709), 1920x1080, 30 fps
+Stream #0:1: Audio: aac (LC), 48000 Hz, stereo, fltp, 320 kb/s
+"""
+    monkeypatch.setattr(
+        release.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 1, stdout="", stderr=details
+        ),
+    )
+
+    checks = release.inspect_av1_420_media(Path("ffmpeg"), Path("video.mp4"))
+
+    assert checks["profile_main"] is True
+    assert checks["codec_tag_av01"] is True
+    assert checks["aac_lc_profile"] is True
 
 
 def _sha256(path):

@@ -31,6 +31,7 @@ try:
         print_result,
         run_workflow,
         sha256_file,
+        validate_output_mode_options,
     )
     from scripts.render_karaoke_track import SHARED_FONT_DIR, SHARED_FONT_FILE
 except ImportError:  # pragma: no cover - direct script execution
@@ -61,6 +62,7 @@ except ImportError:  # pragma: no cover - direct script execution
         print_result,
         run_workflow,
         sha256_file,
+        validate_output_mode_options,
     )
     from render_karaoke_track import (  # type: ignore[no-redef]
         SHARED_FONT_DIR,
@@ -116,6 +118,13 @@ def _resolve_report_path(value: Any, project_root: Path) -> Path:
 def preflight(args: argparse.Namespace) -> Preflight:
     """Validate every local/input contract without creating the output tree."""
 
+    validate_output_mode_options(
+        output_mode=args.output_mode,
+        background_video=args.background_video,
+        color_policy=args.color_policy,
+        singer_colors=tuple(args.singer_color),
+        lossless_companion=args.lossless_companion,
+    )
     if (
         args.mms_backend == MMS_BACKEND_NEXTFIRE_JA_LATN
         and args.allow_mms_network
@@ -179,6 +188,7 @@ def preflight(args: argparse.Namespace) -> Preflight:
         args.background,
         args.background_video,
         args.cover_source_audio,
+        args.metadata_source_audio,
     ):
         if optional_artwork is not None:
             required_paths.append(optional_artwork)

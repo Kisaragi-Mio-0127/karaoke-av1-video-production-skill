@@ -130,7 +130,9 @@ keeps the ASS karaoke, Japanese ruby, singer colours, and cues while removing
 all artwork and panels, and emits a silent alpha-bearing ProRes 4444 MOV. Add
 `--background-video <video>` to have FFmpeg render the same ASS directly onto
 supplied footage as AV1/AAC MP4; long footage is trimmed to the song duration
-and short footage is followed by black. This output mode defaults to the SUG
+and short footage is followed by black. FFmpeg probes `av1_nvenc` and then
+`libaom-av1`; an unavailable or failed NVENC attempt automatically retries the
+software encoder, and the render report records every attempt. This output mode defaults to the SUG
 singer colours (`--color-policy project`). The same two options pass through
 the full-auto and staged Japanese entries.
 

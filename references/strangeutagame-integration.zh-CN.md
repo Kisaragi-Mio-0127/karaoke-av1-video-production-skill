@@ -122,7 +122,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py --manifest <ma
 
 该命令准备MSST人声，生成私有初始SUG，运行日文MMS，生成可编辑companion，准备当前布局并渲染AV1 MP4。默认质量策略是`auto-fallback`，默认视觉样式是`spectrum`。低置信度回退证据会保留在报告中；人工或Agent校轴是可选项。
 
-Full-auto或分阶段MMS命令可加入`--output-mode subtitle-overlay`，MMS各阶段保持原有流程，仅更改最终渲染。省略视频素材时生成无音频、带透明通道的ProRes 4444 MOV；加入`--background-video <视频素材>`时由FFmpeg直接合成为AV1/AAC，较长素材裁剪到歌曲区间，较短素材的剩余区间显示黑幕。
+Full-auto或分阶段MMS命令可加入`--output-mode subtitle-overlay`，MMS各阶段保持原有流程，仅更改最终渲染。省略视频素材时生成无音频、带透明通道的ProRes 4444 MOV；加入`--background-video <视频素材>`时由FFmpeg直接合成为AV1/AAC，较长素材裁剪到歌曲区间，较短素材的剩余区间显示黑幕。背景视频路径依次探测`av1_nvenc`和`libaom-av1`，硬件初始化或渲染失败时自动改用软件编码器。
 
 专辑显示信息默认读取音频标签，再回退到歌曲名和歌手；变调或无标签音频可用`--metadata-source-audio`指定原始带标签音频。
 

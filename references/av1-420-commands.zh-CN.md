@@ -58,9 +58,9 @@ NVENC探测成功时，默认1920x1080、30fps、SDR发布档使用AV1 NVENC CQ3
 
 ## 透明字幕层与给定视频素材
 
-剪辑用字幕层输出为无音频的1920x1080、30 fps ProRes 4444 MOV。使用透明RGBA画布并启用字幕滤镜的alpha处理，以`prores_ks` profile 4编码；验证`yuva444p*`像素格式、`ap4h`/4444 profile、时长、尺寸、帧率和音频流缺失状态。
+剪辑用字幕层输出为无音频的1920x1080、30 fps ProRes 4444 MOV。使用透明RGBA画布并启用字幕滤镜的alpha处理，以`prores_ks` profile 4编码，并加入`-movflags +write_colr`；验证`yuva444p*`像素格式、`ap4h`/4444 profile、BT.709、时长、尺寸、帧率和音频流缺失状态。
 
-提供`--background-video`时，将视频素材等比缩放到1920x1080范围内，空余区域填黑。应用`tpad=stop_mode=add`及显式时长裁剪，使较长素材裁至歌曲区间，使较短素材在剩余区间显示黑幕。时间轴处理完成后烧录ASS，仅映射所选歌曲音频，并使用常规AV1 4:2:0/AAC设置。命令中省略`-shortest`。
+提供`--background-video`时，将视频素材等比缩放到1920x1080范围内，空余区域填黑。应用`tpad=stop_mode=add`及显式时长裁剪，使较长素材裁至歌曲区间，使较短素材在剩余区间显示黑幕。时间轴处理完成后烧录ASS，仅映射所选歌曲音频，并使用常规AV1 4:2:0/AAC设置。编码器按`av1_nvenc`、`libaom-av1`顺序做初始化探测；NVENC初始化或编码失败时改用`libaom-av1`重试完整渲染，各编码器使用独立参数，并将尝试历史写入渲染报告。命令中省略`-shortest`。
 
 ## 时间轴、验证与发布
 

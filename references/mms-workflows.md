@@ -108,7 +108,8 @@ companion-SUG creation retain their normal contracts. With no background video,
 the output is a silent transparent ProRes 4444 MOV. Add
 `--background-video <footage>` to compose directly with FFmpeg into AV1/AAC;
 long footage is trimmed and short footage ends on black for the rest of the
-song interval.
+song interval. The render probes `av1_nvenc` first, retries `libaom-av1` after
+an unavailable or failed hardware attempt, and records the attempt history.
 
 ## Existing SUG route
 

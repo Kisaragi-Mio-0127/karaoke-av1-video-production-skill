@@ -6,10 +6,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,9 +30,12 @@ try:
     )
     from scripts.karaoke_common.media_metadata import resolve_display_metadata
     from scripts.karaoke_common.subtitle_video import (
+        build_av1_encoder_list_command,
+        build_av1_encoder_smoke_command,
         build_background_composite_command,
         build_transparent_overlay_command,
         create_transparent_canvas,
+        parse_available_av1_encoders,
     )
     from scripts.karaoke_language import language_identity
     from scripts.render_karaoke_direct_av1_420_album import (
@@ -53,9 +57,12 @@ except ImportError:  # pragma: no cover - direct script entry points
     )
     from karaoke_common.media_metadata import resolve_display_metadata  # type: ignore[no-redef]
     from karaoke_common.subtitle_video import (  # type: ignore[no-redef]
+        build_av1_encoder_list_command,
+        build_av1_encoder_smoke_command,
         build_background_composite_command,
         build_transparent_overlay_command,
         create_transparent_canvas,
+        parse_available_av1_encoders,
     )
     from karaoke_language import language_identity  # type: ignore[no-redef]
     from render_karaoke_direct_av1_420_album import (  # type: ignore[no-redef]
@@ -162,6 +169,46 @@ def _has_test_root_marker(path: Path) -> bool:
     return False
 
 
+def validate_output_mode_options(
+    *,
+    output_mode: str,
+    background_video: Path | None,
+    color_policy: str | None = None,
+    singer_colors: Sequence[str] = (),
+    lossless_companion: bool = False,
+) -> str:
+    """Validate output-mode options before expensive workflow stages run."""
+
+    if output_mode not in OUTPUT_MODES:
+        raise KaraokeWorkflowError(f"unsupported output mode: {output_mode!r}")
+    resolved_color_policy = color_policy or (
+        "project" if output_mode == "subtitle-overlay" else "cover"
+    )
+    if resolved_color_policy not in {"cover", "project"}:
+        raise KaraokeWorkflowError(
+            f"unsupported color policy: {resolved_color_policy!r}"
+        )
+    if background_video is not None and output_mode != "subtitle-overlay":
+        raise KaraokeWorkflowError(
+            "--background-video requires --output-mode=subtitle-overlay"
+        )
+    if output_mode == "subtitle-overlay":
+        if resolved_color_policy != "project":
+            raise KaraokeWorkflowError(
+                "subtitle-overlay requires --color-policy=project"
+            )
+        if singer_colors:
+            raise KaraokeWorkflowError(
+                "subtitle-overlay reads singer colors from the SUG; update the SUG "
+                "instead of using --singer-color"
+            )
+        if lossless_companion:
+            raise KaraokeWorkflowError(
+                "--lossless-companion is unavailable for subtitle-overlay output"
+            )
+    return resolved_color_policy
+
+
 def validate_visual_contract(config: WorkflowConfig) -> None:
     if (config.timing_overrides is None) != (
         config.timing_override_song_id is None
@@ -173,36 +220,19 @@ def validate_visual_contract(config: WorkflowConfig) -> None:
         raise KaraokeWorkflowError(
             f"unsupported visual style: {config.visual_style!r}"
         )
-    if config.output_mode not in OUTPUT_MODES:
-        raise KaraokeWorkflowError(f"unsupported output mode: {config.output_mode!r}")
-    if config.color_policy not in {"cover", "project"}:
-        raise KaraokeWorkflowError(
-            f"unsupported color policy: {config.color_policy!r}"
-        )
+    validate_output_mode_options(
+        output_mode=config.output_mode,
+        background_video=config.background_video,
+        color_policy=config.color_policy,
+        singer_colors=config.singer_colors,
+        lossless_companion=config.lossless_companion,
+    )
     if config.visual_style == "vinyl" and (
         config.spectrum_color is not None or config.progress_color is not None
     ):
         raise KaraokeWorkflowError(
             "--spectrum-color/--progress-color require --visual-style=spectrum"
         )
-    if config.background_video is not None and config.output_mode != "subtitle-overlay":
-        raise KaraokeWorkflowError(
-            "--background-video requires --output-mode=subtitle-overlay"
-        )
-    if config.output_mode == "subtitle-overlay":
-        if config.color_policy != "project":
-            raise KaraokeWorkflowError(
-                "subtitle-overlay requires --color-policy=project"
-            )
-        if config.singer_colors:
-            raise KaraokeWorkflowError(
-                "subtitle-overlay reads singer colors from the SUG; update the SUG "
-                "instead of using --singer-color"
-            )
-        if config.lossless_companion:
-            raise KaraokeWorkflowError(
-                "--lossless-companion is unavailable for subtitle-overlay output"
-            )
 
 
 def validate_output_dir(config: WorkflowConfig) -> Path:
@@ -424,6 +454,95 @@ def _run_command(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def render_background_with_av1_fallback(
+    *,
+    ffmpeg: Path,
+    background_video: Path,
+    audio_path: Path,
+    ass_path: Path,
+    fonts_dir: Path,
+    output_path: Path,
+    start_seconds: float,
+    duration_seconds: float,
+    runner: Callable[[Sequence[str]], subprocess.CompletedProcess[str]],
+) -> tuple[subprocess.CompletedProcess[str], str, list[dict[str, Any]]]:
+    """Render supplied footage with hardware-first, software AV1 fallback."""
+
+    encoder_list = runner(build_av1_encoder_list_command(ffmpeg))
+    diagnostic = (encoder_list.stdout or "") + "\n" + (encoder_list.stderr or "")
+    if encoder_list.returncode != 0:
+        raise KaraokeWorkflowError(
+            f"FFmpeg encoder discovery failed: {diagnostic[-1200:]}"
+        )
+    candidates = parse_available_av1_encoders(diagnostic)
+    if not candidates:
+        raise KaraokeWorkflowError(
+            "FFmpeg provides neither av1_nvenc nor libaom-av1"
+        )
+    if output_path.exists():
+        raise KaraokeWorkflowError(
+            f"background composite output already exists: {output_path}"
+        )
+
+    attempts: list[dict[str, Any]] = []
+    for video_encoder in candidates:
+        smoke = runner(
+            build_av1_encoder_smoke_command(
+                ffmpeg,
+                video_encoder=video_encoder,
+            )
+        )
+        attempt: dict[str, Any] = {
+            "video_encoder": video_encoder,
+            "probe_returncode": smoke.returncode,
+            "probe_stderr_tail": (smoke.stderr or "")[-1200:],
+            "render_returncode": None,
+            "render_stderr_tail": None,
+        }
+        attempts.append(attempt)
+        if smoke.returncode != 0:
+            continue
+
+        partial = output_path.with_name(
+            f".{output_path.stem}.{os.getpid()}.{video_encoder}.partial"
+            f"{output_path.suffix}"
+        )
+        if partial.exists():
+            raise KaraokeWorkflowError(
+                f"background composite partial already exists: {partial}"
+            )
+        try:
+            command = build_background_composite_command(
+                ffmpeg=ffmpeg,
+                background_video=background_video,
+                audio_path=audio_path,
+                ass_path=ass_path,
+                fonts_dir=fonts_dir,
+                output_path=partial,
+                start_seconds=start_seconds,
+                duration_seconds=duration_seconds,
+                video_encoder=video_encoder,
+            )
+            rendered = runner(command)
+            attempt["render_returncode"] = rendered.returncode
+            attempt["render_stderr_tail"] = (rendered.stderr or "")[-1200:]
+            if (
+                rendered.returncode == 0
+                and partial.is_file()
+                and partial.stat().st_size > 0
+            ):
+                os.replace(partial, output_path)
+                return rendered, video_encoder, attempts
+        finally:
+            if partial.exists():
+                partial.unlink()
+
+    raise KaraokeWorkflowError(
+        "all background AV1 encoder attempts failed: "
+        + json.dumps(attempts, ensure_ascii=False)
+    )
+
+
 def _probe_with_ffmpeg(
     ffmpeg: Path,
     path: Path,
@@ -443,6 +562,54 @@ def _probe_with_ffmpeg(
         "audio_stream": parse_audio_stream(audio_line) if audio_line else None,
         "bt709": "bt709" in diagnostic.casefold(),
         "diagnostic_tail": diagnostic[-2000:],
+    }
+
+
+def build_overlay_media_gate(
+    *,
+    final_probe: Mapping[str, Any],
+    duration_seconds: float,
+    transparent: bool,
+    existing_gate: Mapping[str, Any] | None = None,
+) -> dict[str, bool]:
+    """Build the final media gate for either subtitle-overlay output form."""
+
+    video_stream = final_probe.get("video_stream") or {}
+    duration_drift = abs(
+        float(final_probe.get("duration_seconds") or -1.0) - duration_seconds
+    )
+    if transparent:
+        return {
+            "codec_prores": video_stream.get("codec") == "prores",
+            "prores_4444_tag_ap4h": video_stream.get("codec_tag") == "ap4h",
+            "pixel_format_has_alpha": str(
+                video_stream.get("pixel_format") or ""
+            ).startswith("yuva444p"),
+            "resolution_1920x1080": (
+                video_stream.get("width"), video_stream.get("height")
+            )
+            == (1920, 1080),
+            "cfr_30fps": abs(float(video_stream.get("fps") or 0.0) - 30.0)
+            < 0.01,
+            "bt709": final_probe.get("bt709") is True,
+            "audio_absent": final_probe.get("audio_stream") is None,
+            "duration_within_100ms": duration_drift <= 0.1,
+        }
+
+    verified = existing_gate or {}
+    return {
+        "codec_av1": verified.get("codec_av1") is True,
+        "codec_tag_av01": verified.get("codec_tag_av01") is True,
+        "profile_main": verified.get("profile_main") is True,
+        "pixel_format_yuv420p": verified.get("pixel_format_yuv420p") is True,
+        "yuv_limited_range": verified.get("yuv_limited_range") is True,
+        "resolution_1920x1080": verified.get("resolution_1920x1080") is True,
+        "cfr_30fps": verified.get("cfr_30fps") is True,
+        "bt709": final_probe.get("bt709") is True,
+        "aac_audio": verified.get("aac_audio") is True,
+        "aac_lc_profile": verified.get("aac_lc_profile") is True,
+        "duration_within_100ms": duration_drift <= 0.1,
+        "parsed_video_codec": video_stream.get("codec") == "av1",
     }
 
 
@@ -886,6 +1053,8 @@ def run_workflow(
     }
     if timing_override_identity is not None:
         report["timing_override"] = timing_override_identity
+    background_video_encoder: str | None = None
+    background_video_attempts: list[dict[str, Any]] = []
     try:
         composition_gate: dict[str, Any] | None = None
         if is_overlay:
@@ -1133,8 +1302,17 @@ def run_workflow(
                     output_path=output_path,
                     duration_seconds=duration,
                 )
+                rendered = runner(render_command)
+                if rendered.returncode != 0:
+                    raise KaraokeWorkflowError(
+                        f"subtitle overlay render failed: {rendered.stderr[-2000:]}"
+                    )
             else:
-                render_command = build_background_composite_command(
+                (
+                    rendered,
+                    background_video_encoder,
+                    background_video_attempts,
+                ) = render_background_with_av1_fallback(
                     ffmpeg=ffmpeg,
                     background_video=config.background_video.resolve(),
                     audio_path=config.audio.resolve(),
@@ -1143,11 +1321,7 @@ def run_workflow(
                     output_path=output_path,
                     start_seconds=0.0,
                     duration_seconds=duration,
-                )
-            rendered = runner(render_command)
-            if rendered.returncode != 0:
-                raise KaraokeWorkflowError(
-                    f"subtitle overlay render failed: {rendered.stderr[-2000:]}"
+                    runner=runner,
                 )
         else:
             render_command = build_render_command(
@@ -1238,6 +1412,8 @@ def run_workflow(
             render_stage["background_video"] = {
                 "source_duration_seconds": source_duration,
                 "timeline_policy": "trim-long-pad-short-with-black",
+                "video_encoder": background_video_encoder,
+                "encoder_attempts": background_video_attempts,
                 "black_tail_seconds": (
                     max(0.0, duration - float(source_duration))
                     if source_duration is not None
@@ -1249,27 +1425,28 @@ def run_workflow(
         report["stages"].append(render_stage)
 
         final_probe = _probe_with_ffmpeg(ffmpeg, output_path, runner=runner)
-        video_stream = final_probe.get("video_stream") or {}
-        duration_drift = abs(
-            float(final_probe.get("duration_seconds") or -1.0) - duration
-        )
-        if is_overlay and config.background_video is None:
-            existing_gate = {"selected": "prores-4444-alpha"}
-            media_gate = {
-                "codec_prores": video_stream.get("codec") == "prores",
-                "pixel_format_has_alpha": str(
-                    video_stream.get("pixel_format") or ""
-                ).startswith("yuva444p"),
-                "resolution_1920x1080": (
-                    video_stream.get("width"), video_stream.get("height")
-                ) == (1920, 1080),
-                "cfr_30fps": abs(float(video_stream.get("fps") or 0.0) - 30.0)
-                < 0.01,
-                "audio_absent": final_probe.get("audio_stream") is None,
-                "duration_within_100ms": duration_drift <= 0.1,
-            }
+        if is_overlay:
+            if config.background_video is None:
+                existing_gate = {"selected": "prores-4444-alpha"}
+                media_gate = build_overlay_media_gate(
+                    final_probe=final_probe,
+                    duration_seconds=duration,
+                    transparent=True,
+                )
+            else:
+                existing_gate = media_verifier(ffmpeg, output_path)
+                media_gate = build_overlay_media_gate(
+                    final_probe=final_probe,
+                    duration_seconds=duration,
+                    transparent=False,
+                    existing_gate=existing_gate,
+                )
         else:
             existing_gate = media_verifier(ffmpeg, output_path)
+            video_stream = final_probe.get("video_stream") or {}
+            duration_drift = abs(
+                float(final_probe.get("duration_seconds") or -1.0) - duration
+            )
             media_gate = {
                 "codec_av1": existing_gate.get("codec_av1") is True,
                 "pixel_format_yuv420p": existing_gate.get("pixel_format_yuv420p")

@@ -211,6 +211,10 @@ def test_private_mms_workflow_chains_reusable_stages_and_only_renders_releases(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     env = _environment(tmp_path, monkeypatch)
+    background_video = env.project / "footage.mp4"
+    background_video.write_bytes(b"video")
+    env.args.output_mode = "subtitle-overlay"
+    env.args.background_video = background_video
     calls: dict[str, object] = {}
 
     def audit_runner(**kwargs):
@@ -246,6 +250,9 @@ def test_private_mms_workflow_chains_reusable_stages_and_only_renders_releases(
         assert config.timing_override_song_id == env.track.song_id
         assert config.timing_override_song_id is not None
         assert config.allow_network is False
+        assert config.output_mode == "subtitle-overlay"
+        assert config.background_video == background_video.resolve()
+        assert config.color_policy == "project"
         config.output_dir.mkdir()
         _write_json(config.output_dir / "workflow-report.json", {"status": "ok"})
         return {"status": "ok"}
@@ -517,6 +524,26 @@ def test_preflight_allows_single_track_manifest_and_disables_exact_five_gate(
         "path": env.args.manifest.resolve(),
         "require_five_tracks": False,
     }
+
+
+def test_preflight_rejects_output_mode_and_explicit_input_errors_early(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    env = _environment(tmp_path, monkeypatch)
+    background_video = env.project / "footage.mp4"
+    background_video.write_bytes(b"video")
+    env.args.background_video = background_video
+
+    with pytest.raises(mms_workflow.KaraokeWorkflowError, match="requires"):
+        mms_workflow.preflight(env.args)
+    assert not env.args.output_dir.exists()
+
+    env.args.output_mode = "subtitle-overlay"
+    env.args.background_video = None
+    env.args.metadata_source_audio = env.project / "missing-metadata.flac"
+    with pytest.raises(mms_workflow.KaraokeWorkflowError, match="required non-empty file"):
+        mms_workflow.preflight(env.args)
+    assert not env.args.output_dir.exists()
 
 
 def test_preflight_still_allows_five_track_manifest(

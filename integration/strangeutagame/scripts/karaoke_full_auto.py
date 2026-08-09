@@ -26,6 +26,10 @@ try:
         NEXTFIRE_JA_LATN_MODEL_RELATIVE_DIR,
         resolve_nextfire_ja_latn_model_path,
     )
+    from .karaoke_workflow import (
+        KaraokeWorkflowError,
+        validate_output_mode_options,
+    )
 except ImportError:  # pragma: no cover - direct script execution
     import audit_karaoke_asr_recognition as asr  # type: ignore[no-redef]
     import karaoke_timing  # type: ignore[no-redef]
@@ -45,6 +49,10 @@ except ImportError:  # pragma: no cover - direct script execution
         MMS_BACKENDS,
         NEXTFIRE_JA_LATN_MODEL_RELATIVE_DIR,
         resolve_nextfire_ja_latn_model_path,
+    )
+    from karaoke_workflow import (  # type: ignore[no-redef]
+        KaraokeWorkflowError,
+        validate_output_mode_options,
     )
 
 SUPPORTED_LANGUAGES = frozenset({"ja", "zh", "en"})
@@ -121,6 +129,13 @@ def build_plan(
 ) -> FullAutoPlan:
     """Resolve all immutable inputs before any output or cache is created."""
 
+    try:
+        validate_output_mode_options(
+            output_mode=args.output_mode,
+            background_video=args.background_video,
+        )
+    except KaraokeWorkflowError as error:
+        raise FullAutoError(str(error)) from error
     manifest = args.manifest.expanduser().resolve()
     source = args.source.expanduser().resolve()
     _require_file(manifest, "manifest")
@@ -130,6 +145,7 @@ def build_plan(
         ("explicit composition", args.composition),
         ("explicit cover", args.cover),
         ("explicit background", args.background),
+        ("background video", args.background_video),
         ("explicit cover source audio", args.cover_source_audio),
         ("explicit metadata source audio", args.metadata_source_audio),
     ):

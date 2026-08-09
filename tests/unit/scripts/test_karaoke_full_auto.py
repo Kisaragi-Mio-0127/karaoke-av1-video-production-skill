@@ -113,6 +113,41 @@ def test_plan_rejects_existing_nonprivate_and_wrong_language_outputs(
         full_auto.build_plan(env.args, allowed_languages=frozenset({"zh", "en"}))
 
 
+def test_full_auto_validates_and_forwards_subtitle_overlay_background(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    env = _environment(tmp_path, monkeypatch, "ja")
+    background_video = env.project / "footage.mp4"
+    background_video.write_bytes(b"video")
+    env.args.output_mode = "subtitle-overlay"
+    env.args.background_video = background_video
+
+    plan = full_auto.build_plan(env.args)
+    wrapper_args = full_auto._wrapper_args(plan, env.args)
+
+    assert wrapper_args.output_mode == "subtitle-overlay"
+    assert wrapper_args.background_video == background_video.resolve()
+    assert wrapper_args.color_policy == "project"
+
+
+def test_full_auto_rejects_background_video_errors_before_output_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    env = _environment(tmp_path, monkeypatch, "ja")
+    background_video = env.project / "footage.mp4"
+    background_video.write_bytes(b"video")
+    env.args.background_video = background_video
+
+    with pytest.raises(full_auto.FullAutoError, match="requires"):
+        full_auto.build_plan(env.args)
+
+    env.args.output_mode = "subtitle-overlay"
+    env.args.background_video = env.project / "missing.mp4"
+    with pytest.raises(full_auto.FullAutoError, match="background video does not exist"):
+        full_auto.build_plan(env.args)
+    assert not env.args.output_dir.exists()
+
+
 def test_models_cannot_be_selected_from_cache(tmp_path: Path, monkeypatch):
     env = _environment(tmp_path, monkeypatch, "ja")
     cached = env.project / ".cache" / "torch" / "model.pt"

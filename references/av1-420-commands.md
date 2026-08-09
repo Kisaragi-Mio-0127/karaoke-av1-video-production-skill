@@ -60,8 +60,8 @@ Do not add `-shortest`, `-ar`, or `-ac`. Preserve the lossless source sample rat
 
 The editor overlay output is a silent 1920x1080, 30 fps ProRes 4444 MOV. Render
 ASS onto a transparent RGBA source with the subtitle filter's alpha processing
-enabled, encode profile 4 with `prores_ks`, and verify a `yuva444p*` pixel
-format, the `ap4h`/4444 profile, duration, dimensions, frame rate, and absence
+enabled, encode profile 4 with `prores_ks`, add `-movflags +write_colr`, and verify a `yuva444p*` pixel
+format, the `ap4h`/4444 profile, BT.709, duration, dimensions, frame rate, and absence
 of audio.
 
 When `--background-video` is supplied, scale it to fit within 1920x1080 and pad
@@ -69,6 +69,9 @@ the unused area with black. Apply `tpad=stop_mode=add` followed by an explicit
 duration trim: this trims long footage and fills a short source with black
 through the selected song interval. Burn ASS after that timeline operation,
 map only the selected song audio, and use the normal AV1 4:2:0/AAC settings.
+Probe encoder initialization in `av1_nvenc`, `libaom-av1` order. Retry the full
+render with `libaom-av1` when NVENC initialization or encoding fails; keep
+encoder-specific options separate and record all attempts in the render report.
 Do not use `-shortest`.
 
 ## Timeline, verification, and promotion

@@ -202,7 +202,8 @@ Full-auto, staged MMS, and existing-SUG rerender commands accept
 silent transparent ProRes 4444 MOV for editor compositing. With
 `--background-video <footage>`, FFmpeg produces the normal AV1/AAC MP4 directly:
 long footage is trimmed to the song interval, while short footage is followed
-by black through the remaining interval.
+by black through the remaining interval. Encoding probes `av1_nvenc` first and
+automatically retries `libaom-av1` when NVENC is unavailable or its render fails.
 
 Japanese video rerender from an existing adjusted SUG:
 

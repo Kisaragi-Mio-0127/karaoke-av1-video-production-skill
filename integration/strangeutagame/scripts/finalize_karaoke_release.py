@@ -1190,7 +1190,7 @@ def inspect_av1_420_media(ffmpeg: Path, video: Path) -> dict[str, Any]:
         "codec_tag_av01": re.search(r"\(\s*av01\s*/", video_details, re.IGNORECASE)
         is not None,
         "profile_main": re.search(
-            r"\bav1\s+\([^)]*\)\s+\(\s*main\s*\)",
+            r"\bav1\b[^\r\n]*\(\s*main\s*\)",
             video_details,
             re.IGNORECASE,
         )
@@ -1241,7 +1241,7 @@ def inspect_av1_420_lossless_media(ffmpeg: Path, video: Path) -> dict[str, Any]:
         "codec_av1": re.search(r"Video:\s+av1\b", video_details, re.IGNORECASE)
         is not None,
         "profile_main": re.search(
-            r"\bav1\s+\([^)]*\)\s+\(\s*main\s*\)",
+            r"\bav1\b[^\r\n]*\(\s*main\s*\)",
             video_details,
             re.IGNORECASE,
         )

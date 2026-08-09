@@ -87,7 +87,7 @@ Skip manual timing review when automatic evidence and release checks agree. When
 `run_karaoke_japanese_mms_workflow.py` is the staged MMS/recovery entry. It is
 Japanese-only and separate from batch rendering. Full-auto requires
 `--manifest`, `--song-id`, `--source`, and a new `--output-dir`; it prepares a
-private initial SUG before invoking the staged wrapper. The staged wrapper may
+working initial SUG before invoking the staged wrapper. The staged wrapper may
 instead receive a single explicit `--sug` for recovery or rerendering. Both
 routes build the current composition in `render/artwork-current`, while an
 explicit `--composition` remains an advanced gated override. Neither route

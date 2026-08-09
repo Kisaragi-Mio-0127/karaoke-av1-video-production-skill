@@ -3,7 +3,6 @@
 [简体中文](mms-workflows.zh-CN.md) | English
 
 Run commands from the StrangeUtaGame project root with `uv run --no-sync`.
-This public integration contains Japanese and language-neutral workflow files.
 
 ## Full-auto first run
 
@@ -17,7 +16,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
 The command resolves the selected Japanese manifest track and performs:
 
 ```text
-preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
+preflight -> MSST vocal stem -> working initial SUG -> MMS audit/build
 -> editable companion SUG -> automatic current layout -> AV1 MP4
 -> relocatable editable SUG snapshot
 ```
@@ -90,8 +89,8 @@ Use the lower-level wrapper for recovery or inspection:
 uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
   --manifest <manifest> --song-id <song-id> `
   --source <frozen-lyrics.json> `
-  --sug <private-or-reviewed.sug> `
-  --output-dir <new-private-output-dir> `
+  --sug <working-or-reviewed.sug> `
+  --output-dir <new-output-dir> `
   --mms-model-path models/mms/model.pt `
   --quality-policy <strict-or-auto-fallback> `
   --visual-style spectrum

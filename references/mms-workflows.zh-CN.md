@@ -2,7 +2,7 @@
 
 [English](mms-workflows.md) | 简体中文
 
-从StrangeUtaGame项目根目录使用`uv run --no-sync`运行命令。本公开集成包含日文和语言中立的工作流文件。
+从StrangeUtaGame项目根目录使用`uv run --no-sync`运行命令。
 
 ## Full-auto首次运行
 
@@ -16,7 +16,7 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
 该命令解析选定的日文清单曲目，并执行：
 
 ```text
-preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
+preflight -> MSST vocal stem -> working initial SUG -> MMS audit/build
 -> editable companion SUG -> automatic current layout -> AV1 MP4
 -> relocatable editable SUG snapshot
 ```
@@ -57,8 +57,8 @@ preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
 uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
   --manifest <manifest> --song-id <song-id> `
   --source <frozen-lyrics.json> `
-  --sug <private-or-reviewed.sug> `
-  --output-dir <new-private-output-dir> `
+  --sug <working-or-reviewed.sug> `
+  --output-dir <new-output-dir> `
   --mms-model-path models/mms/model.pt `
   --quality-policy <strict-or-auto-fallback> `
   --visual-style spectrum

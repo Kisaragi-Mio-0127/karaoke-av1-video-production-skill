@@ -2,11 +2,11 @@
 
 [English](asr-sug-pitch.md) | 简体中文
 
-## SUG版本门禁
+## SUG兼容性门禁
 
-- 从`src/strange_uta_game/__version__.py`读取应用版本，从`SugMigrator.CURRENT_VERSION`读取存储格式。不要使用过时的打包版本或README徽章作为解析器契约。
-- 当前经过测试的基线是StrangeUtaGame1.4.5和SUG格式0.3.0。较新的应用可能仍保持相同的存储格式。
+- 从`src/strange_uta_game/__version__.py`读取应用版本，从`SugMigrator.CURRENT_VERSION`读取存储格式，并以这些运行时值作为解析器契约。
 - 对于普通非MMS的SUG兼容性检查，使用目标仓库项目本地的Python运行`scripts/check_sug_compatibility.py`。加载是只读的；要求解析器/Schema兼容性，并执行针对性的渲染测试。日文MMS不使用前后哈希作为检查或门禁；任何`*_sha256`只记录在报告中。
+- 安装还要求目标应用版本与SUG格式匹配安装器内置的兼容性常量；解析成功不会绕过这项精确检查。
 - 未知SUG版本不会仅因JSON结构看起来相似就自动兼容。发布前必须进行真实的解析器加载和针对性渲染测试。
 
 ## 独立ASR与显式日文MMS策略

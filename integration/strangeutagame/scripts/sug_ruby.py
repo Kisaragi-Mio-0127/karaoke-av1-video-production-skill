@@ -1077,6 +1077,25 @@ def apply_review_patches(
     }
 
 
+def _is_word_link_boundary_text(text: str) -> bool:
+    return any(
+        char.isspace() or unicodedata.category(char).startswith(("P", "S"))
+        for char in text
+    )
+
+
+def _clear_word_links_at_boundaries(characters: Sequence[Any]) -> None:
+    for index, character in enumerate(characters):
+        text = str(_value(character, "char", "") or "")
+        next_text = (
+            str(_value(characters[index + 1], "char", "") or "")
+            if index + 1 < len(characters)
+            else ""
+        )
+        if _is_word_link_boundary_text(text) or _is_word_link_boundary_text(next_text):
+            _set_value(character, "linked_to_next", False)
+
+
 def _restore_analyzed_whitespace_axis(
     original_chars: Sequence[Any],
     analyzed_chars: Sequence[Any],
@@ -1156,6 +1175,7 @@ def fill_missing_project_ruby(project: Any, helper: Any) -> list[dict[str, Any]]
             )
             if len(analyzed_chars) != len(original_chars):
                 raise RubyValidationError("whole-sentence ruby alignment failed")
+            _clear_word_links_at_boundaries(analyzed_chars)
 
             start = 0
             while start < len(analyzed_chars):
@@ -1172,6 +1192,7 @@ def fill_missing_project_ruby(project: Any, helper: Any) -> list[dict[str, Any]]
                 )
                 if (
                     any(_character_has_ruby(character) for character in source_chain)
+                    or _is_word_link_boundary_text(surface)
                     or is_pure_katakana(surface)
                     or not any(
                         _character_has_ruby(character)

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import unicodedata
+
+import pytest
+
 from scripts.sug_ruby import (
     RUBY_REVIEW_SCHEMA,
     apply_review_patches,
@@ -183,6 +187,220 @@ def test_whole_sentence_fill_preserves_words_existing_ruby_and_timing():
     assert sentence.characters[2].ruby is existing
     assert sentence.characters[2].ruby.text == "あめ"
     assert all(character.ruby is None for character in sentence.characters[3:])
+    assert timing_fingerprint(project) == before_timing
+
+
+@pytest.mark.parametrize(
+    ("opening", "closing"),
+    [("(", ")"), ("（", "）"), ("「", "」"), ("『", "』"), ("《", "》")],
+)
+def test_whole_sentence_fill_breaks_ruby_groups_at_paired_punctuation(opening, closing):
+    text = f"今日{opening}きょう{closing}晴{opening}は{closing}れる明日"
+    sentence = Sentence(
+        id="sentence-1",
+        singer_id="singer-1",
+        characters=[
+            Character(char=char, check_count=1, timestamps=[1_000 + index * 100])
+            for index, char in enumerate(text)
+        ],
+    )
+    project = Project(
+        id="project-1",
+        sentences=[sentence],
+        metadata=ProjectMetadata(language="ja"),
+    )
+    before_timing = timing_fingerprint(project)
+
+    class SentenceService:
+        def apply_to_sentence(self, analyzed, **kwargs):
+            assert analyzed.text == text
+            boundary_indices = [
+                index
+                for index, char in enumerate(analyzed.text)
+                if char in {opening, closing}
+            ]
+            for index in boundary_indices:
+                analyzed.characters[index].linked_to_next = True
+                analyzed.characters[index - 1].linked_to_next = True
+
+            analyzed.characters[0].ruby = Ruby(parts=[RubyPart(text="きょう")])
+            analyzed.characters[0].linked_to_next = True
+
+            hare = text.index("晴")
+            analyzed.characters[hare].ruby = Ruby(parts=[RubyPart(text="は")])
+            analyzed.characters[hare].linked_to_next = True
+
+            tomorrow = text.index("明日")
+            analyzed.characters[tomorrow].ruby = Ruby(parts=[RubyPart(text="あ")])
+            analyzed.characters[tomorrow].linked_to_next = True
+            analyzed.characters[tomorrow + 1].ruby = Ruby(parts=[RubyPart(text="した")])
+
+    records = fill_missing_project_ruby(project, SentenceService())
+
+    assert sentence.text == text
+    assert [(span.surface, span.reading) for span in iter_sug_ruby_spans(project)] == [
+        ("今日", "きょう"),
+        ("晴", "は"),
+        ("明日", "あした"),
+    ]
+    assert sentence.characters[0].linked_to_next is True
+    assert sentence.characters[text.index("晴")].linked_to_next is False
+    assert [record["surface"] for record in records] == ["今日", "晴", "明日"]
+    assert timing_fingerprint(project) == before_timing
+
+
+@pytest.mark.parametrize(
+    ("separator", "category"),
+    [
+        ("―", "Pd"),
+        ("・", "Po"),
+        ("、", "Po"),
+        ("。", "Po"),
+        ("〜", "Pd"),
+        ("～", "Sm"),
+        ("♪", "So"),
+    ],
+)
+def test_whole_sentence_fill_breaks_ruby_groups_at_punctuation_and_symbols(
+    separator, category
+):
+    text = f"晴{separator}れる明日"
+    sentence = Sentence(
+        id="sentence-1",
+        singer_id="singer-1",
+        characters=[Character(char=char, timestamps=[1_000]) for char in text],
+    )
+    project = Project(
+        id="project-1",
+        sentences=[sentence],
+        metadata=ProjectMetadata(language="ja"),
+    )
+
+    class SentenceService:
+        def apply_to_sentence(self, analyzed, **kwargs):
+            analyzed.characters[0].ruby = Ruby(parts=[RubyPart(text="は")])
+            analyzed.characters[0].linked_to_next = True
+            analyzed.characters[1].linked_to_next = True
+            tomorrow = text.index("明日")
+            analyzed.characters[tomorrow].ruby = Ruby(parts=[RubyPart(text="あ")])
+            analyzed.characters[tomorrow].linked_to_next = True
+            analyzed.characters[tomorrow + 1].ruby = Ruby(parts=[RubyPart(text="した")])
+
+    records = fill_missing_project_ruby(project, SentenceService())
+
+    assert unicodedata.category(separator) == category
+    assert [(span.surface, span.reading) for span in iter_sug_ruby_spans(project)] == [
+        ("晴", "は"),
+        ("明日", "あした"),
+    ]
+    assert sentence.characters[0].linked_to_next is False
+    assert [record["surface"] for record in records] == ["晴", "明日"]
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected_category"),
+    [(" ", None), ("・", "Po"), ("♪", "So")],
+)
+def test_whole_sentence_fill_rejects_ruby_assigned_to_boundary_character(
+    boundary, expected_category
+):
+    text = f"前{boundary}後"
+    sentence = Sentence(
+        id="sentence-1",
+        singer_id="singer-1",
+        characters=[
+            Character(
+                char=char,
+                check_count=0 if char.isspace() else 1,
+                timestamps=[] if char.isspace() else [1_000],
+            )
+            for char in text
+        ],
+    )
+    project = Project(
+        id="project-1",
+        sentences=[sentence],
+        metadata=ProjectMetadata(language="ja"),
+    )
+    before_links = [character.linked_to_next for character in sentence.characters]
+    before_timing = timing_fingerprint(project)
+
+    class SentenceService:
+        def apply_to_sentence(self, analyzed, **kwargs):
+            analyzed.characters[0].linked_to_next = True
+            analyzed.characters[1].ruby = Ruby(parts=[RubyPart(text="きょうかい")])
+            analyzed.characters[1].linked_to_next = True
+
+    records = fill_missing_project_ruby(project, SentenceService())
+
+    if expected_category is None:
+        assert boundary.isspace()
+    else:
+        assert unicodedata.category(boundary) == expected_category
+    assert records == []
+    assert sentence.characters[1].ruby is None
+    assert [character.linked_to_next for character in sentence.characters] == before_links
+    assert timing_fingerprint(project) == before_timing
+
+
+@pytest.mark.parametrize("mark", ["ー", "ｰ", "々"])
+def test_whole_sentence_fill_preserves_allowed_word_marks(mark):
+    text = f"語{mark}"
+    sentence = Sentence(
+        id="sentence-1",
+        singer_id="singer-1",
+        characters=[Character(char=char, timestamps=[1_000]) for char in text],
+    )
+    project = Project(
+        id="project-1",
+        sentences=[sentence],
+        metadata=ProjectMetadata(language="ja"),
+    )
+
+    class SentenceService:
+        def apply_to_sentence(self, analyzed, **kwargs):
+            analyzed.characters[0].ruby = Ruby(parts=[RubyPart(text="ご")])
+            analyzed.characters[0].linked_to_next = True
+
+    records = fill_missing_project_ruby(project, SentenceService())
+
+    assert [(span.surface, span.reading) for span in iter_sug_ruby_spans(project)] == [
+        (text, "ご")
+    ]
+    assert sentence.characters[0].linked_to_next is True
+    assert [record["surface"] for record in records] == [text]
+
+
+def test_whole_sentence_fill_preserves_existing_human_ruby_and_links():
+    existing = Ruby(parts=[RubyPart(text="きょう")])
+    text = "今日（きょう）"
+    sentence = Sentence(
+        id="sentence-1",
+        singer_id="singer-1",
+        characters=[Character(char=char, timestamps=[1_000]) for char in text],
+    )
+    sentence.characters[0].ruby = existing
+    for index in (0, 1, 2, 5):
+        sentence.characters[index].linked_to_next = True
+    before_links = [character.linked_to_next for character in sentence.characters]
+    project = Project(
+        id="project-1",
+        sentences=[sentence],
+        metadata=ProjectMetadata(language="ja"),
+    )
+    before_timing = timing_fingerprint(project)
+
+    class SentenceService:
+        def apply_to_sentence(self, analyzed, **kwargs):
+            analyzed.characters[0].ruby = Ruby(parts=[RubyPart(text="machine")])
+            for character in analyzed.characters:
+                character.linked_to_next = True
+
+    assert fill_missing_project_ruby(project, SentenceService()) == []
+    assert sentence.characters[0].ruby is existing
+    assert sentence.characters[0].ruby.text == "きょう"
+    assert all(character.ruby is None for character in sentence.characters[1:])
+    assert [character.linked_to_next for character in sentence.characters] == before_links
     assert timing_fingerprint(project) == before_timing
 
 

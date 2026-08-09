@@ -1390,10 +1390,14 @@ def _semantic_gap_after_indices(
     return frozenset(result)
 
 
+_JAPANESE_OPENING_PAIRED_CHARS = frozenset("(（[［{｛｟【「『〈《〔〖〘〚〝“‘")
+_JAPANESE_CLOSING_PAIRED_CHARS = frozenset(")）]］}｝｠】」』〉》〕〗〙〛〟”’")
 _BAD_DISPLAY_BOUNDARY_START_CHARS = frozenset(
     "・ーぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ"
+) | _JAPANESE_CLOSING_PAIRED_CHARS
+_BAD_DISPLAY_BOUNDARY_END_CHARS = (
+    frozenset("・ーっッ") | _JAPANESE_OPENING_PAIRED_CHARS
 )
-_BAD_DISPLAY_BOUNDARY_END_CHARS = frozenset("・ーっッ")
 _JAPANESE_CONTINUATION_BLOCKS = frozenset(
     {"けど", "けれど", "から", "ので", "のに", "ても", "なら", "たら", "れば"}
 )
@@ -1434,6 +1438,11 @@ def _is_protected_display_boundary(
         return False
     left = characters[position - 1]
     right = characters[position]
+    if (
+        left.char in _JAPANESE_OPENING_PAIRED_CHARS
+        or right.char in _JAPANESE_CLOSING_PAIRED_CHARS
+    ):
+        return True
     if bool(getattr(left, "linked_to_next", False)):
         return True
     if is_pure_katakana(left.char) and is_pure_katakana(right.char):
@@ -1791,6 +1800,32 @@ def _join_short_display_runs(
             index += 1
             continue
 
+        right_donor_has_paired_boundary = (
+            index + 1 < len(result)
+            and needed < len(result[index + 1])
+            and (
+                result[index + 1][needed - 1].char
+                in _JAPANESE_OPENING_PAIRED_CHARS
+                or result[index + 1][needed].char
+                in _JAPANESE_CLOSING_PAIRED_CHARS
+            )
+        )
+        left_donor_has_paired_boundary = (
+            index > 0
+            and needed < len(result[index - 1])
+            and (
+                result[index - 1][-needed - 1].char
+                in _JAPANESE_OPENING_PAIRED_CHARS
+                or result[index - 1][-needed].char
+                in _JAPANESE_CLOSING_PAIRED_CHARS
+            )
+        )
+        if right_donor_has_paired_boundary or left_donor_has_paired_boundary:
+            # Keep the short phrase when borrowing would leave an opening mark
+            # at line end or a closing mark at the following line start.
+            index += 1
+            continue
+
         if (
             index == len(result) - 1
             and index > 0
@@ -1882,6 +1917,29 @@ def _split_sentence_character_runs(
     return _coalesce_display_runs_that_fit(runs, max_chars=max_chars)
 
 
+def _repair_japanese_paired_boundaries(runs: list[list]) -> list[list]:
+    """Move paired punctuation across source-space boundaries for kinsoku."""
+
+    result = [list(run) for run in runs if run]
+    index = 0
+    while index + 1 < len(result):
+        left = result[index]
+        right = result[index + 1]
+        while left and left[-1].char in _JAPANESE_OPENING_PAIRED_CHARS:
+            right.insert(0, left.pop())
+        while right and right[0].char in _JAPANESE_CLOSING_PAIRED_CHARS:
+            left.append(right.pop(0))
+        if not left:
+            result.pop(index)
+            index = max(0, index - 1)
+            continue
+        if not right:
+            result.pop(index + 1)
+            continue
+        index += 1
+    return result
+
+
 def _split_japanese_whitespace_runs(
     sentence: Sentence,
     *,
@@ -1942,6 +2000,7 @@ def _split_japanese_whitespace_runs(
         # across a reviewed whitespace boundary. Keep it intact when neither
         # neighbouring semantic block can be merged whole.
         index += 1
+    runs = _repair_japanese_paired_boundaries(runs)
     # Joining complete blocks is safe; moving individual characters between
     # them is not. In particular, do not turn ``降り出す前に 帰る場所を``
     # into ``降り出す前 | に帰る場所を`` merely to satisfy a minimum length.

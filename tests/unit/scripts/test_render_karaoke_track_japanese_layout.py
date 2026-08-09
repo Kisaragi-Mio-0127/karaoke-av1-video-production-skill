@@ -479,6 +479,174 @@ def test_required_split_never_cuts_a_canonical_ruby_span():
         assert not sentence.characters[cursor - 1].linked_to_next
 
 
+@pytest.mark.parametrize(
+    ("opening", "closing"),
+    [
+        ("(", ")"),
+        ("（", "）"),
+        ("[", "]"),
+        ("［", "］"),
+        ("{", "}"),
+        ("｛", "｝"),
+        ("｟", "｠"),
+        ("【", "】"),
+        ("「", "」"),
+        ("『", "』"),
+        ("〈", "〉"),
+        ("《", "》"),
+        ("〔", "〕"),
+        ("〖", "〗"),
+        ("〘", "〙"),
+        ("〚", "〛"),
+        ("〝", "〟"),
+        ("“", "”"),
+        ("‘", "’"),
+    ],
+)
+def test_required_split_preserves_paired_text_and_obeys_kinsoku(
+    opening: str,
+    closing: str,
+):
+    texts = (
+        f"春夏秋冬東西南{opening}本文{closing}天地玄黄",
+        f"春夏秋{opening}本文内容{closing}東西南北天地",
+    )
+
+    for text in texts:
+        phrases = renderer.split_sentence_for_display(
+            _sentence(text),
+            max_chars=8,
+            language="ja",
+        )
+        rendered_runs = [phrase.text for phrase in phrases]
+
+        assert "".join(rendered_runs) == text
+        assert all(not run.endswith(opening) for run in rendered_runs[:-1])
+        assert all(not run.startswith(closing) for run in rendered_runs[1:])
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "春夏秋冬東西南（ 本文内容天地玄黄",
+            ["春夏秋冬東西南", "（本文内容天地玄黄"],
+        ),
+        (
+            "春夏秋冬東西南北 ）本文内容天地玄",
+            ["春夏秋冬東西南北）", "本文内容天地玄"],
+        ),
+    ],
+)
+def test_whitespace_split_repairs_paired_punctuation_boundary(
+    text: str,
+    expected: list[str],
+):
+    sentence = _sentence(text)
+    source_characters = [
+        character for character in sentence.characters if not character.char.isspace()
+    ]
+
+    phrases = renderer.split_sentence_for_display(
+        sentence,
+        max_chars=8,
+        language="ja",
+    )
+    output_characters = [
+        character for phrase in phrases for character in phrase.characters
+    ]
+
+    assert [phrase.text for phrase in phrases] == expected
+    assert output_characters == source_characters
+    assert all(
+        output is source
+        for output, source in zip(output_characters, source_characters, strict=True)
+    )
+
+
+@pytest.mark.parametrize(
+    "runs",
+    [
+        ("春夏秋冬", "東西）本文内容天地玄黄"),
+        ("春夏秋冬東西南北（本文", "天地玄黄"),
+    ],
+)
+def test_short_run_donor_never_creates_paired_punctuation_boundary(
+    runs: tuple[str, str],
+):
+    sentences = [_sentence(text) for text in runs]
+    source_characters = [
+        character for sentence in sentences for character in sentence.characters
+    ]
+
+    result = renderer._join_short_display_runs(
+        [list(sentence.characters) for sentence in sentences],
+        max_chars=8,
+    )
+    output_characters = [character for run in result for character in run]
+    rendered_runs = ["".join(character.char for character in run) for run in result]
+
+    assert len(result) == 2
+    assert all(
+        run[-1].char not in renderer._JAPANESE_OPENING_PAIRED_CHARS
+        for run in result[:-1]
+    )
+    assert all(
+        run[0].char not in renderer._JAPANESE_CLOSING_PAIRED_CHARS
+        for run in result[1:]
+    )
+    assert "".join(rendered_runs) == "".join(runs)
+    assert output_characters == source_characters
+    assert all(
+        output is source
+        for output, source in zip(output_characters, source_characters, strict=True)
+    )
+
+
+def test_complete_parenthesized_text_participates_in_width_measurement(monkeypatch):
+    text = "春夏（正文）東西"
+    measured_texts: list[str] = []
+
+    def measured_text_span(_font_file, measured_text, **_kwargs):
+        measured_texts.append(measured_text)
+        return renderer.WIDE_LAYOUT.slot_width - 20
+
+    monkeypatch.setattr(renderer, "_measured_text_span", measured_text_span)
+
+    phrases = renderer.split_sentence_for_display(
+        _sentence(text),
+        max_chars=renderer.WIDE_LAYOUT.max_phrase_chars,
+        language="ja",
+        font_file=Path("synthetic-font.ttf"),
+        layout=renderer.WIDE_LAYOUT,
+    )
+
+    assert measured_texts == [text]
+    assert [phrase.text for phrase in phrases] == [text]
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        ("春夏秋冬東西（", "本文内容）明日へ"),
+        ("春夏秋冬（本文", "）明日へ歩いて"),
+    ],
+)
+def test_display_override_rejects_paired_punctuation_kinsoku(
+    left: str,
+    right: str,
+):
+    text = left + right
+
+    with pytest.raises(ValueError, match="bad Japanese phrase boundary"):
+        renderer.split_sentence_for_display(
+            _sentence(text),
+            max_chars=8,
+            language="ja",
+            display_phrase_overrides={text: (left, right)},
+        )
+
+
 def test_required_split_never_starts_next_phrase_with_particle_when_other_candidates_are_protected(
     monkeypatch,
 ):

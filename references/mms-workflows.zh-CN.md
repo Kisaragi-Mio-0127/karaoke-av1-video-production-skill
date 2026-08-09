@@ -23,9 +23,11 @@ preflight -> MSST vocal stem -> private initial SUG -> MMS audit/build
 
 输出根目录必须不存在，且必须位于项目的`.render-work`目录下。运行绝不会覆盖清单、冻结歌词源、规范SUG、已接受媒体或模型文件。
 
-命令中展示的四项输入是必需项，美术参数是可选项。`--cover`可显式指定图片；否则流程会优先复用标准交付目录中的`cover.jpg`，不存在时再读取所选封面音频的内嵌图片。`--background`、`--composition`和`--cover-source-audio`是显式的高级覆盖项。
+清单、歌曲ID、新输出目录和一种歌词输入是必需项。冻结JSON或网易刷新目标使用`--source`，手工UTF-8 LRC/TXT使用`--lyrics-file`。美术参数是可选项。`--cover`可显式指定图片；否则流程会优先复用标准交付目录中的`cover.jpg`，不存在时再读取所选封面音频的内嵌图片。`--background`、`--composition`和`--cover-source-audio`是显式的高级覆盖项。
 
 默认沿用冻结歌词源。需要主动从网易刷新当前单曲时，显式加入`--refresh-source`，此时`--source`是刷新后JSON的写入位置；脚本会读取受支持的音频内嵌歌曲ID，也可用`--netease-song-id <数字ID>`覆盖。不带刷新参数时不发起歌词网络请求。
+
+带时间戳的LRC保持原内容。纯文本按非空行生成歌词行，并在对齐前按音频时长生成均匀粗时间锚点；生成时间轴需要后续复核。
 
 专辑显示信息默认读取音频标签，缺失时回退到歌曲名和歌手。变调或无标签的交付音频可用`--metadata-source-audio`指定原始带标签音频。每次成功渲染还会在`render/editable-project`下写出媒体路径已校验的可编辑SUG。
 

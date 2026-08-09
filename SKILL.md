@@ -1,6 +1,6 @@
 ---
 name: karaoke-av1-video-production
-description: Produce, rerender, package, or debug Japanese karaoke videos and editable SUG timing projects with local audio, frozen lyrics, MSST/MMS evidence, automatic layout generation, subtitle validation, and AV1 4:2:0 MP4 release checks. Use for a new Japanese full-auto run, a reviewed-SUG rerender, staged Japanese MMS recovery, or generic AV1 packaging. Do not use for TTS, voice cloning, music generation, vocal separation, or standalone lyric transcription.
+description: Produce, rerender, package, or debug Japanese karaoke videos and editable SUG timing projects with local audio, frozen JSON or manual LRC/TXT lyrics, MSST/MMS evidence, automatic layout generation, subtitle validation, and AV1 4:2:0 MP4 release checks. Use for a new Japanese full-auto run, a reviewed-SUG rerender, staged Japanese MMS recovery, or generic AV1 packaging. Do not use for TTS, voice cloning, music generation, vocal separation, or standalone lyric transcription.
 ---
 
 # Karaoke AV1 Video Production
@@ -73,6 +73,11 @@ The workflow reads a numeric song ID from supported NetEase audio metadata;
 `--netease-song-id <numeric-id>` remains an explicit override. Without the
 refresh flag, no lyric network request is made.
 
+When no frozen JSON exists, pass `--lyrics-file <lyrics.lrc|lyrics.txt>` instead
+of `--source`. Timestamped LRC is preserved. UTF-8 plain text uses one non-empty
+line per lyric line and receives uniform coarse anchors across the audio before
+acoustic alignment; treat its timing as review-required evidence.
+
 Inspect local song, track-artist, and album identity without a network request:
 
 ```powershell
@@ -83,7 +88,8 @@ Add `--fetch-album` to that identity command only when an explicit NetEase
 album-detail request is wanted. It adds album artists and album size while
 keeping track artists separate.
 
-The four command inputs above are required. Artwork options are optional:
+The manifest, song ID, new output directory, and exactly one lyric input
+(`--source` or `--lyrics-file`) are required. Artwork options are optional:
 `--cover` selects an explicit image; otherwise the workflow reuses the standard
 deliverable `cover.jpg` when present, then checks the selected cover audio for
 an embedded image. Advanced overrides include `--background`, `--composition`,

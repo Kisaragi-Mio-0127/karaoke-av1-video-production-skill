@@ -93,7 +93,7 @@ python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --next
 
 ## 项目配置
 
-使用已授权的清单和冻结歌词源。选定歌曲、音频、字体、模型路径和新的私有输出位置必须在生产开始前有效。除非显式使用`--refresh-source`授权单曲刷新，否则歌词源文件必须已经存在；省略`--netease-song-id`时，脚本会读取受支持的音频内嵌网易歌曲ID。保持规范SUG、冻结歌词、私有证据、companion SUG和交付媒体彼此分离。
+使用已授权的清单和一种显式歌词输入。选定歌曲、音频、字体、模型路径和新的私有输出位置必须在生产开始前有效。除非显式使用`--refresh-source`授权单曲刷新，否则歌词源文件必须已经存在；省略`--netease-song-id`时，脚本会读取受支持的音频内嵌网易歌曲ID。手工UTF-8歌词可用`--lyrics-file <lyrics.lrc|lyrics.txt>`替代`--source`；纯文本会生成均匀粗时间锚点并进入时间复核状态。保持规范SUG、冻结歌词、私有证据、companion SUG和交付媒体彼此分离。
 
 默认日文流程使用项目自有的MMS和Whisper路径。生产CLI可以显式覆盖路径，但覆盖不授权网络下载。注音验证仍是可选项。日文分阶段、直接渲染和批量CLI提供`--pronunciation-validation {off,optional,required}`，默认是`optional`；full-auto不要求这个sidecar。
 
@@ -102,7 +102,7 @@ python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> --next
 公开日文生产顺序如下：
 
 ```text
-manifest + song-id + frozen lyric source + new output directory
+manifest + song-id + one lyric source + new output directory
 -> MSST -> private initial SUG -> Japanese MMS
 -> editable companion SUG -> current layout -> AV1 MP4
 -> relocatable editable SUG
@@ -117,6 +117,8 @@ manifest + song-id + frozen lyric source + new output directory
 ```powershell
 uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --output-dir .render-work/<new-run-dir> --device auto
 ```
+
+使用手工歌词时，将`--source <frozen-lyrics.json>`替换为`--lyrics-file <lyrics.lrc|lyrics.txt>`。
 
 需要选择实验性、仅限日文的后端时，加入`--mms-backend nextfire-ja-latn`。常规双音轨审核以及`auto-fallback`/`strict`策略仍然生效。
 

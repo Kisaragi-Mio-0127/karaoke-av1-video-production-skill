@@ -32,6 +32,9 @@ into the `--source` destination. The command reads a supported embedded song
 ID unless `--netease-song-id <numeric-id>` is supplied. Album display
 metadata defaults to audio tags and then the song title/artist; use
 `--metadata-source-audio` for transformed or tagless delivery audio.
+When no frozen JSON exists, use `--lyrics-file <lyrics.lrc|lyrics.txt>` in its
+place. LRC timestamps are preserved; plain UTF-8 text receives uniform coarse
+anchors before acoustic alignment and remains timing-review input.
 
 The existing `scripts/run_karaoke_japanese_workflow.py` has a different role:
 it directly rerenders an existing adjusted or reviewed SUG and does not run
@@ -177,6 +180,9 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
   --output-dir <new-private-output-dir> `
   --quality-policy auto-fallback
 ```
+
+Replace `--source <frozen-lyrics.json>` with
+`--lyrics-file <lyrics.lrc|lyrics.txt>` for a manually supplied lyric file.
 
 To explicitly exercise the experimental Japanese-only backend, add
 `--mms-backend nextfire-ja-latn`. The same dual-audio audit and

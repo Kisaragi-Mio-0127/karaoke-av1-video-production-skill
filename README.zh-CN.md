@@ -6,7 +6,7 @@
 
 ## 可以自动完成什么
 
-推荐的日文入口是单命令`scripts/run_karaoke_japanese_full_auto.py`。给定清单、歌曲ID、冻结歌词和新的输出目录后，它会：
+推荐的日文入口是单命令`scripts/run_karaoke_japanese_full_auto.py`。给定清单、歌曲ID、歌词输入和新的输出目录后，它会：
 
 - 准备选中歌曲的MSST人声分轨；
 - 生成私有初始SUG；
@@ -17,6 +17,8 @@
 默认质量策略是`auto-fallback`。流程采用可用的高置信度MMS时间，同时让低置信度或未解决单元保留规范时间，并在报告中保留证据。companion SUG生成后，人工或Agent校轴是可选后续，不是自动流程的前置条件。
 
 默认使用冻结歌词源。只有显式加入`--refresh-source`时，才会从网易刷新所选歌曲并写入`--source`指定的新JSON；脚本会从受支持的网易音频标签读取歌曲ID，也可用`--netease-song-id <数字ID>`覆盖。不带刷新参数时不会请求在线歌词。`karaoke_netease_metadata.py <音频> --identity --fetch-album`会在显式要求时查询专辑详情，补充专辑作者与专辑规模，并与曲目歌手分开保存。专辑显示信息默认读取音频标签，缺失时回退到歌曲名和歌手。变调或无标签的交付音频可用`--metadata-source-audio`指定原始带标签音频。
+
+缺少冻结JSON时，可改用`--lyrics-file <lyrics.lrc|lyrics.txt>`。LRC时间戳会原样保留；UTF-8纯文本按非空行生成歌词行，并在声学对齐前按音频时长生成均匀粗时间锚点，这类时间轴需要后续复核。
 
 现有的`scripts/run_karaoke_japanese_workflow.py`用途不同：它直接重新渲染已有的调整后或复核后的SUG，不运行MSST或MMS。底层的`scripts/run_karaoke_japanese_mms_workflow.py`用于分阶段审计、恢复和门禁检查。
 
@@ -105,6 +107,8 @@ uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py `
   --output-dir <new-private-output-dir> `
   --quality-policy auto-fallback
 ```
+
+手工歌词文件可将`--source <frozen-lyrics.json>`替换为`--lyrics-file <lyrics.lrc|lyrics.txt>`。
 
 需要显式试用实验性日文后端时，加入`--mms-backend nextfire-ja-latn`。同一套双音轨审核以及`auto-fallback`/`strict`质量策略仍然适用。
 

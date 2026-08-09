@@ -98,6 +98,7 @@ class FullAutoPlan:
     track: AlbumTrack
     manifest: Path
     source: Path
+    lyrics_file: Path | None
     output_dir: Path
     initial_root: Path
     initial_sug: Path
@@ -132,6 +133,72 @@ def _require_model_path(path: Path, models_root: Path, label: str) -> Path:
     return resolved
 
 
+def _manual_lyrics_source(plan: FullAutoPlan) -> dict[str, Any] | None:
+    lyrics_file = plan.lyrics_file
+    if lyrics_file is None:
+        return None
+    try:
+        raw_lyrics = lyrics_file.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise FullAutoError(
+            f"manual lyrics must be UTF-8 text: {lyrics_file}"
+        ) from error
+
+    parsed_entries = karaoke_timing.parse_lrc(raw_lyrics)
+    if lyrics_file.suffix.casefold() == ".lrc" or parsed_entries:
+        if not any(entry.text.strip() for entry in parsed_entries):
+            raise FullAutoError(
+                f"manual LRC contains no timestamped lyric lines: {lyrics_file}"
+            )
+        normalized_lrc = raw_lyrics
+        timing_mode = "provided-lrc"
+        line_count = sum(1 for entry in parsed_entries if entry.text.strip())
+    else:
+        lines = [line.strip() for line in raw_lyrics.splitlines() if line.strip()]
+        if not lines:
+            raise FullAutoError(f"manual text lyrics contain no lyric lines: {lyrics_file}")
+        _duration_seconds, duration_ms = karaoke_timing.read_mutagen_duration(
+            plan.track.audio_path
+        )
+        if duration_ms <= 0:
+            raise FullAutoError(
+                f"selected audio has no usable duration: {plan.track.audio_path}"
+            )
+        generated_lines: list[str] = []
+        for index, line in enumerate(lines):
+            timestamp_ms = duration_ms * index // len(lines)
+            minutes, remainder = divmod(timestamp_ms, 60_000)
+            seconds, milliseconds = divmod(remainder, 1_000)
+            generated_lines.append(
+                f"[{minutes:02d}:{seconds:02d}.{milliseconds:03d}]{line}"
+            )
+        normalized_lrc = "\n".join(generated_lines) + "\n"
+        timing_mode = "uniform-coarse-anchors"
+        line_count = len(lines)
+
+    source_document = {
+        "schema_version": "manual-lyrics-source/v1",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "input": {
+            "path": str(lyrics_file),
+            "format": lyrics_file.suffix.casefold().removeprefix("."),
+            "timing_mode": timing_mode,
+            "line_count": line_count,
+        },
+        "songs": {
+            plan.track.song_id: {
+                "song_id": plan.track.song_id,
+                "title": plan.track.title,
+                "artist": plan.track.artist,
+                "audio_file": plan.track.audio_path.name,
+                "lrc": normalized_lrc,
+            }
+        },
+    }
+    _write_report(plan.source, source_document)
+    return dict(source_document["input"])
+
+
 def build_plan(
     args: argparse.Namespace,
     *,
@@ -147,9 +214,29 @@ def build_plan(
     except KaraokeWorkflowError as error:
         raise FullAutoError(str(error)) from error
     manifest = args.manifest.expanduser().resolve()
-    source = args.source.expanduser().resolve()
+    output_dir = args.output_dir.expanduser().resolve()
+    source_argument = getattr(args, "source", None)
+    lyrics_argument = getattr(args, "lyrics_file", None)
+    if args.refresh_source and lyrics_argument is not None:
+        raise FullAutoError("--refresh-source cannot be used with --lyrics-file")
+    if args.refresh_source and source_argument is None:
+        raise FullAutoError("--refresh-source requires --source as its JSON destination")
+    if source_argument is None and lyrics_argument is None:
+        raise FullAutoError("one of --source or --lyrics-file is required")
+    if source_argument is not None and lyrics_argument is not None:
+        raise FullAutoError("--source and --lyrics-file cannot be used together")
+    lyrics_file = (
+        lyrics_argument.expanduser().resolve()
+        if lyrics_argument is not None
+        else None
+    )
+    source = (
+        source_argument.expanduser().resolve()
+        if source_argument is not None
+        else (output_dir / "inputs" / "manual-lyrics.json").resolve()
+    )
     _require_file(manifest, "manifest")
-    if not args.refresh_source:
+    if lyrics_file is None and not args.refresh_source:
         _require_file(source, "frozen lyric source")
     for label, optional_path in (
         ("explicit composition", args.composition),
@@ -158,6 +245,7 @@ def build_plan(
         ("background video", args.background_video),
         ("explicit cover source audio", args.cover_source_audio),
         ("explicit metadata source audio", args.metadata_source_audio),
+        ("manual lyrics file", lyrics_file),
     ):
         if optional_path is not None:
             _require_file(optional_path.expanduser().resolve(), label)
@@ -174,7 +262,9 @@ def build_plan(
             f"this entry supports only {expected}; {track.song_id} is {track.language}"
         )
     _require_file(track.audio_path.resolve(), "selected mix audio")
-    if source.is_file() and not args.refresh_source:
+    if lyrics_file is not None and lyrics_file.suffix.casefold() not in {".lrc", ".txt"}:
+        raise FullAutoError("--lyrics-file supports only .lrc or .txt files")
+    if source.is_file() and lyrics_file is None and not args.refresh_source:
         source_document = json.loads(source.read_text(encoding="utf-8"))
         songs = (
             source_document.get("songs")
@@ -201,7 +291,6 @@ def build_plan(
 
     project_root = album.project_root.resolve()
     private_root = (project_root / ".render-work").resolve()
-    output_dir = args.output_dir.expanduser().resolve()
     if output_dir.exists():
         raise FullAutoError(f"output directory already exists: {output_dir}")
     if output_dir == private_root or not _is_relative_to(output_dir, private_root):
@@ -250,6 +339,7 @@ def build_plan(
         track=track,
         manifest=manifest,
         source=source,
+        lyrics_file=lyrics_file,
         output_dir=output_dir,
         initial_root=initial_root,
         initial_sug=initial_sug,
@@ -369,10 +459,18 @@ def run_full_auto(
         "resolved_device": None,
         "netease_song_id": plan.netease_song_id,
         "netease_song_id_source": plan.netease_song_id_source,
+        "lyrics_input": "manual-file" if plan.lyrics_file is not None else (
+            "netease-refresh" if args.refresh_source else "frozen-json"
+        ),
         "stages": [],
         "outputs": {},
     }
     try:
+        manual_lyrics = _manual_lyrics_source(plan)
+        if manual_lyrics is not None:
+            report["stages"].append(
+                {"name": "manual-lyrics-source", "status": "ok", **manual_lyrics}
+            )
         stems = msst.prepare(
             [plan.track.audio_path], force=False, manifest=plan.album
         )
@@ -446,11 +544,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--song-id", required=True)
-    parser.add_argument("--source", type=Path, required=True)
+    lyrics_input = parser.add_mutually_exclusive_group()
+    lyrics_input.add_argument(
+        "--source",
+        type=Path,
+        help="frozen lyric JSON, or the JSON destination used with --refresh-source",
+    )
+    lyrics_input.add_argument(
+        "--lyrics-file",
+        type=Path,
+        help=(
+            "manual UTF-8 .lrc or .txt lyrics; plain text receives uniform "
+            "coarse timing anchors before acoustic alignment"
+        ),
+    )
     parser.add_argument(
         "--refresh-source",
         action="store_true",
-        help="explicitly refresh the selected lyric source from NetEase",
+        help="refresh --source from NetEase; requires --source",
     )
     parser.add_argument(
         "--netease-song-id",

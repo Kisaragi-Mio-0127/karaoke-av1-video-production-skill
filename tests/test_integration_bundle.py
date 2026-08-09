@@ -133,6 +133,7 @@ def test_full_auto_keeps_zh_en_route_import_lazy() -> None:
         "--composition",
         "--cover-source-audio",
         "--netease-song-id",
+        "--lyrics-file",
         "--output-mode",
         "--background-video",
     ):

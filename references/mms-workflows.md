@@ -26,9 +26,11 @@ The output root must not exist and must stay below the project's
 `.render-work` directory. The run never overwrites the manifest, frozen lyric
 source, canonical SUG, accepted media, or model files.
 
-The four shown inputs are required. Artwork is optional: `--cover` selects an
-explicit image; otherwise the standard deliverable `cover.jpg` is reused when
-present, followed by an embedded-cover lookup in the selected cover audio.
+The manifest, song ID, new output directory, and exactly one lyric input are
+required. Use `--source` for frozen JSON or a NetEase refresh destination, or
+use `--lyrics-file` for a manual UTF-8 LRC/TXT file. Artwork is optional:
+`--cover` selects an explicit image; otherwise the standard deliverable
+`cover.jpg` is reused when present, followed by an embedded-cover lookup in the selected cover audio.
 `--background`, `--composition`, and `--cover-source-audio` are advanced
 explicit overrides.
 
@@ -37,6 +39,10 @@ NetEase, add `--refresh-source`; `--source` becomes the destination for the
 refreshed JSON. The workflow reads a supported embedded song ID unless
 `--netease-song-id <numeric-id>` is supplied. Without the refresh flag, the
 full-auto route performs no lyric network request.
+
+Timestamped LRC is preserved. Plain text uses each non-empty line as one lyric
+line and receives uniform coarse anchors across the audio before alignment.
+Keep the resulting timing in review-required state.
 
 Album display metadata is read from audio tags by default and falls back to
 the song title and artist. Use `--metadata-source-audio` for transformed or

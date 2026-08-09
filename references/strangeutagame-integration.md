@@ -145,11 +145,13 @@ drivers.
 
 ## Project configuration
 
-Use an authorized manifest and frozen lyric source. The selected track, audio,
+Use an authorized manifest and one explicit lyric source. The selected track, audio,
 fonts, model paths, and new private output location must be valid before
 production starts. The source file must already exist unless an explicit
 `--refresh-source` authorizes a single-song refresh. When
 `--netease-song-id` is omitted, the command reads a supported embedded song ID.
+Use `--lyrics-file <lyrics.lrc|lyrics.txt>` instead of `--source` for manual
+UTF-8 lyrics. Plain text receives uniform coarse anchors and requires timing review.
 Keep canonical SUG, frozen lyrics, private evidence,
 companion SUG, and delivery media separate.
 
@@ -165,7 +167,7 @@ default; full-auto does not require the sidecar.
 The public Japanese production order is:
 
 ```text
-manifest + song-id + frozen lyric source + new output directory
+manifest + song-id + one lyric source + new output directory
 -> MSST -> private initial SUG -> Japanese MMS
 -> editable companion SUG -> current layout -> AV1 MP4
 -> relocatable editable SUG
@@ -183,6 +185,9 @@ Run the normal first command from the StrangeUtaGame project root:
 ```powershell
 uv run --no-sync python scripts/run_karaoke_japanese_full_auto.py --manifest <manifest> --song-id <song-id> --source <frozen-lyrics.json> --output-dir .render-work/<new-run-dir> --device auto
 ```
+
+For manual lyrics, replace `--source <frozen-lyrics.json>` with
+`--lyrics-file <lyrics.lrc|lyrics.txt>`.
 
 To select the experimental Japanese-only backend, add
 `--mms-backend nextfire-ja-latn`. The normal dual-audio audit and

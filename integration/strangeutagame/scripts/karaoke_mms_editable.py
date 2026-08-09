@@ -311,7 +311,7 @@ def _recover_interrupted_publish(
     if not state_path.exists():
         destination_exists = destination.exists()
         sidecar_exists = destination_sidecar.exists()
-        if destination_exists and sidecar_exists:
+        if destination_exists and (sidecar_exists or sidecar_bytes is None):
             raise FileExistsError(f"editable MMS companion already exists: {destination}")
         orphan_path = destination if destination_exists else destination_sidecar
         orphan_bytes = companion_bytes if destination_exists else sidecar_bytes

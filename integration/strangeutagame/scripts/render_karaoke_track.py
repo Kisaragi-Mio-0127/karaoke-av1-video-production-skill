@@ -1683,6 +1683,30 @@ def _split_character_run(
         )
 
     if best_position is None:
+        # A particle at the only minimum-length boundary belongs to the first
+        # phrase. Search beyond it and permit a short tail while preserving
+        # every canonical ruby span.
+        short_tail_positions = range(
+            max(minimum, fallback_maximum + 1),
+            len(characters),
+        )
+        best_position = next(
+            (
+                position
+                for position in short_tail_positions
+                if not _is_protected_display_boundary(
+                    characters,
+                    position,
+                    eligible_ruby_character_ids=eligible_ruby_character_ids,
+                )
+                and not _starts_with_bad_display_boundary_token(
+                    characters, position
+                )
+            ),
+            None,
+        )
+
+    if best_position is None:
         # The run has no legal lexical boundary (for example, one continuous
         # katakana token). Keep it intact and let the measured font-fit path
         # handle the visual width instead of inventing a word break.

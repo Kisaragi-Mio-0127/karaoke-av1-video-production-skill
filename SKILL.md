@@ -123,12 +123,22 @@ only and must never overwrite existing reviewed ruby. Manual or Agent review of
 the generated companion remains optional. MMS may adjust timing/alignment, but
 must not rewrite ruby or frozen display text.
 
-The display splitter preserves every source whitespace boundary and every
-tokenizer-produced `linked_to_next` word group. Automatic splitting,
-short-phrase rebalancing, and explicit display overrides must never cut one of
-those groups. For legacy reviewed SUG files without word links, project
-adjacent individually annotated kanji as one render-only word-level ruby span
-and keep that span together during display splitting.
+The canonical SUG preserves every source whitespace character. Display phrases
+omit whitespace glyphs, while source-space positions remain available as
+semantic or breathing boundaries and as subtle spacing inside a retained
+phrase. Whitespace never becomes a timed or highlighted glyph event. Follow
+the numeric targets and decision order in
+`references/subtitle-timing-quality.md`.
+
+Automatic splitting, short-phrase rebalancing, and explicit display overrides
+must preserve every tokenizer-produced `linked_to_next` word group, continuous
+katakana run, and canonical ruby span. For legacy reviewed SUG files without
+word links, project adjacent individually annotated kanji as one render-only
+word-level ruby span and keep that span together during display splitting.
+Paired punctuation remains visible and its contents remain ordinary display
+text: forbid an opening mark at line end and a closing mark at the next line
+start, while allowing long parenthetical text to split at a legal internal
+boundary.
 
 ## Existing SUG rerender
 

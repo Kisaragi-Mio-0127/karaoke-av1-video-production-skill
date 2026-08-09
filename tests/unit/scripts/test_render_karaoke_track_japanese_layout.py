@@ -508,14 +508,24 @@ def test_fifteen_character_split_keeps_particle_before_short_tail_and_preserves_
     for index in range(ruby_start, 8):
         sentence.characters[index].linked_to_next = True
 
-    runs = renderer._split_character_run(sentence.characters, max_chars=8)
-    rendered_runs = ["".join(character.char for character in run) for run in runs]
+    phrases = renderer.split_sentence_for_display(
+        sentence,
+        max_chars=8,
+        language="ja",
+    )
+    rendered_runs = [phrase.text for phrase in phrases]
 
     assert len(sentence.characters) == 15
     assert rendered_runs == ["春夏秋冬東西南北空を", "歩いて帰る"]
-    assert len(runs[-1]) == 5
-    assert runs[0][-1].char == "を"
-    assert sentence.characters[len(runs[0]) - 1].linked_to_next is False
+    assert len(phrases[-1].characters) == 5
+    assert all(
+        not phrase.text.startswith(renderer._BAD_DISPLAY_BOUNDARY_START_TOKENS)
+        for phrase in phrases[1:]
+    )
+    cursor = 0
+    for phrase in phrases[:-1]:
+        cursor += len(phrase.characters)
+        assert sentence.characters[cursor - 1].linked_to_next is False
     assert "".join(rendered_runs) == sentence.text
 
 

@@ -1791,6 +1791,19 @@ def _join_short_display_runs(
             index += 1
             continue
 
+        if (
+            index == len(result) - 1
+            and index > 0
+            and "".join(character.char for character in result[index - 1]).endswith(
+                _BAD_DISPLAY_BOUNDARY_START_TOKENS
+            )
+        ):
+            # The splitter intentionally kept this particle with the preceding
+            # phrase after accepting a short tail. Rebalancing would move the
+            # particle back to the start of this final phrase.
+            index += 1
+            continue
+
         # Minimum length is the hard requirement. If neither neighbour can
         # donate cleanly, merge even when this creates a rare soft-max overrun.
         if index + 1 < len(result):

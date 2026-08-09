@@ -20,6 +20,10 @@ when the renderer or canvas changes.
   vinyl asset.
 - Never combine both effects in one output. The AV1 batch entry's `both`
   option creates two independent outputs, not a combined frame.
+- `--output-mode subtitle-overlay` is an output-mode override rather than a
+  third artwork style. It skips the composition, cover, title, panel, vinyl,
+  and spectrum in the encoded picture while retaining the same wide ASS
+  geometry. A supplied `--background-video` becomes the picture source.
 
 ## Current composition
 

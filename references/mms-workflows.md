@@ -102,11 +102,22 @@ Create the companion before applying the quality policy. Keep it separate from
 the input SUG. If visual release overrides exist, pass the sidecar to render;
 otherwise render the companion with its preserved sentence releases.
 
+Both full-auto and staged MMS accept `--output-mode subtitle-overlay`. This
+changes only the render stage; audit, MMS alignment, timing-override build, and
+companion-SUG creation retain their normal contracts. With no background video,
+the output is a silent transparent ProRes 4444 MOV. Add
+`--background-video <footage>` to compose directly with FFmpeg into AV1/AAC;
+long footage is trimmed and short footage ends on black for the rest of the
+song interval.
+
 ## Existing SUG route
 
 Use `scripts/run_karaoke_japanese_workflow.py` to rerender an already reviewed
 or manually adjusted SUG. That route generates the current layout and video
 but does not prepare MSST, build initial timing, or invoke MMS.
+
+The existing-SUG route accepts the same `--output-mode subtitle-overlay` and
+optional `--background-video` arguments.
 
 ## Model and cache boundary
 

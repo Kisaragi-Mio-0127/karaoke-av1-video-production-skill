@@ -281,6 +281,8 @@ def _wrapper_args(plan: FullAutoPlan, args: argparse.Namespace) -> argparse.Name
         str(plan.vocals_root),
         "--visual-style",
         args.visual_style,
+        "--output-mode",
+        args.output_mode,
         "--device",
         getattr(args, "device", DEFAULT_DEVICE),
     ]
@@ -295,11 +297,14 @@ def _wrapper_args(plan: FullAutoPlan, args: argparse.Namespace) -> argparse.Name
         ("--background", args.background),
         ("--cover-source-audio", args.cover_source_audio),
         ("--metadata-source-audio", args.metadata_source_audio),
+        ("--background-video", args.background_video),
     ):
         if value is not None:
             values.extend((option, str(value.expanduser().resolve())))
     if plan.track.language != "ja":
         values.extend(("--language", plan.track.language))
+    if args.output_mode == "subtitle-overlay":
+        values.extend(("--color-policy", "project"))
     parsed = module.make_parser().parse_args(values)
     parsed.sug = plan.initial_sug
     return parsed
@@ -434,6 +439,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--visual-style", choices=("vinyl", "spectrum"), default="spectrum"
     )
+    parser.add_argument(
+        "--output-mode",
+        choices=("standard", "subtitle-overlay"),
+        default="standard",
+    )
+    parser.add_argument("--background-video", type=Path)
     parser.add_argument("--composition", type=Path)
     parser.add_argument("--cover", type=Path)
     parser.add_argument("--background", type=Path)

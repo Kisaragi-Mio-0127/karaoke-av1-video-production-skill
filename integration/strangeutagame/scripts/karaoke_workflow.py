@@ -28,6 +28,11 @@ try:
         resolve_ffmpeg as resolve_ffmpeg_tool,
     )
     from scripts.karaoke_common.media_metadata import resolve_display_metadata
+    from scripts.karaoke_common.subtitle_video import (
+        build_background_composite_command,
+        build_transparent_overlay_command,
+        create_transparent_canvas,
+    )
     from scripts.karaoke_language import language_identity
     from scripts.render_karaoke_direct_av1_420_album import (
         DirectAV1420RenderError,
@@ -47,6 +52,11 @@ except ImportError:  # pragma: no cover - direct script entry points
         resolve_ffmpeg as resolve_ffmpeg_tool,
     )
     from karaoke_common.media_metadata import resolve_display_metadata  # type: ignore[no-redef]
+    from karaoke_common.subtitle_video import (  # type: ignore[no-redef]
+        build_background_composite_command,
+        build_transparent_overlay_command,
+        create_transparent_canvas,
+    )
     from karaoke_language import language_identity  # type: ignore[no-redef]
     from render_karaoke_direct_av1_420_album import (  # type: ignore[no-redef]
         DirectAV1420RenderError,
@@ -63,6 +73,7 @@ TRACK_RENDERER_SCRIPT = REPO_ROOT / "scripts" / "render_karaoke_track.py"
 WORKFLOW_REPORT_NAME = "workflow-report.json"
 TEST_ROOT_MARKER = ".karaoke-workflow-test-root"
 VISUAL_STYLES = ("vinyl", "spectrum")
+OUTPUT_MODES = ("standard", "subtitle-overlay")
 
 
 def inspect_av1_420_media(ffmpeg: Path, media: Path) -> dict[str, Any]:
@@ -115,6 +126,8 @@ class WorkflowConfig:
     canonical_deliverables: tuple[Path, ...] = ()
     timing_overrides: Path | None = None
     timing_override_song_id: str | None = None
+    output_mode: str = "standard"
+    background_video: Path | None = None
 
 
 def sha256_file(path: Path) -> str:
@@ -160,6 +173,8 @@ def validate_visual_contract(config: WorkflowConfig) -> None:
         raise KaraokeWorkflowError(
             f"unsupported visual style: {config.visual_style!r}"
         )
+    if config.output_mode not in OUTPUT_MODES:
+        raise KaraokeWorkflowError(f"unsupported output mode: {config.output_mode!r}")
     if config.color_policy not in {"cover", "project"}:
         raise KaraokeWorkflowError(
             f"unsupported color policy: {config.color_policy!r}"
@@ -170,6 +185,24 @@ def validate_visual_contract(config: WorkflowConfig) -> None:
         raise KaraokeWorkflowError(
             "--spectrum-color/--progress-color require --visual-style=spectrum"
         )
+    if config.background_video is not None and config.output_mode != "subtitle-overlay":
+        raise KaraokeWorkflowError(
+            "--background-video requires --output-mode=subtitle-overlay"
+        )
+    if config.output_mode == "subtitle-overlay":
+        if config.color_policy != "project":
+            raise KaraokeWorkflowError(
+                "subtitle-overlay requires --color-policy=project"
+            )
+        if config.singer_colors:
+            raise KaraokeWorkflowError(
+                "subtitle-overlay reads singer colors from the SUG; update the SUG "
+                "instead of using --singer-color"
+            )
+        if config.lossless_companion:
+            raise KaraokeWorkflowError(
+                "--lossless-companion is unavailable for subtitle-overlay output"
+            )
 
 
 def validate_output_dir(config: WorkflowConfig) -> Path:
@@ -192,6 +225,8 @@ def validate_output_dir(config: WorkflowConfig) -> Path:
     for optional_source in (config.composition, config.cover, config.background):
         if optional_source is not None:
             sources.append(optional_source)
+    if config.background_video is not None:
+        sources.append(config.background_video)
     for source in sources:
         root = _nearest_deliverable_root(source)
         if root is not None:
@@ -229,8 +264,10 @@ def build_probe_command(ffmpeg: Path, path: Path) -> list[str]:
     ]
 
 
-def build_full_decode_command(ffmpeg: Path, path: Path) -> list[str]:
-    return [
+def build_full_decode_command(
+    ffmpeg: Path, path: Path, *, include_audio: bool = True
+) -> list[str]:
+    command = [
         str(ffmpeg),
         "-v",
         "error",
@@ -239,12 +276,11 @@ def build_full_decode_command(ffmpeg: Path, path: Path) -> list[str]:
         str(path),
         "-map",
         "0:v:0",
-        "-map",
-        "0:a:0",
-        "-f",
-        "null",
-        "-",
     ]
+    if include_audio:
+        command.extend(["-map", "0:a:0"])
+    command.extend(["-f", "null", "-"])
+    return command
 
 
 def build_video_stream_hash_command(ffmpeg: Path, path: Path) -> list[str]:
@@ -276,6 +312,9 @@ def build_ass_command(
     output_path: Path,
     duration: float,
 ) -> list[str]:
+    renderer_visual_style = (
+        "spectrum" if config.output_mode == "subtitle-overlay" else config.visual_style
+    )
     command = [
         sys.executable,
         str(TRACK_RENDERER_SCRIPT),
@@ -302,7 +341,7 @@ def build_ass_command(
         "--layout",
         config.layout,
         "--visual-style",
-        config.visual_style,
+        renderer_visual_style,
         "--color-policy",
         config.color_policy,
     ]
@@ -315,7 +354,7 @@ def build_ass_command(
                 str(config.timing_override_song_id),
             ]
         )
-    if config.visual_style == "vinyl":
+    if renderer_visual_style == "vinyl":
         if generated_vinyl is None:
             raise KaraokeWorkflowError("vinyl workflow did not provide generated artwork")
         command.extend(
@@ -325,7 +364,7 @@ def build_ass_command(
         raise KaraokeWorkflowError("spectrum workflow must not receive vinyl artwork")
     for singer_color in config.singer_colors:
         command.extend(["--singer-color", singer_color])
-    if config.visual_style == "spectrum":
+    if renderer_visual_style == "spectrum" and config.output_mode == "standard":
         if config.spectrum_color is not None:
             command.extend(["--spectrum-color", config.spectrum_color])
         if config.progress_color is not None:
@@ -786,7 +825,8 @@ def run_workflow(
         album_artist=display_metadata["album_artist"],
     )
     output_dir = validate_output_dir(config)
-    is_vinyl = config.visual_style == "vinyl"
+    is_overlay = config.output_mode == "subtitle-overlay"
+    is_vinyl = not is_overlay and config.visual_style == "vinyl"
     input_paths = {
         "sug": config.sug,
         "delivery_audio": config.audio,
@@ -799,6 +839,7 @@ def run_workflow(
         ("background", config.background),
         ("cover_source_audio", config.cover_source_audio),
         ("metadata_source_audio", config.metadata_source_audio),
+        ("background_video", config.background_video),
     ):
         if path is not None:
             input_paths[name] = path
@@ -825,6 +866,7 @@ def run_workflow(
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "language": config.language,
         "layout": config.layout,
+        "output_mode": config.output_mode,
         "visual_style": config.visual_style,
         "vinyl_motion": "rotate" if is_vinyl else None,
         "full_decode": _full_decode_report(requested=config.full_decode),
@@ -846,105 +888,136 @@ def run_workflow(
         report["timing_override"] = timing_override_identity
     try:
         composition_gate: dict[str, Any] | None = None
-        if config.composition is not None:
-            composition_gate = validate_workflow_composition(config)
-
-        if artwork_builder is None:
-            prepared = artwork_preparer(
-                output_dir=output_dir,
-                audio_path=config.audio.resolve(),
-                cover_source_audio=(
-                    config.cover_source_audio.resolve()
-                    if config.cover_source_audio is not None
-                    else None
-                ),
-                cover_path=config.cover,
-                background_path=config.background,
-                composition_override=config.composition,
-                fonts_dir=config.fonts_dir.resolve(),
-                title=config.title,
-                artist=config.artist,
-                album_title=config.album_title,
-                album_artist=config.album_artist,
-                visual_style=config.visual_style,
+        if is_overlay:
+            composition = _assert_output_path(
+                output_dir / "artwork-current" / "transparent-canvas.png",
+                output_dir,
             )
-            artwork_report = prepared["report"]
-            generated_vinyl = prepared["vinyl"]
-        else:
-            if config.composition is None:
-                raise KaraokeWorkflowError(
-                    "legacy artwork_builder cannot prepare an automatic composition"
-                )
+            create_transparent_canvas(composition)
+            config = replace(config, composition=composition)
             generated_vinyl = None
-            legacy_artwork: dict[str, Any] | None = None
-            if is_vinyl:
-                artwork_dir = _assert_output_path(
-                    output_dir / "artwork-current", output_dir
-                )
-                cover_source_audio = (config.cover_source_audio or config.audio).resolve()
-                legacy_artwork = artwork_builder(
-                    cover_source_audio,
-                    artwork_dir,
-                    config.title,
-                    config.artist,
-                    config.cover_url,
-                    config.fonts_dir.resolve(),
-                    allow_network=config.allow_network,
-                    album_title=config.album_title,
-                    album_artist=config.album_artist,
-                )
-                generated_vinyl = artwork_dir / "vinyl.png"
-            metadata = json.loads(
-                config.composition.with_suffix(".json").read_text(encoding="utf-8")
-            )
             artwork_report = {
                 "schema_version": "karaoke-auto-artwork/v1",
-                "selection": "explicit-advanced-override",
-                "visual_style": config.visual_style,
-                "composition": _input_identity(config.composition),
-                "layout": metadata,
-                "vinyl": (
-                    _input_identity(generated_vinyl)
-                    if generated_vinyl is not None
-                    else None
-                ),
+                "selection": "transparent-subtitle-canvas",
+                "visual_style": None,
+                "composition": _input_identity(composition),
+                "layout": {
+                    "layout_version": "subtitle-overlay/v1",
+                    "canvas": [1920, 1080],
+                    "transparent": True,
+                },
+                "vinyl": None,
             }
-            if legacy_artwork is not None:
-                artwork_report.update(legacy_artwork)
+        else:
+            if config.composition is not None:
+                composition_gate = validate_workflow_composition(config)
 
-        config = replace(config, composition=Path(prepared["composition"]) if artwork_builder is None else config.composition)
+            if artwork_builder is None:
+                prepared = artwork_preparer(
+                    output_dir=output_dir,
+                    audio_path=config.audio.resolve(),
+                    cover_source_audio=(
+                        config.cover_source_audio.resolve()
+                        if config.cover_source_audio is not None
+                        else None
+                    ),
+                    cover_path=config.cover,
+                    background_path=config.background,
+                    composition_override=config.composition,
+                    fonts_dir=config.fonts_dir.resolve(),
+                    title=config.title,
+                    artist=config.artist,
+                    album_title=config.album_title,
+                    album_artist=config.album_artist,
+                    visual_style=config.visual_style,
+                )
+                artwork_report = prepared["report"]
+                generated_vinyl = prepared["vinyl"]
+                config = replace(config, composition=Path(prepared["composition"]))
+            else:
+                if config.composition is None:
+                    raise KaraokeWorkflowError(
+                        "legacy artwork_builder cannot prepare an automatic composition"
+                    )
+                generated_vinyl = None
+                legacy_artwork: dict[str, Any] | None = None
+                if is_vinyl:
+                    artwork_dir = _assert_output_path(
+                        output_dir / "artwork-current", output_dir
+                    )
+                    cover_source_audio = (
+                        config.cover_source_audio or config.audio
+                    ).resolve()
+                    legacy_artwork = artwork_builder(
+                        cover_source_audio,
+                        artwork_dir,
+                        config.title,
+                        config.artist,
+                        config.cover_url,
+                        config.fonts_dir.resolve(),
+                        allow_network=config.allow_network,
+                        album_title=config.album_title,
+                        album_artist=config.album_artist,
+                    )
+                    generated_vinyl = artwork_dir / "vinyl.png"
+                metadata = json.loads(
+                    config.composition.with_suffix(".json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                artwork_report = {
+                    "schema_version": "karaoke-auto-artwork/v1",
+                    "selection": "explicit-advanced-override",
+                    "visual_style": config.visual_style,
+                    "composition": _input_identity(config.composition),
+                    "layout": metadata,
+                    "vinyl": (
+                        _input_identity(generated_vinyl)
+                        if generated_vinyl is not None
+                        else None
+                    ),
+                }
+                if legacy_artwork is not None:
+                    artwork_report.update(legacy_artwork)
+
         assert config.composition is not None
         identities["composition"] = _input_identity(config.composition)
         report["inputs"] = identities
         report["auto_artwork"] = artwork_report
         report["stages"].append(
             {
-                "name": "auto-artwork",
+                "name": "subtitle-overlay-canvas" if is_overlay else "auto-artwork",
                 "status": "ok",
                 "selection": artwork_report["selection"],
-                "visual_style": config.visual_style,
+                "visual_style": None if is_overlay else config.visual_style,
                 "layout": artwork_report["layout"],
                 "vinyl_generated": generated_vinyl is not None,
             }
         )
-        if composition_gate is None:
-            composition_gate = validate_workflow_composition(config)
-        report["stages"].append(
-            {
-                "name": "current-wide-composition",
-                "status": "ok",
-                "visual_style": config.visual_style,
-                "gate": composition_gate,
-            }
-        )
-        probe_paths = {
-            "audio": config.audio,
-            "composition": config.composition,
-        }
+        if not is_overlay:
+            if composition_gate is None:
+                composition_gate = validate_workflow_composition(config)
+            report["stages"].append(
+                {
+                    "name": "current-wide-composition",
+                    "status": "ok",
+                    "visual_style": config.visual_style,
+                    "gate": composition_gate,
+                }
+            )
+        probe_paths = {"audio": config.audio}
+        if is_overlay and config.background_video is not None:
+            probe_paths["background_video"] = config.background_video
+        elif not is_overlay:
+            probe_paths["composition"] = config.composition
         probes = {
             name: _probe_with_ffmpeg(ffmpeg, path.resolve(), runner=runner)
             for name, path in probe_paths.items()
         }
+        if config.background_video is not None and probes[
+            "background_video"
+        ].get("video_stream") is None:
+            raise KaraokeWorkflowError("--background-video has no video stream")
         full_duration = _duration_from_probe(probes["audio"])
         lossless_source_codec = (
             validate_lossless_source(config.audio, probes["audio"])
@@ -987,7 +1060,12 @@ def run_workflow(
         )
         ass_path = _assert_output_path(output_dir / "karaoke.ass", output_dir)
         ass_report_path = _assert_output_path(output_dir / "ass-report.json", output_dir)
-        output_path = _assert_output_path(output_dir / "karaoke-av1.mp4", output_dir)
+        output_name = (
+            "karaoke-subtitle-overlay.mov"
+            if is_overlay and config.background_video is None
+            else "karaoke-av1.mp4"
+        )
+        output_path = _assert_output_path(output_dir / output_name, output_dir)
         lossless_output = (
             _assert_output_path(
                 output_dir / "karaoke-av1-lossless.mkv", output_dir
@@ -1033,24 +1111,65 @@ def run_workflow(
             }
         )
 
-        render_command = build_render_command(
-            config,
-            generated_vinyl=generated_vinyl,
-            ass_path=ass_path,
-            report_path=render_report_path,
-            output_path=output_path,
-            duration=duration,
-            lossless_output=lossless_output,
-        )
-        rendered = runner(render_command)
-        if rendered.returncode != 0:
-            raise KaraokeWorkflowError(f"AV1 render failed: {rendered.stderr[-2000:]}")
+        if is_overlay:
+            final_ass_command = build_ass_command(
+                config,
+                generated_vinyl=None,
+                ass_path=ass_path,
+                report_path=render_report_path,
+                output_path=output_path,
+                duration=duration,
+            )
+            final_ass_result = runner(final_ass_command)
+            if final_ass_result.returncode != 0:
+                raise KaraokeWorkflowError(
+                    f"final ASS production failed: {final_ass_result.stderr[-2000:]}"
+                )
+            if config.background_video is None:
+                render_command = build_transparent_overlay_command(
+                    ffmpeg=ffmpeg,
+                    ass_path=ass_path,
+                    fonts_dir=config.fonts_dir.resolve(),
+                    output_path=output_path,
+                    duration_seconds=duration,
+                )
+            else:
+                render_command = build_background_composite_command(
+                    ffmpeg=ffmpeg,
+                    background_video=config.background_video.resolve(),
+                    audio_path=config.audio.resolve(),
+                    ass_path=ass_path,
+                    fonts_dir=config.fonts_dir.resolve(),
+                    output_path=output_path,
+                    start_seconds=0.0,
+                    duration_seconds=duration,
+                )
+            rendered = runner(render_command)
+            if rendered.returncode != 0:
+                raise KaraokeWorkflowError(
+                    f"subtitle overlay render failed: {rendered.stderr[-2000:]}"
+                )
+        else:
+            render_command = build_render_command(
+                config,
+                generated_vinyl=generated_vinyl,
+                ass_path=ass_path,
+                report_path=render_report_path,
+                output_path=output_path,
+                duration=duration,
+                lossless_output=lossless_output,
+            )
+            rendered = runner(render_command)
+            if rendered.returncode != 0:
+                raise KaraokeWorkflowError(
+                    f"AV1 render failed: {rendered.stderr[-2000:]}"
+                )
         if (
             not output_path.is_file()
             or not ass_path.is_file()
             or not render_report_path.is_file()
         ):
-            raise KaraokeWorkflowError("AV1 render did not create its declared outputs")
+            raise KaraokeWorkflowError("render did not create its declared outputs")
         if lossless_output is not None and not lossless_output.is_file():
             raise KaraokeWorkflowError(
                 "requested lossless companion was not created"
@@ -1066,10 +1185,18 @@ def run_workflow(
             raise KaraokeWorkflowError(
                 "preflight and final ASS identities differ for the same SUG/config"
             )
-        visual_report_gate = validate_renderer_report(
-            config,
-            render_report_path,
-            generated_vinyl=generated_vinyl,
+        visual_report_gate = (
+            {
+                "status": "ok",
+                "output_mode": "subtitle-overlay",
+                "background_video": config.background_video is not None,
+            }
+            if is_overlay
+            else validate_renderer_report(
+                config,
+                render_report_path,
+                generated_vinyl=generated_vinyl,
+            )
         )
         final_renderer_report = json.loads(
             render_report_path.read_text(encoding="utf-8")
@@ -1091,39 +1218,83 @@ def run_workflow(
             }
         )
         render_stage = {
-            "name": "render-av1-mp4",
+            "name": (
+                "render-background-video-av1"
+                if is_overlay and config.background_video is not None
+                else "render-subtitle-overlay-prores"
+                if is_overlay
+                else "render-av1-mp4"
+            ),
             "status": "ok",
             "duration_seconds": duration,
             "mode": "smoke" if config.smoke_duration is not None else "full",
-            "visual_style": config.visual_style,
+            "output_mode": config.output_mode,
+            "visual_style": None if is_overlay else config.visual_style,
             "vinyl_motion": "rotate" if is_vinyl else None,
             "visual_report_gate": visual_report_gate,
         }
+        if config.background_video is not None:
+            source_duration = probes["background_video"].get("duration_seconds")
+            render_stage["background_video"] = {
+                "source_duration_seconds": source_duration,
+                "timeline_policy": "trim-long-pad-short-with-black",
+                "black_tail_seconds": (
+                    max(0.0, duration - float(source_duration))
+                    if source_duration is not None
+                    else None
+                ),
+            }
         if generated_vinyl is not None:
             render_stage["vinyl_sha256"] = sha256_file(generated_vinyl)
         report["stages"].append(render_stage)
 
         final_probe = _probe_with_ffmpeg(ffmpeg, output_path, runner=runner)
-        existing_gate = media_verifier(ffmpeg, output_path)
         video_stream = final_probe.get("video_stream") or {}
         duration_drift = abs(
             float(final_probe.get("duration_seconds") or -1.0) - duration
         )
-        media_gate = {
-            "codec_av1": existing_gate.get("codec_av1") is True,
-            "pixel_format_yuv420p": existing_gate.get("pixel_format_yuv420p") is True,
-            "resolution_1920x1080": existing_gate.get("resolution_1920x1080") is True,
-            "cfr_30fps": existing_gate.get("cfr_30fps") is True,
-            "bt709": final_probe.get("bt709") is True,
-            "audio_present": final_probe.get("audio_stream") is not None,
-            "duration_within_100ms": duration_drift <= 0.1,
-            "parsed_video_codec": video_stream.get("codec") == "av1",
-        }
+        if is_overlay and config.background_video is None:
+            existing_gate = {"selected": "prores-4444-alpha"}
+            media_gate = {
+                "codec_prores": video_stream.get("codec") == "prores",
+                "pixel_format_has_alpha": str(
+                    video_stream.get("pixel_format") or ""
+                ).startswith("yuva444p"),
+                "resolution_1920x1080": (
+                    video_stream.get("width"), video_stream.get("height")
+                ) == (1920, 1080),
+                "cfr_30fps": abs(float(video_stream.get("fps") or 0.0) - 30.0)
+                < 0.01,
+                "audio_absent": final_probe.get("audio_stream") is None,
+                "duration_within_100ms": duration_drift <= 0.1,
+            }
+        else:
+            existing_gate = media_verifier(ffmpeg, output_path)
+            media_gate = {
+                "codec_av1": existing_gate.get("codec_av1") is True,
+                "pixel_format_yuv420p": existing_gate.get("pixel_format_yuv420p")
+                is True,
+                "resolution_1920x1080": existing_gate.get("resolution_1920x1080")
+                is True,
+                "cfr_30fps": existing_gate.get("cfr_30fps") is True,
+                "bt709": final_probe.get("bt709") is True,
+                "audio_present": final_probe.get("audio_stream") is not None,
+                "duration_within_100ms": duration_drift <= 0.1,
+                "parsed_video_codec": video_stream.get("codec") == "av1",
+            }
         if not all(media_gate.values()):
             raise KaraokeWorkflowError(f"final media gate failed: {media_gate}")
         decoded = None
         if config.full_decode:
-            decoded = runner(build_full_decode_command(ffmpeg, output_path))
+            decoded = runner(
+                build_full_decode_command(
+                    ffmpeg,
+                    output_path,
+                    include_audio=not (
+                        is_overlay and config.background_video is None
+                    ),
+                )
+            )
             report["full_decode"] = _full_decode_report(
                 requested=True,
                 completed=decoded,
@@ -1255,12 +1426,30 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
         help="choose exactly one right-side visual effect (default: vinyl)",
     )
     parser.add_argument(
+        "--output-mode",
+        choices=OUTPUT_MODES,
+        default="standard",
+        help=(
+            "standard renders the selected visual style; subtitle-overlay emits "
+            "a transparent ProRes 4444 MOV unless --background-video is supplied"
+        ),
+    )
+    parser.add_argument(
+        "--background-video",
+        type=Path,
+        help=(
+            "FFmpeg-compose this video behind subtitle-overlay output; long input "
+            "is trimmed and short input is followed by black"
+        ),
+    )
+    parser.add_argument(
         "--color-policy",
         choices=("cover", "project"),
-        default="cover",
+        default=None,
         help=(
             "cover assigns the ordered cover palette to active singers; "
-            "project preserves SUG singer colors as a compatibility rollback"
+            "project preserves SUG singer colors; defaults to project for "
+            "subtitle-overlay and cover otherwise"
         ),
     )
     parser.add_argument(
@@ -1350,7 +1539,10 @@ def config_from_args(
         smoke_duration=args.smoke_duration,
         pronunciation_validation=pronunciation_validation,
         visual_style=args.visual_style,
-        color_policy=args.color_policy,
+        color_policy=(
+            args.color_policy
+            or ("project" if args.output_mode == "subtitle-overlay" else "cover")
+        ),
         singer_colors=tuple(args.singer_color),
         spectrum_color=args.spectrum_color,
         progress_color=args.progress_color,
@@ -1360,6 +1552,8 @@ def config_from_args(
         lossless_companion=args.lossless_companion,
         full_decode=args.full_decode,
         canonical_deliverables=tuple(args.canonical_deliverables),
+        output_mode=args.output_mode,
+        background_video=args.background_video,
     )
     validate_visual_contract(config)
     return config

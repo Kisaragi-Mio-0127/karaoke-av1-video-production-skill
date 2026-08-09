@@ -177,6 +177,7 @@ def preflight(args: argparse.Namespace) -> Preflight:
         args.composition,
         args.cover,
         args.background,
+        args.background_video,
         args.cover_source_audio,
     ):
         if optional_artwork is not None:
@@ -644,7 +645,10 @@ def run_mms_workflow(
             smoke_duration=args.smoke_duration,
             pronunciation_validation=args.pronunciation_validation,
             visual_style=args.visual_style,
-            color_policy=args.color_policy,
+            color_policy=(
+                args.color_policy
+                or ("project" if args.output_mode == "subtitle-overlay" else "cover")
+            ),
             singer_colors=tuple(args.singer_color),
             spectrum_color=args.spectrum_color,
             progress_color=args.progress_color,
@@ -656,6 +660,12 @@ def run_mms_workflow(
             canonical_deliverables=(pre.album.deliverable_dir,),
             timing_overrides=release_timing_overrides,
             timing_override_song_id=(pre.track.song_id if use_visual_release else None),
+            output_mode=args.output_mode,
+            background_video=(
+                args.background_video.expanduser().resolve()
+                if args.background_video is not None
+                else None
+            ),
         )
         report["render_gate"] = {"ok": False}
         render_report = renderer(config)
@@ -744,8 +754,14 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cover", type=Path)
     parser.add_argument("--background", type=Path)
     parser.add_argument("--visual-style", choices=("vinyl", "spectrum"), default="vinyl")
+    parser.add_argument(
+        "--output-mode",
+        choices=("standard", "subtitle-overlay"),
+        default="standard",
+    )
+    parser.add_argument("--background-video", type=Path)
     parser.add_argument("--vinyl", dest="canonical_vinyl", type=Path)
-    parser.add_argument("--color-policy", choices=("cover", "project"), default="cover")
+    parser.add_argument("--color-policy", choices=("cover", "project"), default=None)
     parser.add_argument("--singer-color", action="append", default=[])
     parser.add_argument("--spectrum-color")
     parser.add_argument("--progress-color")

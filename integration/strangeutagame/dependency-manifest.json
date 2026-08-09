@@ -89,6 +89,11 @@
       "reason": "Resolves album display metadata from explicit overrides, audio tags, or track fallback values."
     },
     {
+      "path": "karaoke_common/subtitle_video.py",
+      "category": "package-file",
+      "reason": "Builds transparent ProRes subtitle-layer and supplied-video FFmpeg commands without changing SUG timing."
+    },
+    {
       "path": "karaoke_common/visuals.py",
       "category": "package-file",
       "reason": "Owns the vinyl and spectrum FFmpeg filter graphs used by the single-track renderer."

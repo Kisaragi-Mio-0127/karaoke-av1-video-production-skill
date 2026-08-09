@@ -65,6 +65,7 @@ def test_dependency_manifest_exactly_covers_python_bundle() -> None:
         "karaoke_common/artwork.py",
         "karaoke_common/editable_sug.py",
         "karaoke_common/media_metadata.py",
+        "karaoke_common/subtitle_video.py",
         "karaoke_common/visuals.py",
         "karaoke_full_auto.py",
         "karaoke_mms_editable.py",
@@ -125,7 +126,14 @@ def test_full_auto_keeps_zh_en_route_import_lazy() -> None:
 
     assert not any("run_karaoke_zh_en" in name for name in top_level_imports)
     source = path.read_text(encoding="utf-8")
-    for option in ("--cover", "--background", "--composition", "--cover-source-audio"):
+    for option in (
+        "--cover",
+        "--background",
+        "--composition",
+        "--cover-source-audio",
+        "--output-mode",
+        "--background-video",
+    ):
         assert option in source
 
 
@@ -190,6 +198,7 @@ def test_documentation_is_bilingual_and_focuses_on_current_routes() -> None:
         assert "render_karaoke_direct_hevc444_album.py" not in text
         assert "--quality-policy" in text
         assert "auto-fallback" in text
+        assert "subtitle-overlay" in text
     assert "current wide layout" in english
     assert "当前宽屏布局" in chinese
     assert re.search(r"[\u4e00-\u9fff]", chinese)
@@ -209,6 +218,8 @@ def test_network_and_output_expansion_require_explicit_flags() -> None:
     assert "--refresh-source" in timing
     assert "--allow-network" in workflow
     assert "--allow-cover-network" in mms
+    assert "--output-mode" in workflow and "--background-video" in workflow
+    assert "--output-mode" in mms and "--background-video" in mms
     assert "--lossless-companion" in workflow and "action=\"store_true\"" in workflow
     assert "--full-decode" in workflow and "action=\"store_true\"" in workflow
     assert "--full-decode" in direct and "action=\"store_true\"" in direct

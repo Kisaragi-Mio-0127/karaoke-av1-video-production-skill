@@ -56,6 +56,21 @@ Use MKV for preserved ASS soft subtitles or multiple tracks. After the MP4 passe
 
 Do not add `-shortest`, `-ar`, or `-ac`. Preserve the lossless source sample rate and channel structure. Before paired release, require MP4 AAC-LC/320k metadata, FLAC-only MKV audio, identical encoded video streams, matching timelines, and decoded MKV PCM equal to the selected source interval.
 
+## Subtitle overlay and supplied footage
+
+The editor overlay output is a silent 1920x1080, 30 fps ProRes 4444 MOV. Render
+ASS onto a transparent RGBA source with the subtitle filter's alpha processing
+enabled, encode profile 4 with `prores_ks`, and verify a `yuva444p*` pixel
+format, the `ap4h`/4444 profile, duration, dimensions, frame rate, and absence
+of audio.
+
+When `--background-video` is supplied, scale it to fit within 1920x1080 and pad
+the unused area with black. Apply `tpad=stop_mode=add` followed by an explicit
+duration trim: this trims long footage and fills a short source with black
+through the selected song interval. Burn ASS after that timeline operation,
+map only the selected song audio, and use the normal AV1 4:2:0/AAC settings.
+Do not use `-shortest`.
+
 ## Timeline, verification, and promotion
 
 - Inspect input `start_time`, stream durations, frame-rate mode, and final ASS events; do not use `-shortest` to conceal drift.

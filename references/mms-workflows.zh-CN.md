@@ -70,9 +70,13 @@ audit -> timing override build -> companion SUG -> release decision -> render
 
 在应用质量策略前创建伴侣文件。将它与输入SUG分开保存。如果存在视觉释放覆盖，将sidecar传给渲染；否则使用保留的句子释放来渲染伴侣文件。
 
+Full-auto和分阶段MMS均接受`--output-mode subtitle-overlay`。该参数只改变渲染阶段，审计、MMS对齐、时间覆盖构建和companion SUG生成仍沿用原有契约。未提供背景视频时输出无音频、带透明通道的ProRes 4444 MOV；加入`--background-video <视频素材>`后由FFmpeg直接合成为AV1/AAC，较长素材会被裁剪，较短素材的剩余歌曲区间显示黑幕。
+
 ## 已有SUG路径
 
 使用`scripts/run_karaoke_japanese_workflow.py`重新渲染已经审核或手动调整的SUG。该路径生成当前布局和视频，但不准备MSST、不构建初始时间，也不调用MMS。
+
+已有SUG路径同样接受`--output-mode subtitle-overlay`和可选的`--background-video`。
 
 ## 模型与缓存边界
 

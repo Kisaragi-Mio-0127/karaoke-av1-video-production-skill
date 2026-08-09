@@ -197,6 +197,13 @@ experimental option is intended; do not combine it with `--mms-model-path`.
 The staged wrapper accepts optional `--source`, `--sug`, and `--vocals-root`
 overrides. It does not download a missing MMS checkpoint during production.
 
+Full-auto, staged MMS, and existing-SUG rerender commands accept
+`--output-mode subtitle-overlay`. Without `--background-video`, this writes a
+silent transparent ProRes 4444 MOV for editor compositing. With
+`--background-video <footage>`, FFmpeg produces the normal AV1/AAC MP4 directly:
+long footage is trimmed to the song interval, while short footage is followed
+by black through the remaining interval.
+
 Japanese video rerender from an existing adjusted SUG:
 
 ```powershell

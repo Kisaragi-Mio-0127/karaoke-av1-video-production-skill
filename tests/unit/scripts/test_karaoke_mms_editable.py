@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import scripts.karaoke_mms_editable as karaoke_mms_editable
 from scripts.karaoke_mms_editable import MmsEditableError, create_mms_editable_companion
 from scripts.sug_ruby import span_hash, sug_hash, write_review_sidecar
 from strange_uta_game.backend.infrastructure.persistence.sug_io import SugProjectParser
@@ -295,3 +296,145 @@ def test_companion_rejects_decreasing_checkpoint_timeline(tmp_path: Path):
                 }
             },
         )
+
+
+def _write_reviewed_ruby_project(tmp_path: Path) -> tuple[Path, Path, dict]:
+    canonical = tmp_path / "canonical.sug"
+    audio = tmp_path / "mix.flac"
+    audio.write_bytes(b"audio")
+    document = {
+        "version": "0.3.0",
+        "metadata": {"language": "ja"},
+        "singers": [{"id": "singer", "name": "Singer", "is_default": True}],
+        "sentences": [
+            {
+                "id": "line-0",
+                "singer_id": "singer",
+                "characters": [
+                    {
+                        "char": "今",
+                        "timestamps": [1000],
+                        "ruby": {"parts": [{"text": "いま", "offset_ms": 0}]},
+                    },
+                    {
+                        "char": "日",
+                        "timestamps": [1500],
+                        "sentence_end_ts": 2000,
+                        "ruby": {"parts": [{"text": "ひ", "offset_ms": 0}]},
+                    },
+                ],
+            }
+        ],
+        "media_path": "old.flac",
+    }
+    canonical.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    records = [
+        {
+            "sentence_id": "line-0",
+            "start": index,
+            "end": index + 1,
+            "surface": character["char"],
+            "source": "human-review",
+            "review_status": "human-locked",
+            "generation_id": f"record-{index}",
+            "after_hash": span_hash(document, 0, index, index + 1),
+        }
+        for index, character in enumerate(document["sentences"][0]["characters"])
+    ]
+    write_review_sidecar(
+        canonical.with_suffix(".ruby-review.json"),
+        sug_hash_before=sug_hash(document),
+        sug_hash_after=sug_hash(document),
+        records=records,
+        generation_id="reviewed-generation",
+    )
+    return canonical, audio, document
+
+
+def test_companion_rejects_stale_canonical_sidecar_sug_hash(tmp_path: Path):
+    canonical, audio, _ = _write_reviewed_ruby_project(tmp_path)
+    sidecar_path = canonical.with_suffix(".ruby-review.json")
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["sug_hash_after"] = "stale-sug-hash"
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+    with pytest.raises(MmsEditableError, match="sug_hash_after is stale"):
+        create_mms_editable_companion(
+            canonical_sug=canonical,
+            audio=audio,
+            build_dir=tmp_path / "build",
+            song_id="song-ja",
+            overrides={"songs": {"song-ja": {"lines": {"0": {}}}}},
+        )
+
+    assert sidecar["generation_id"] == "reviewed-generation"
+    assert not (tmp_path / "build" / "canonical.mms-editable.sug").exists()
+
+
+def test_companion_rejects_partially_stale_canonical_sidecar_records(tmp_path: Path):
+    canonical, audio, _ = _write_reviewed_ruby_project(tmp_path)
+    sidecar_path = canonical.with_suffix(".ruby-review.json")
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar["records"][1]["after_hash"] = "stale-span-hash"
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+    with pytest.raises(MmsEditableError, match="record 1 after_hash is stale"):
+        create_mms_editable_companion(
+            canonical_sug=canonical,
+            audio=audio,
+            build_dir=tmp_path / "build",
+            song_id="song-ja",
+            overrides={"songs": {"song-ja": {"lines": {"0": {}}}}},
+        )
+
+    assert sidecar["generation_id"] == "reviewed-generation"
+    assert not (tmp_path / "build" / "canonical.mms-editable.sug").exists()
+
+
+@pytest.mark.parametrize("retain_publish_state", [True, False])
+def test_companion_recovers_sidecar_orphan_after_interrupted_publish(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retain_publish_state: bool,
+):
+    canonical, audio, _ = _write_reviewed_ruby_project(tmp_path)
+    build = tmp_path / "build"
+    destination = build / "canonical.mms-editable.sug"
+    destination_sidecar = destination.with_suffix(".ruby-review.json")
+    publish_state = build / ".canonical.mms-editable.sug.publish.json"
+    real_link = karaoke_mms_editable.os.link
+
+    def fail_before_sug_publish(source: Path, target: Path) -> None:
+        if Path(target) == destination:
+            raise RuntimeError("injected failure between sidecar and SUG publish")
+        real_link(source, target)
+
+    monkeypatch.setattr(karaoke_mms_editable.os, "link", fail_before_sug_publish)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        create_mms_editable_companion(
+            canonical_sug=canonical,
+            audio=audio,
+            build_dir=build,
+            song_id="song-ja",
+            overrides={"songs": {"song-ja": {"lines": {"0": {}}}}},
+        )
+
+    assert publish_state.is_file()
+    assert destination_sidecar.is_file()
+    assert not destination.exists()
+    if not retain_publish_state:
+        publish_state.unlink()
+
+    monkeypatch.setattr(karaoke_mms_editable.os, "link", real_link)
+    retried = create_mms_editable_companion(
+        canonical_sug=canonical,
+        audio=audio,
+        build_dir=build,
+        song_id="song-ja",
+        overrides={"songs": {"song-ja": {"lines": {"0": {}}}}},
+    )
+
+    assert retried == destination
+    assert destination.is_file()
+    assert destination_sidecar.is_file()
+    assert not publish_state.exists()

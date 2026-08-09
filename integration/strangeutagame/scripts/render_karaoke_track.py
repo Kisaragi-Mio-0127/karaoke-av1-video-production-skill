@@ -1325,6 +1325,17 @@ _BAD_DISPLAY_BOUNDARY_START_TOKENS = (
 )
 
 
+def _starts_with_bad_display_boundary_token(
+    characters: Sequence,
+    position: int,
+) -> bool:
+    if position < 0 or position >= len(characters):
+        return False
+    width = max(map(len, _BAD_DISPLAY_BOUNDARY_START_TOKENS))
+    suffix = "".join(character.char for character in characters[position : position + width])
+    return suffix.startswith(_BAD_DISPLAY_BOUNDARY_START_TOKENS)
+
+
 def _normalize_display_text(text: str) -> str:
     """Return the source-line text used for display-phrase override lookup."""
 
@@ -1625,6 +1636,8 @@ def _split_character_run(
             eligible_ruby_character_ids=eligible_ruby_character_ids,
         ):
             continue
+        if _starts_with_bad_display_boundary_token(characters, position):
+            continue
         left_onset = _character_onset(characters[position - 1])
         right_onset = _character_onset(characters[position])
         acoustic_gap = (
@@ -1634,14 +1647,11 @@ def _split_character_run(
         )
         ending_bonus = 0
         prefix = run_text[:position]
-        suffix = run_text[position:]
         if any(prefix.endswith(ending) for ending in _PREFERRED_PHRASE_ENDINGS):
             ending_bonus = 320
         if prefix.endswith(("、", "。", "？", "！", "…")):
             ending_bonus += 600
         score = min(acoustic_gap, 1_500) * 0.35 + ending_bonus
-        if suffix.startswith(_BAD_DISPLAY_BOUNDARY_START_TOKENS):
-            score -= 500
         score -= abs(position - target) * 70
         if score > best_score:
             best_score = score
@@ -1664,6 +1674,9 @@ def _split_character_run(
                     characters,
                     position,
                     eligible_ruby_character_ids=eligible_ruby_character_ids,
+                )
+                and not _starts_with_bad_display_boundary_token(
+                    characters, position
                 )
             ),
             None,
@@ -1727,6 +1740,9 @@ def _join_short_display_runs(
                 needed,
                 eligible_ruby_character_ids=eligible_ruby_character_ids,
             )
+            and not _starts_with_bad_display_boundary_token(
+                result[index + 1], needed
+            )
         ):
             donor = result[index + 1]
             result[index].extend(donor[:needed])
@@ -1740,6 +1756,9 @@ def _join_short_display_runs(
                 result[index - 1],
                 len(result[index - 1]) - needed,
                 eligible_ruby_character_ids=eligible_ruby_character_ids,
+            )
+            and not _starts_with_bad_display_boundary_token(
+                result[index - 1], len(result[index - 1]) - needed
             )
         ):
             donor = result[index - 1]

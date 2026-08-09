@@ -144,6 +144,27 @@ def test_off_skips_sidecar_review_but_not_japanese_structure():
         )
 
 
+def test_off_loads_sidecar_for_renderer_provenance(tmp_path):
+    sidecar_path = tmp_path / "song.ruby-review.json"
+    sidecar_path.write_text("{}", encoding="utf-8")
+    machine_sidecar = {
+        "records": [
+            {
+                "source": "project-auto-check",
+                "review_status": "machine-fill",
+            }
+        ]
+    }
+
+    loaded = load_pronunciation_sidecar(
+        sidecar_path,
+        mode="off",
+        loader=lambda _path: machine_sidecar,
+    )
+
+    assert loaded is machine_sidecar
+
+
 @pytest.mark.parametrize("language", ("zh", "en"))
 @pytest.mark.parametrize("mode", ("optional", "required", "off"))
 def test_zh_en_require_zero_source_and_rendered_ruby(language: str, mode: str):

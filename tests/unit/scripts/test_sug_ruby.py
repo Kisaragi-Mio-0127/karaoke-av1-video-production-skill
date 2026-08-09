@@ -407,9 +407,28 @@ def test_whole_sentence_fill_rejects_ruby_assigned_to_boundary_character(
     assert timing_fingerprint(project) == before_timing
 
 
-@pytest.mark.parametrize("mark", ["ー", "ｰ", "々"])
-def test_whole_sentence_fill_preserves_allowed_word_marks(mark):
-    text = f"語{mark}"
+@pytest.mark.parametrize(
+    ("suffix", "link_positions", "expected_surface", "expected_link"),
+    [
+        ("る", frozenset(), "語", False),
+        ("ー", frozenset(), "語", False),
+        ("ｰ", frozenset(), "語", False),
+        ("々", frozenset({0}), "語々", True),
+    ],
+)
+def test_successful_sudachi_replaces_helper_links_at_non_kanji_boundaries(
+    monkeypatch,
+    suffix,
+    link_positions,
+    expected_surface,
+    expected_link,
+):
+    monkeypatch.setattr(
+        sug_ruby,
+        "_sudachi_kanji_link_positions",
+        lambda _text: link_positions,
+    )
+    text = f"語{suffix}"
     sentence = Sentence(
         id="sentence-1",
         singer_id="singer-1",
@@ -429,10 +448,10 @@ def test_whole_sentence_fill_preserves_allowed_word_marks(mark):
     records = fill_missing_project_ruby(project, SentenceService())
 
     assert [(span.surface, span.reading) for span in iter_sug_ruby_spans(project)] == [
-        (text, "ご")
+        (expected_surface, "ご")
     ]
-    assert sentence.characters[0].linked_to_next is True
-    assert [record["surface"] for record in records] == [text]
+    assert sentence.characters[0].linked_to_next is expected_link
+    assert [record["surface"] for record in records] == [expected_surface]
 
 
 def test_whole_sentence_fill_preserves_existing_human_ruby_and_links():

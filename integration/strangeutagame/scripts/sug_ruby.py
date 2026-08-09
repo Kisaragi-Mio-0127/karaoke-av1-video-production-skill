@@ -1156,8 +1156,7 @@ def _apply_sudachi_word_links(characters: Sequence[Any]) -> bool:
     if link_positions is None:
         return False
     for index, character in enumerate(characters[:-1]):
-        if _is_kanji(texts[index]) and _is_kanji(texts[index + 1]):
-            _set_value(character, "linked_to_next", index in link_positions)
+        _set_value(character, "linked_to_next", index in link_positions)
     return True
 
 

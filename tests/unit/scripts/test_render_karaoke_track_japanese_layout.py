@@ -479,6 +479,28 @@ def test_required_split_never_cuts_a_canonical_ruby_span():
         assert not sentence.characters[cursor - 1].linked_to_next
 
 
+def test_required_split_never_starts_next_phrase_with_particle_when_other_candidates_are_protected(
+    monkeypatch,
+):
+    sentence = _sentence("春夏秋冬東西南北を歩いて帰る場所へ")
+    sentence.characters[8].timestamps[0] = 5_000
+    monkeypatch.setattr(
+        renderer,
+        "_is_protected_display_boundary",
+        lambda _characters, position, **_kwargs: position not in {6, 8},
+    )
+
+    runs = renderer._split_character_run(sentence.characters, max_chars=8)
+
+    rendered_runs = ["".join(character.char for character in run) for run in runs]
+    assert rendered_runs[0] == "春夏秋冬東西"
+    assert "".join(rendered_runs) == sentence.text
+    assert all(
+        not run.startswith(renderer._BAD_DISPLAY_BOUNDARY_START_TOKENS)
+        for run in rendered_runs[1:]
+    )
+
+
 def test_display_override_never_cuts_a_canonical_word_span():
     sentence = _sentence("明日もずっと信じ続けて歩いていく")
     sentence.characters[7].linked_to_next = True

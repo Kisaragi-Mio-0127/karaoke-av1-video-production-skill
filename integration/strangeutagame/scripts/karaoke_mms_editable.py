@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import uuid
@@ -13,7 +14,6 @@ from typing import Any
 
 try:
     from scripts.sug_ruby import (
-        iter_sug_ruby_spans,
         load_review_sidecar,
         sentence_id,
         span_hash,
@@ -24,7 +24,6 @@ try:
     )
 except ImportError:  # pragma: no cover - direct script execution
     from sug_ruby import (  # type: ignore[no-redef]
-        iter_sug_ruby_spans,
         load_review_sidecar,
         sentence_id,
         span_hash,
@@ -236,7 +235,9 @@ def _assert_only_timing_and_media_changed(
 
 
 def _companion_review_sidecar(
-    canonical_sidecar: Mapping[str, Any], companion: Mapping[str, Any]
+    canonical_sidecar: Mapping[str, Any],
+    canonical: Mapping[str, Any],
+    companion: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Rebind canonical ruby provenance to the timing-adjusted companion."""
 
@@ -244,33 +245,124 @@ def _companion_review_sidecar(
     records = sidecar.get("records")
     if not isinstance(records, list):
         raise MmsEditableError("canonical ruby review sidecar records must be a list")
+    canonical_hash = sug_hash(canonical)
+    if sidecar.get("sug_hash_after") != canonical_hash:
+        raise MmsEditableError(
+            "canonical ruby review sidecar sug_hash_after is stale for the canonical SUG"
+        )
 
-    sentences = companion.get("sentences", [])
+    sentences = canonical.get("sentences", [])
     sentence_indices = {
         sentence_id(sentence, f"sentence:{sentence_index}"): sentence_index
         for sentence_index, sentence in enumerate(sentences)
     }
-
-    current_spans = {
-        (span.sentence_id, span.start, span.end): span_hash(
-            companion, sentence_indices[span.sentence_id], span.start, span.end
-        )
-        for span in iter_sug_ruby_spans(companion)
-    }
-    for record in records:
+    for record_index, record in enumerate(records):
         if not isinstance(record, dict):
-            continue
-        identity = (
-            str(record.get("sentence_id", "")),
-            int(record.get("start", -1)),
-            int(record.get("end", -1)),
+            raise MmsEditableError(
+                f"canonical ruby review sidecar record {record_index} must be an object"
+            )
+        sid = str(record.get("sentence_id", ""))
+        try:
+            start = int(record.get("start", -1))
+            end = int(record.get("end", -1))
+        except (TypeError, ValueError) as error:
+            raise MmsEditableError(
+                f"canonical ruby review sidecar record {record_index} has invalid span coordinates"
+            ) from error
+        sentence_index = sentence_indices.get(sid)
+        characters = (
+            sentences[sentence_index].get("characters", [])
+            if sentence_index is not None and isinstance(sentences[sentence_index], Mapping)
+            else []
         )
-        current_hash = current_spans.get(identity)
-        if current_hash is not None:
-            record["after_hash"] = current_hash
+        if sentence_index is None or not 0 <= start < end <= len(characters):
+            raise MmsEditableError(
+                f"canonical ruby review sidecar record {record_index} does not match a canonical SUG span"
+            )
+        canonical_span_hash = span_hash(canonical, sentence_index, start, end)
+        if record.get("after_hash") != canonical_span_hash:
+            raise MmsEditableError(
+                f"canonical ruby review sidecar record {record_index} after_hash is stale"
+            )
+        record["after_hash"] = span_hash(companion, sentence_index, start, end)
 
     sidecar["sug_hash_after"] = sug_hash(companion)
     return sidecar
+
+
+def _json_bytes(value: Mapping[str, Any]) -> bytes:
+    return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
+def _sha256(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _recover_interrupted_publish(
+    *,
+    state_path: Path,
+    destination: Path,
+    destination_sidecar: Path,
+    companion_bytes: bytes,
+    sidecar_bytes: bytes | None,
+) -> bool:
+    """Recover a journaled two-file publish; return true for an already complete pair."""
+
+    if not state_path.exists():
+        destination_exists = destination.exists()
+        sidecar_exists = destination_sidecar.exists()
+        if destination_exists and sidecar_exists:
+            raise FileExistsError(f"editable MMS companion already exists: {destination}")
+        orphan_path = destination if destination_exists else destination_sidecar
+        orphan_bytes = companion_bytes if destination_exists else sidecar_bytes
+        if destination_exists or sidecar_exists:
+            if orphan_bytes is None or _sha256(orphan_path.read_bytes()) != _sha256(
+                orphan_bytes
+            ):
+                raise MmsEditableError(
+                    f"untracked editable MMS publish orphan has unexpected content: {orphan_path}"
+                )
+            orphan_path.unlink()
+        return False
+
+    expected_state = {
+        "schema": 1,
+        "destination": destination.name,
+        "destination_sha256": _sha256(companion_bytes),
+        "sidecar": destination_sidecar.name if sidecar_bytes is not None else None,
+        "sidecar_sha256": _sha256(sidecar_bytes) if sidecar_bytes is not None else None,
+    }
+    state = _load_object(state_path, "editable MMS publish state")
+    if state != expected_state:
+        raise MmsEditableError(
+            "interrupted editable MMS publish state does not match the current inputs"
+        )
+
+    for path, expected_bytes in (
+        (destination, companion_bytes),
+        (destination_sidecar, sidecar_bytes),
+    ):
+        if expected_bytes is None:
+            if path.exists():
+                raise MmsEditableError(
+                    f"interrupted editable MMS publish has an unexpected file: {path}"
+                )
+        elif path.exists() and _sha256(path.read_bytes()) != _sha256(expected_bytes):
+            raise MmsEditableError(
+                f"interrupted editable MMS publish file content changed: {path}"
+            )
+
+    pair_complete = destination.exists() and (
+        sidecar_bytes is None or destination_sidecar.exists()
+    )
+    if pair_complete:
+        state_path.unlink()
+        return True
+
+    destination.unlink(missing_ok=True)
+    destination_sidecar.unlink(missing_ok=True)
+    state_path.unlink()
+    return False
 
 
 def create_mms_editable_companion(
@@ -281,7 +373,11 @@ def create_mms_editable_companion(
     song_id: str,
     overrides: Mapping[str, Any],
 ) -> Path:
-    """Atomically create ``build/<stem>.mms-editable.sug`` without overwriting."""
+    """Recoverably create a SUG/sidecar pair without overwriting a complete pair.
+
+    A fsynced publish record precedes both hard links. A retry validates recorded
+    hashes before completing or removing an interrupted partial publication.
+    """
 
     canonical = canonical_sug.expanduser().resolve()
     selected_audio = audio.expanduser().resolve()
@@ -289,12 +385,6 @@ def create_mms_editable_companion(
     destination = destination_dir / f"{canonical.stem}.mms-editable.sug"
     canonical_sidecar = canonical.with_suffix(".ruby-review.json")
     destination_sidecar = destination.with_suffix(".ruby-review.json")
-    if destination.exists():
-        raise FileExistsError(f"editable MMS companion already exists: {destination}")
-    if canonical_sidecar.is_file() and destination_sidecar.exists():
-        raise FileExistsError(
-            f"editable MMS companion ruby sidecar already exists: {destination_sidecar}"
-        )
     if not selected_audio.is_file():
         raise MmsEditableError(f"selected audio is missing: {selected_audio}")
 
@@ -327,21 +417,34 @@ def create_mms_editable_companion(
     )
     companion_sidecar = (
         _companion_review_sidecar(
-            load_review_sidecar(canonical_sidecar), companion
+            load_review_sidecar(canonical_sidecar), canonical_document, companion
         )
         if canonical_sidecar_bytes is not None
         else None
     )
     destination_dir.mkdir(parents=True, exist_ok=True)
+    companion_bytes = _json_bytes(companion)
+    sidecar_bytes = _json_bytes(companion_sidecar) if companion_sidecar is not None else None
+    publish_state = destination.with_name(f".{destination.name}.publish.json")
+    if _recover_interrupted_publish(
+        state_path=publish_state,
+        destination=destination,
+        destination_sidecar=destination_sidecar,
+        companion_bytes=companion_bytes,
+        sidecar_bytes=sidecar_bytes,
+    ):
+        return destination
+
     temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
     sidecar_temporary = destination_sidecar.with_name(
         f".{destination_sidecar.name}.{uuid.uuid4().hex}.tmp"
     )
-    sidecar_published = False
+    state_temporary = publish_state.with_name(
+        f".{publish_state.name}.{uuid.uuid4().hex}.tmp"
+    )
     try:
-        with temporary.open("x", encoding="utf-8", newline="\n") as handle:
-            json.dump(companion, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
+        with temporary.open("xb") as handle:
+            handle.write(companion_bytes)
             handle.flush()
             os.fsync(handle.fileno())
         SugProjectParser.load(str(temporary))
@@ -349,26 +452,37 @@ def create_mms_editable_companion(
         if extras.get("media_path") != companion["media_path"]:
             raise MmsEditableError("editable MMS companion media_path did not round-trip")
         if companion_sidecar is not None:
-            with sidecar_temporary.open("x", encoding="utf-8", newline="\n") as handle:
-                json.dump(companion_sidecar, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
+            with sidecar_temporary.open("xb") as handle:
+                handle.write(sidecar_bytes or b"")
                 handle.flush()
                 os.fsync(handle.fileno())
             load_review_sidecar(sidecar_temporary)
+
+        publish_payload = {
+            "schema": 1,
+            "destination": destination.name,
+            "destination_sha256": _sha256(companion_bytes),
+            "sidecar": destination_sidecar.name if sidecar_bytes is not None else None,
+            "sidecar_sha256": _sha256(sidecar_bytes) if sidecar_bytes is not None else None,
+        }
+        with state_temporary.open("xb") as handle:
+            handle.write(_json_bytes(publish_payload))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(state_temporary, publish_state)
+        if companion_sidecar is not None:
             os.link(sidecar_temporary, destination_sidecar)
-            sidecar_published = True
         os.link(temporary, destination)
-    except Exception:
-        if sidecar_published:
-            destination_sidecar.unlink(missing_ok=True)
-        raise
+        publish_state.unlink()
     finally:
         temporary.unlink(missing_ok=True)
         sidecar_temporary.unlink(missing_ok=True)
+        state_temporary.unlink(missing_ok=True)
 
     if canonical.read_bytes() != original_bytes:
         destination.unlink(missing_ok=True)
         destination_sidecar.unlink(missing_ok=True)
+        publish_state.unlink(missing_ok=True)
         raise MmsEditableError("canonical SUG bytes changed while creating companion")
     if (
         canonical_sidecar_bytes is not None
@@ -376,6 +490,7 @@ def create_mms_editable_companion(
     ):
         destination.unlink(missing_ok=True)
         destination_sidecar.unlink(missing_ok=True)
+        publish_state.unlink(missing_ok=True)
         raise MmsEditableError(
             "canonical ruby review sidecar bytes changed while creating companion"
         )

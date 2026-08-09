@@ -8,6 +8,7 @@ import pytest
 
 from scripts import run_karaoke_japanese_mms_workflow as mms_workflow
 from scripts.karaoke_workflow import KaraokeWorkflowError
+from scripts.sug_ruby import span_hash, sug_hash, write_review_sidecar
 
 
 def _environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -211,6 +212,30 @@ def test_private_mms_workflow_chains_reusable_stages_and_only_renders_releases(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     env = _environment(tmp_path, monkeypatch)
+    canonical_sidecar = env.sug.with_suffix(".ruby-review.json")
+    write_review_sidecar(
+        canonical_sidecar,
+        sug_hash_before=sug_hash(env.sug_document),
+        sug_hash_after=sug_hash(env.sug_document),
+        records=[
+            {
+                "sentence_id": "sentence:0",
+                "start": 0,
+                "end": 2,
+                "surface": "今日",
+                "source": "project-auto-check",
+                "review_status": "machine-fill",
+                "confidence": None,
+                "evidence": ["whole-sentence-tokenizer"],
+                "model_prompt_version": None,
+                "generation_id": "generated-ruby",
+                "before_hash": span_hash(env.sug_document, 0, 0, 2),
+                "after_hash": span_hash(env.sug_document, 0, 0, 2),
+            }
+        ],
+        generation_id="canonical-generation",
+    )
+    canonical_sidecar_bytes = canonical_sidecar.read_bytes()
     background_video = env.project / "footage.mp4"
     background_video.write_bytes(b"video")
     env.args.output_mode = "subtitle-overlay"
@@ -253,6 +278,14 @@ def test_private_mms_workflow_chains_reusable_stages_and_only_renders_releases(
         assert config.output_mode == "subtitle-overlay"
         assert config.background_video == background_video.resolve()
         assert config.color_policy == "project"
+        companion_sidecar = config.sug.with_suffix(".ruby-review.json")
+        assert companion_sidecar.is_file()
+        current_sug = json.loads(config.sug.read_text(encoding="utf-8"))
+        current_sidecar = json.loads(companion_sidecar.read_text(encoding="utf-8"))
+        assert current_sidecar["sug_hash_after"] == sug_hash(current_sug)
+        assert current_sidecar["records"][0]["after_hash"] == span_hash(
+            current_sug, 0, 0, 2
+        )
         config.output_dir.mkdir()
         _write_json(config.output_dir / "workflow-report.json", {"status": "ok"})
         return {"status": "ok"}
@@ -280,6 +313,12 @@ def test_private_mms_workflow_chains_reusable_stages_and_only_renders_releases(
     timing_output = report["outputs"]["timing_overrides"]
     companion_output = report["outputs"]["mms_editable_sug"]
     assert companion_output["paired_timing_overrides"] == timing_output
+    assert companion_output["ruby_review_sidecar"] == report["outputs"][
+        "ruby_review_sidecar"
+    ]
+    assert companion_output["ruby_review_sidecar"]["path"].endswith(
+        ".mms-editable.ruby-review.json"
+    )
     assert render_stage["timing_overrides"] == timing_output
     assert render_stage["mms_editable_sug"] == companion_output
     assert calls["audit"]["song_ids"] == (env.track.song_id,)
@@ -296,6 +335,7 @@ def test_private_mms_workflow_chains_reusable_stages_and_only_renders_releases(
     assert env.sug.read_text(encoding="utf-8") == json.dumps(
         env.sug_document, ensure_ascii=False
     )
+    assert canonical_sidecar.read_bytes() == canonical_sidecar_bytes
 
 
 def test_explicit_mms_model_takes_priority_is_passed_and_recorded(

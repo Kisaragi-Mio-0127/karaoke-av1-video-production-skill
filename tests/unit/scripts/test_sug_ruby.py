@@ -4,6 +4,7 @@ import unicodedata
 
 import pytest
 
+from scripts import sug_ruby
 from scripts.sug_ruby import (
     RUBY_REVIEW_SCHEMA,
     apply_review_patches,
@@ -188,6 +189,69 @@ def test_whole_sentence_fill_preserves_words_existing_ruby_and_timing():
     assert sentence.characters[2].ruby.text == "あめ"
     assert all(character.ruby is None for character in sentence.characters[3:])
     assert timing_fingerprint(project) == before_timing
+
+
+def test_pinned_sudachi_dictionary_finds_adjacent_kanji_word_boundaries():
+    sug_ruby._sudachi_segmenter.cache_clear()
+
+    assert sug_ruby._sudachi_kanji_link_positions("今年来年 一番好き") == frozenset(
+        {0, 2, 5}
+    )
+
+
+def test_whole_sentence_fill_projects_sudachi_words_without_cross_word_links(
+    monkeypatch,
+):
+    text = "今年来年一番好き"
+    readings = ("こ", "とし", "らい", "ねん", "いち", "ばん", "す", None)
+    sentence = Sentence(
+        id="sentence-1",
+        singer_id="singer-1",
+        characters=[
+            Character(char=char, check_count=1, timestamps=[1_000 + index * 100])
+            for index, char in enumerate(text)
+        ],
+    )
+    project = Project(
+        id="project-1",
+        sentences=[sentence],
+        metadata=ProjectMetadata(language="ja"),
+    )
+
+    class SentenceService:
+        def apply_to_sentence(self, analyzed, **_kwargs):
+            for character, reading in zip(
+                analyzed.characters, readings, strict=True
+            ):
+                if reading:
+                    character.ruby = Ruby(parts=[RubyPart(text=reading)])
+
+    monkeypatch.setattr(
+        sug_ruby,
+        "_sudachi_kanji_link_positions",
+        lambda value: frozenset({0, 2, 4}) if value == text else None,
+    )
+
+    fill_missing_project_ruby(project, SentenceService())
+
+    assert [character.linked_to_next for character in sentence.characters] == [
+        True,
+        False,
+        True,
+        False,
+        True,
+        False,
+        False,
+        False,
+    ]
+    assert [
+        (span.surface, span.reading) for span in iter_sug_ruby_spans(project)
+    ] == [
+        ("今年", "ことし"),
+        ("来年", "らいねん"),
+        ("一番", "いちばん"),
+        ("好", "す"),
+    ]
 
 
 @pytest.mark.parametrize(

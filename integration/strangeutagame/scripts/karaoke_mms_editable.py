@@ -12,10 +12,24 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from scripts.sug_ruby import (
+        iter_sug_ruby_spans,
+        load_review_sidecar,
+        sentence_id,
+        span_hash,
+        sug_hash,
+    )
     from strange_uta_game.backend.infrastructure.persistence.sug_io import (
         SugProjectParser,
     )
 except ImportError:  # pragma: no cover - direct script execution
+    from sug_ruby import (  # type: ignore[no-redef]
+        iter_sug_ruby_spans,
+        load_review_sidecar,
+        sentence_id,
+        span_hash,
+        sug_hash,
+    )
     from strange_uta_game.backend.infrastructure.persistence.sug_io import (  # type: ignore[no-redef]
         SugProjectParser,
     )
@@ -221,6 +235,44 @@ def _assert_only_timing_and_media_changed(
         )
 
 
+def _companion_review_sidecar(
+    canonical_sidecar: Mapping[str, Any], companion: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Rebind canonical ruby provenance to the timing-adjusted companion."""
+
+    sidecar = copy.deepcopy(dict(canonical_sidecar))
+    records = sidecar.get("records")
+    if not isinstance(records, list):
+        raise MmsEditableError("canonical ruby review sidecar records must be a list")
+
+    sentences = companion.get("sentences", [])
+    sentence_indices = {
+        sentence_id(sentence, f"sentence:{sentence_index}"): sentence_index
+        for sentence_index, sentence in enumerate(sentences)
+    }
+
+    current_spans = {
+        (span.sentence_id, span.start, span.end): span_hash(
+            companion, sentence_indices[span.sentence_id], span.start, span.end
+        )
+        for span in iter_sug_ruby_spans(companion)
+    }
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        identity = (
+            str(record.get("sentence_id", "")),
+            int(record.get("start", -1)),
+            int(record.get("end", -1)),
+        )
+        current_hash = current_spans.get(identity)
+        if current_hash is not None:
+            record["after_hash"] = current_hash
+
+    sidecar["sug_hash_after"] = sug_hash(companion)
+    return sidecar
+
+
 def create_mms_editable_companion(
     *,
     canonical_sug: Path,
@@ -235,8 +287,14 @@ def create_mms_editable_companion(
     selected_audio = audio.expanduser().resolve()
     destination_dir = build_dir.expanduser().resolve()
     destination = destination_dir / f"{canonical.stem}.mms-editable.sug"
+    canonical_sidecar = canonical.with_suffix(".ruby-review.json")
+    destination_sidecar = destination.with_suffix(".ruby-review.json")
     if destination.exists():
         raise FileExistsError(f"editable MMS companion already exists: {destination}")
+    if canonical_sidecar.is_file() and destination_sidecar.exists():
+        raise FileExistsError(
+            f"editable MMS companion ruby sidecar already exists: {destination_sidecar}"
+        )
     if not selected_audio.is_file():
         raise MmsEditableError(f"selected audio is missing: {selected_audio}")
 
@@ -264,8 +322,22 @@ def create_mms_editable_companion(
     relative_audio = os.path.relpath(selected_audio, start=destination.parent)
     companion["media_path"] = Path(relative_audio).as_posix()
     _assert_only_timing_and_media_changed(canonical_document, companion)
+    canonical_sidecar_bytes = (
+        canonical_sidecar.read_bytes() if canonical_sidecar.is_file() else None
+    )
+    companion_sidecar = (
+        _companion_review_sidecar(
+            load_review_sidecar(canonical_sidecar), companion
+        )
+        if canonical_sidecar_bytes is not None
+        else None
+    )
     destination_dir.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+    sidecar_temporary = destination_sidecar.with_name(
+        f".{destination_sidecar.name}.{uuid.uuid4().hex}.tmp"
+    )
+    sidecar_published = False
     try:
         with temporary.open("x", encoding="utf-8", newline="\n") as handle:
             json.dump(companion, handle, ensure_ascii=False, indent=2)
@@ -276,11 +348,35 @@ def create_mms_editable_companion(
         extras = SugProjectParser.load_extras(str(temporary))
         if extras.get("media_path") != companion["media_path"]:
             raise MmsEditableError("editable MMS companion media_path did not round-trip")
+        if companion_sidecar is not None:
+            with sidecar_temporary.open("x", encoding="utf-8", newline="\n") as handle:
+                json.dump(companion_sidecar, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            load_review_sidecar(sidecar_temporary)
+            os.link(sidecar_temporary, destination_sidecar)
+            sidecar_published = True
         os.link(temporary, destination)
+    except Exception:
+        if sidecar_published:
+            destination_sidecar.unlink(missing_ok=True)
+        raise
     finally:
         temporary.unlink(missing_ok=True)
+        sidecar_temporary.unlink(missing_ok=True)
 
     if canonical.read_bytes() != original_bytes:
         destination.unlink(missing_ok=True)
+        destination_sidecar.unlink(missing_ok=True)
         raise MmsEditableError("canonical SUG bytes changed while creating companion")
+    if (
+        canonical_sidecar_bytes is not None
+        and canonical_sidecar.read_bytes() != canonical_sidecar_bytes
+    ):
+        destination.unlink(missing_ok=True)
+        destination_sidecar.unlink(missing_ok=True)
+        raise MmsEditableError(
+            "canonical ruby review sidecar bytes changed while creating companion"
+        )
     return destination

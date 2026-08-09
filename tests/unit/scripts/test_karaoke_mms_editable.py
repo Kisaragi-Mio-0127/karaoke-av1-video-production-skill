@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts.karaoke_mms_editable import MmsEditableError, create_mms_editable_companion
+from scripts.sug_ruby import span_hash, sug_hash, write_review_sidecar
 from strange_uta_game.backend.infrastructure.persistence.sug_io import SugProjectParser
 
 
@@ -57,6 +58,30 @@ def test_companion_is_loadable_atomic_non_overwriting_and_preserves_canonical(
         encoding="utf-8",
     )
     original_bytes = canonical.read_bytes()
+    canonical_sidecar = canonical.with_suffix(".ruby-review.json")
+    write_review_sidecar(
+        canonical_sidecar,
+        sug_hash_before=sug_hash(document),
+        sug_hash_after=sug_hash(document),
+        records=[
+            {
+                "sentence_id": "line-0",
+                "start": 0,
+                "end": 2,
+                "surface": "今日",
+                "source": "project-auto-check",
+                "review_status": "machine-fill",
+                "confidence": None,
+                "evidence": ["whole-sentence-tokenizer"],
+                "model_prompt_version": None,
+                "generation_id": "generated-ruby",
+                "before_hash": span_hash(document, 0, 0, 2),
+                "after_hash": span_hash(document, 0, 0, 2),
+            }
+        ],
+        generation_id="canonical-generation",
+    )
+    original_sidecar_bytes = canonical_sidecar.read_bytes()
     overrides = {
         "songs": {
             "song-ja": {
@@ -81,7 +106,17 @@ def test_companion_is_loadable_atomic_non_overwriting_and_preserves_canonical(
 
     assert companion == build / "canonical.mms-editable.sug"
     assert canonical.read_bytes() == original_bytes
+    assert canonical_sidecar.read_bytes() == original_sidecar_bytes
     saved = json.loads(companion.read_text(encoding="utf-8"))
+    companion_sidecar_path = companion.with_suffix(".ruby-review.json")
+    companion_sidecar = json.loads(companion_sidecar_path.read_text(encoding="utf-8"))
+    assert companion_sidecar["generation_id"] == "canonical-generation"
+    assert companion_sidecar["sug_hash_after"] == sug_hash(saved)
+    assert companion_sidecar["records"][0]["after_hash"] == span_hash(
+        saved, 0, 0, 2
+    )
+    assert companion_sidecar["records"][0]["source"] == "project-auto-check"
+    assert companion_sidecar["records"][0]["review_status"] == "machine-fill"
     first, second = saved["sentences"][0]["characters"]
     assert first["timestamps"] == [900, 1200]
     assert second["timestamps"] == [1600]

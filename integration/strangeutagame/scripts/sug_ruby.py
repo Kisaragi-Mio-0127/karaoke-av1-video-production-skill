@@ -14,6 +14,7 @@ import unicodedata
 from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -1096,6 +1097,70 @@ def _clear_word_links_at_boundaries(characters: Sequence[Any]) -> None:
             _set_value(character, "linked_to_next", False)
 
 
+@lru_cache(maxsize=1)
+def _sudachi_segmenter() -> tuple[Any, Any] | None:
+    """Load the pinned small Sudachi dictionary for lexical boundaries."""
+
+    try:
+        from sudachipy import dictionary, tokenizer
+
+        return (
+            dictionary.Dictionary(dict="small").create(),
+            tokenizer.Tokenizer.SplitMode.C,
+        )
+    except (ImportError, ModuleNotFoundError, OSError, RuntimeError):
+        return None
+
+
+def _sudachi_kanji_link_positions(text: str) -> frozenset[int] | None:
+    """Return boundaries inside one Sudachi word and one continuous kanji run."""
+
+    configured = _sudachi_segmenter()
+    if configured is None:
+        return None
+    segmenter, split_mode = configured
+    try:
+        morphemes = segmenter.tokenize(text, split_mode)
+    except Exception:
+        return None
+
+    cursor = 0
+    result: set[int] = set()
+    for morpheme in morphemes:
+        surface = str(morpheme.surface())
+        if not surface:
+            continue
+        if text[cursor : cursor + len(surface)] == surface:
+            start = cursor
+        else:
+            start = text.find(surface, cursor)
+            if start < 0 or any(not char.isspace() for char in text[cursor:start]):
+                return None
+        end = start + len(surface)
+        for position in range(start, end - 1):
+            if _is_kanji(text[position]) and _is_kanji(text[position + 1]):
+                result.add(position)
+        cursor = end
+    if any(not char.isspace() for char in text[cursor:]):
+        return None
+    return frozenset(result)
+
+
+def _apply_sudachi_word_links(characters: Sequence[Any]) -> bool:
+    """Project lexical kanji boundaries without crossing words or okurigana."""
+
+    texts = [str(_value(character, "char", "") or "") for character in characters]
+    if any(len(text) != 1 for text in texts):
+        return False
+    link_positions = _sudachi_kanji_link_positions("".join(texts))
+    if link_positions is None:
+        return False
+    for index, character in enumerate(characters[:-1]):
+        if _is_kanji(texts[index]) and _is_kanji(texts[index + 1]):
+            _set_value(character, "linked_to_next", index in link_positions)
+    return True
+
+
 def _restore_analyzed_whitespace_axis(
     original_chars: Sequence[Any],
     analyzed_chars: Sequence[Any],
@@ -1175,6 +1240,7 @@ def fill_missing_project_ruby(project: Any, helper: Any) -> list[dict[str, Any]]
             )
             if len(analyzed_chars) != len(original_chars):
                 raise RubyValidationError("whole-sentence ruby alignment failed")
+            _apply_sudachi_word_links(analyzed_chars)
             _clear_word_links_at_boundaries(analyzed_chars)
 
             start = 0

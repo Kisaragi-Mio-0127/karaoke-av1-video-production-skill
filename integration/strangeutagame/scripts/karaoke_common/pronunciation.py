@@ -39,7 +39,7 @@ def load_pronunciation_sidecar(
     if mode not in PRONUNCIATION_VALIDATION_MODES:
         raise ValueError(f"unsupported pronunciation validation mode: {mode!r}")
     sidecar_path = Path(path)
-    if mode == "off" or not sidecar_path.is_file():
+    if not sidecar_path.is_file():
         return None
     try:
         return loader(sidecar_path)

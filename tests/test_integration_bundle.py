@@ -17,6 +17,31 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "integration" / "strangeutagame"
 SCRIPTS = BUNDLE / "scripts"
 MANIFEST = BUNDLE / "dependency-manifest.json"
+_ABSOLUTE_LOCAL_PATH = re.compile(
+    r"(?<![A-Za-z0-9_])[A-Za-z]:[/\\]|/home/[^/<\s]+/", re.IGNORECASE
+)
+_PRIVATE_LITERAL = re.compile(
+    r"private-album-name|private-song-title|private-lyric-fragment", re.IGNORECASE
+)
+_ALLOWED_SYNTHETIC_TEST_PATHS = (
+    "C:/requirements/",
+    "C:\\requirements\\",
+    "C:\\escape",
+    "C:/evidence/",
+    "C:/models/",
+    "C:/path/",
+    "C:/Windows",
+    "C:/project/",
+)
+
+
+def _is_allowed_synthetic_test_path(
+    relative_path: str, line: str, match_offset: int
+) -> bool:
+    return relative_path.startswith("tests/") and any(
+        line.startswith(marker, match_offset)
+        for marker in _ALLOWED_SYNTHETIC_TEST_PATHS
+    )
 
 
 def _load_installer():
@@ -368,16 +393,44 @@ def test_manifest_driven_tools_have_no_import_time_private_manifest() -> None:
 
 
 def test_public_bundle_contains_no_track_specific_or_private_literals() -> None:
-    forbidden = re.compile(
-        r"((?<![A-Za-z0-9_])[A-Za-z]:[/\\]|/home/|private-album-name|"
-        r"private-song-title|private-lyric-fragment)",
-        re.IGNORECASE,
+    tracked = subprocess.check_output(
+        ["git", "ls-files", "-z"], cwd=ROOT
+    ).decode("utf-8").split("\0")
+    for relative_path in sorted(filter(None, tracked)):
+        path = ROOT / relative_path
+        if path.resolve() == Path(__file__).resolve():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        assert _PRIVATE_LITERAL.search(text) is None, path
+        for match in _ABSOLUTE_LOCAL_PATH.finditer(text):
+            line_start = text.rfind("\n", 0, match.start()) + 1
+            line_end = text.find("\n", match.end())
+            line = text[line_start : line_end if line_end >= 0 else None]
+            allowed = _is_allowed_synthetic_test_path(
+                relative_path, line, match.start() - line_start
+            )
+            assert allowed, f"{path}: {match.group(0)}"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ("D:/workspace/private-song", r"D:\workspace\private-song", "/home/example/private-song"),
+)
+def test_private_path_detector_covers_non_system_directories(value: str) -> None:
+    assert _ABSOLUTE_LOCAL_PATH.search(value) is not None
+
+
+def test_synthetic_path_allowlist_does_not_hide_private_path_on_same_line() -> None:
+    line = 'paths = "C:/requirements/pinned.txt", "D:/workspace/private-song"'
+    matches = list(_ABSOLUTE_LOCAL_PATH.finditer(line))
+
+    assert _is_allowed_synthetic_test_path("tests/example.py", line, matches[0].start())
+    assert not _is_allowed_synthetic_test_path(
+        "tests/example.py", line, matches[1].start()
     )
-    for path in sorted(
-        [ROOT / "README.md", ROOT / "README.zh-CN.md", ROOT / "SKILL.md"]
-        + list(SCRIPTS.rglob("*.py"))
-    ):
-        assert forbidden.search(path.read_text(encoding="utf-8")) is None, path
 
 
 def test_skill_contains_no_runtime_or_test_artifacts() -> None:

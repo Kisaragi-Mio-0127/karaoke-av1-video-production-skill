@@ -133,6 +133,10 @@ otherwise. This selection does not install a driver. Production still follows
 
 ## Install the integration
 
+Get StrangeUtaGame from its upstream repository:
+[karaoke-studio/StrangeUtaGame](https://github.com/karaoke-studio/StrangeUtaGame).
+Prepare a compatible checkout separately from this Skill repository.
+
 Clone the Skill into the Codex skills directory:
 
 ```powershell

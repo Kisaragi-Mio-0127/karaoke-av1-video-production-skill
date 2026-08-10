@@ -72,6 +72,10 @@ python scripts/bootstrap_karaoke_environment.py --target <StrangeUtaGame> `
 
 ## 安装集成
 
+从上游仓库获取StrangeUtaGame：
+[karaoke-studio/StrangeUtaGame](https://github.com/karaoke-studio/StrangeUtaGame)。
+请在本Skill仓库之外单独准备兼容的StrangeUtaGame工作区。
+
 将Skill克隆到Codex技能目录：
 
 ```powershell

@@ -8,6 +8,10 @@ checkout.
 
 ## Install
 
+Obtain the application from the upstream
+[karaoke-studio/StrangeUtaGame](https://github.com/karaoke-studio/StrangeUtaGame)
+repository and prepare a compatible checkout separately from this Skill.
+
 Preview the copy plan, then install into an existing checkout:
 
 ```powershell
@@ -305,8 +309,8 @@ Run compatibility and environment checks with the actual target:
 
 ```powershell
 Set-Location <StrangeUtaGame>
-uv run --no-sync python D:\path\to\skill\scripts/check_sug_compatibility.py --repo . --project <project.sug>
-python D:\path\to\skill\scripts/check_karaoke_environment.py --target .
+uv run --no-sync python <skill-root>\scripts\check_sug_compatibility.py --repo . --project <project.sug>
+python <skill-root>\scripts\check_karaoke_environment.py --target .
 ```
 
 The environment check may return non-zero when `ffmpeg` or `ffprobe` is absent;

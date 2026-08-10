@@ -6,6 +6,10 @@
 
 ## 安装
 
+从上游仓库
+[karaoke-studio/StrangeUtaGame](https://github.com/karaoke-studio/StrangeUtaGame)
+获取应用，并在本Skill之外单独准备兼容工作区。
+
 先预览复制计划，再安装到已有工作区：
 
 ```powershell
@@ -184,8 +188,8 @@ Full-auto、分阶段MMS、直接重渲染和批量渲染需要目标应用运�
 
 ```powershell
 Set-Location <StrangeUtaGame>
-uv run --no-sync python D:\path\to\skill\scripts/check_sug_compatibility.py --repo . --project <project.sug>
-python D:\path\to\skill\scripts/check_karaoke_environment.py --target .
+uv run --no-sync python <skill-root>\scripts\check_sug_compatibility.py --repo . --project <project.sug>
+python <skill-root>\scripts\check_karaoke_environment.py --target .
 ```
 
 如果`ffmpeg`或`ffprobe`缺失，环境检查可能返回非零；这只是诊断结果，不表示生产流程可以下载这些工具。

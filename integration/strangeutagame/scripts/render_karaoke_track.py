@@ -2002,8 +2002,8 @@ def _split_japanese_whitespace_runs(
         index += 1
     runs = _repair_japanese_paired_boundaries(runs)
     # Joining complete blocks is safe; moving individual characters between
-    # them is not. In particular, do not turn ``降り出す前に 帰る場所を``
-    # into ``降り出す前 | に帰る場所を`` merely to satisfy a minimum length.
+    # them is not. In particular, do not turn ``画面確認前に 項目追加を``
+    # into ``画面確認前 | に項目追加を`` merely to satisfy a minimum length.
     return _coalesce_display_runs_that_fit(
         runs,
         max_chars=max_chars,

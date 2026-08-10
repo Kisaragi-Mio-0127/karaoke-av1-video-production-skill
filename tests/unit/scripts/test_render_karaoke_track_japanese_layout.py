@@ -258,7 +258,7 @@ def test_seventeen_character_japanese_line_that_fits_splits_into_balanced_phrase
 
 
 def test_long_japanese_line_that_fits_still_splits_at_semantic_boundary(monkeypatch):
-    sentence = _sentence("聞いたってきっと朝にはいつもいないんだろう")
+    sentence = _sentence("試験番号一二三四五六は画面分割確認事項追加")
     monkeypatch.setattr(
         renderer,
         "_measured_text_span",
@@ -274,14 +274,14 @@ def test_long_japanese_line_that_fits_still_splits_at_semantic_boundary(monkeypa
     )
 
     assert [phrase.text for phrase in phrases] == [
-        "聞いたってきっと朝には",
-        "いつもいないんだろう",
+        "試験番号一二三四五六は",
+        "画面分割確認事項追加",
     ]
     assert "".join(phrase.text for phrase in phrases) == sentence.text
 
 
 def test_long_japanese_line_prefers_internal_spaces_even_when_width_fits(monkeypatch):
-    sentence = _sentence("それでも もう一度 この手を 僕は伸ばしてみたよ")
+    sentence = _sentence("試験項目 番号確認 表示領域 分割動作確認追加済")
     monkeypatch.setattr(
         renderer,
         "_measured_text_span",
@@ -297,14 +297,14 @@ def test_long_japanese_line_prefers_internal_spaces_even_when_width_fits(monkeyp
     )
 
     assert [phrase.text for phrase in phrases] == [
-        "それでももう一度",
-        "この手を僕は伸ばしてみたよ",
+        "試験項目番号確認",
+        "表示領域分割動作確認追加済",
     ]
     assert "".join(phrase.text for phrase in phrases) == sentence.text.replace(" ", "")
 
 
 def test_compact_japanese_line_keeps_internal_space_as_semantic_gap(monkeypatch):
-    sentence = _sentence("海が見たいって 君は言うよ")
+    sentence = _sentence("表示領域確認中 番号一二三")
     source_timestamps = {
         id(character): tuple(character.global_timestamps)
         for character in sentence.characters
@@ -324,7 +324,7 @@ def test_compact_japanese_line_keeps_internal_space_as_semantic_gap(monkeypatch)
         layout=renderer.WIDE_LAYOUT,
     )
 
-    assert [phrase.text for phrase in phrases] == ["海が見たいって君は言うよ"]
+    assert [phrase.text for phrase in phrases] == ["表示領域確認中番号一二三"]
     assert all(
         not character.char.isspace()
         for phrase in phrases
@@ -344,7 +344,7 @@ def test_compact_japanese_line_keeps_internal_space_as_semantic_gap(monkeypatch)
 def test_thirteen_visible_characters_prefer_source_space_before_width_fast_path(
     monkeypatch,
 ):
-    sentence = _sentence("春風を待ってる 君と歩きたい")
+    sentence = _sentence("表示領域確認中 番号確認追加")
     monkeypatch.setattr(
         renderer,
         "_measured_text_span",
@@ -360,13 +360,13 @@ def test_thirteen_visible_characters_prefer_source_space_before_width_fast_path(
     )
 
     assert [phrase.text for phrase in phrases] == [
-        "春風を待ってる",
-        "君と歩きたい",
+        "表示領域確認中",
+        "番号確認追加",
     ]
 
 
 def test_mid_sentence_continuation_never_starts_the_following_line(monkeypatch):
-    sentence = _sentence("忘れないでいて けど 明日は歩き出せるから")
+    sentence = _sentence("表示領域確認中 けど 番号一二三四五六確認")
     monkeypatch.setattr(
         renderer,
         "_measured_text_span",
@@ -382,14 +382,14 @@ def test_mid_sentence_continuation_never_starts_the_following_line(monkeypatch):
     )
 
     assert [phrase.text for phrase in phrases] == [
-        "忘れないでいてけど",
-        "明日は歩き出せるから",
+        "表示領域確認中けど",
+        "番号一二三四五六確認",
     ]
     assert all(not phrase.text.startswith("けど") for phrase in phrases[1:])
 
 
 def test_whitespace_split_never_moves_a_particle_across_the_source_boundary(monkeypatch):
-    sentence = _sentence("冷たい雨が 降り出す前に 帰る場所を")
+    sentence = _sentence("試験番号は 画面確認前に 項目追加を")
     monkeypatch.setattr(
         renderer,
         "_measured_text_span",
@@ -405,13 +405,13 @@ def test_whitespace_split_never_moves_a_particle_across_the_source_boundary(monk
     )
 
     assert [phrase.text for phrase in phrases] == [
-        "冷たい雨が降り出す前に",
-        "帰る場所を",
+        "試験番号は画面確認前に",
+        "項目追加を",
     ]
 
 
 def test_short_continuation_block_stays_with_the_preceding_phrase(monkeypatch):
-    sentence = _sentence("この手で握りしめた かけらがひとつこぼれ落ちたよ けど")
+    sentence = _sentence("試験用文字列番号一 表示領域分割動作確認番号二三 けど")
     monkeypatch.setattr(
         renderer,
         "_measured_text_span",
@@ -427,13 +427,13 @@ def test_short_continuation_block_stays_with_the_preceding_phrase(monkeypatch):
     )
 
     assert [phrase.text for phrase in phrases] == [
-        "この手で握りしめた",
-        "かけらがひとつこぼれ落ちたよけど",
+        "試験用文字列番号一",
+        "表示領域分割動作確認番号二三けど",
     ]
 
 
 def test_whitespace_split_preserves_character_objects_and_timestamps(monkeypatch):
-    sentence = _sentence("それでも もう一度 この手を 僕は伸ばしてみたよ")
+    sentence = _sentence("試験項目 番号確認 表示領域 分割動作確認追加済")
     source_characters = [
         character for character in sentence.characters if not character.char.isspace()
     ]
@@ -726,7 +726,7 @@ def test_fifteen_character_split_keeps_particle_before_short_tail_and_preserves_
 
 
 def test_display_override_never_cuts_a_canonical_word_span():
-    sentence = _sentence("明日もずっと信じ続けて歩いていく")
+    sentence = _sentence("試験番号一二三四五六表示確認追加")
     sentence.characters[7].linked_to_next = True
 
     with pytest.raises(ValueError, match="protected Japanese display unit"):
@@ -735,9 +735,9 @@ def test_display_override_never_cuts_a_canonical_word_span():
             max_chars=renderer.WIDE_LAYOUT.max_phrase_chars,
             language="ja",
             display_phrase_overrides={
-                "明日もずっと信じ続けて歩いていく": (
-                    "明日もずっと信じ",
-                    "続けて歩いていく",
+                "試験番号一二三四五六表示確認追加": (
+                    "試験番号一二三四",
+                    "五六表示確認追加",
                 )
             },
         )

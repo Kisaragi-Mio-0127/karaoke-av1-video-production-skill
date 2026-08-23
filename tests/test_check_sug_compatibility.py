@@ -33,7 +33,7 @@ def _fake_checkout(root: Path) -> tuple[Path, Path]:
     ):
         (directory / "__init__.py").write_text("", encoding="utf-8")
     (package / "__version__.py").write_text(
-        '__version__ = "1.5.0"\n', encoding="utf-8"
+        '__version__ = "1.6.2"\n', encoding="utf-8"
     )
     (persistence / "sug_io.py").write_text(
         "class SugMigrator:\n"
@@ -53,12 +53,12 @@ def _fake_checkout(root: Path) -> tuple[Path, Path]:
     return repo, project
 
 
-def test_checker_defaults_to_strangeutagame_1_5_0_and_sug_0_3_0() -> None:
+def test_checker_defaults_to_strangeutagame_1_6_2_and_sug_0_3_0() -> None:
     args = _load_checker().build_parser().parse_args(
         ["--repo", ".", "--project", "representative.sug"]
     )
 
-    assert args.expected_app_version == "1.5.0"
+    assert args.expected_app_version == "1.6.2"
     assert args.expected_sug_version == "0.3.0"
 
 
@@ -76,13 +76,13 @@ def test_official_package_metadata_mismatch_is_diagnostic_only(tmp_path: Path) -
         report = checker.inspect_checkout(
             repo,
             [project],
-            expected_app_version="1.5.0",
+            expected_app_version="1.6.2",
             expected_sug_version="0.3.0",
         )
         wrong_version_report = checker.inspect_checkout(
             repo,
             [project],
-            expected_app_version="1.4.5",
+            expected_app_version="1.5.0",
             expected_sug_version="0.3.0",
         )
     finally:
@@ -91,7 +91,7 @@ def test_official_package_metadata_mismatch_is_diagnostic_only(tmp_path: Path) -
                 sys.modules.pop(name)
         sys.modules.update(prior_modules)
 
-    assert report["application_version"] == "1.5.0"
+    assert report["application_version"] == "1.6.2"
     assert report["package_version"] == "1.2.6"
     assert report["schema_version"] == "karaoke-sug-compatibility/v2"
     assert report["diagnostics"]["package_version_matches_application"] is False

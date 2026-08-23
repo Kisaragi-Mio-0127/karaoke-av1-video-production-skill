@@ -120,8 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project", type=Path, action="append", default=[])
     parser.add_argument(
         "--expected-app-version",
-        default="1.5.0",
-        help="required application version (default: 1.5.0)",
+        default="1.6.2",
+        help="required application version (default: 1.6.2)",
     )
     parser.add_argument("--expected-sug-version", default="0.3.0")
     parser.add_argument("--output", type=Path)

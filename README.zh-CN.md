@@ -8,6 +8,8 @@ Karaoke AV1 Video Production为StrangeUtaGame提供日文卡拉OK时间轴、可
 
 安装前对目标StrangeUtaGame工作区运行兼容性检查与安装器dry run。兼容性依据应用运行时版本、`SugMigrator` schema和代表性SUG解析结果判断。解析成功仍须通过安装器内置的应用版本与SUG格式精确检查；安装器会在复制文件前报告不受支持的目标。
 
+`main`分支对应StrangeUtaGame 1.6.2与SUG格式0.3.0。旧应用版本的精确集成分别保留在`sug-1.5.0`和`sug-1.4.5`分支。
+
 ## 可以自动完成什么
 
 推荐的日文入口是单命令`scripts/run_karaoke_japanese_full_auto.py`。给定清单、歌曲ID、歌词输入和新的输出目录后，它会：

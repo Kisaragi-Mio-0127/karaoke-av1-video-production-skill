@@ -20,7 +20,7 @@ from pathlib import PurePosixPath
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = SKILL_ROOT / "integration" / "strangeutagame"
 DEPENDENCY_MANIFEST = BUNDLE_ROOT / "dependency-manifest.json"
-EXPECTED_APPLICATION_VERSION = "1.5.0"
+EXPECTED_APPLICATION_VERSION = "1.6.2"
 EXPECTED_SUG_FORMAT_VERSION = "0.3.0"
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 

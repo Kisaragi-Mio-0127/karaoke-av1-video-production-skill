@@ -6,6 +6,10 @@ This reference covers installation, environment preparation, production
 entries, workspace dependencies, and validation for a compatible StrangeUtaGame
 checkout.
 
+The `main` branch targets StrangeUtaGame 1.6.2 and SUG format 0.3.0. Use the
+versioned `sug-1.5.0` or `sug-1.4.5` branch for those earlier application
+releases.
+
 ## Install
 
 Obtain the application from the upstream

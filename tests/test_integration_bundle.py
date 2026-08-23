@@ -64,7 +64,7 @@ def _fake_target(root: Path) -> Path:
         '[project]\nname = "strange-uta-game"\n', encoding="utf-8"
     )
     (package / "__version__.py").write_text(
-        '__version__ = "1.5.0"\n', encoding="utf-8"
+        '__version__ = "1.6.2"\n', encoding="utf-8"
     )
     (persistence / "sug_io.py").write_text(
         'class SugMigrator:\n    CURRENT_VERSION = "0.3.0"\n', encoding="utf-8"
@@ -191,7 +191,7 @@ def test_installer_dry_run_is_manifest_driven(tmp_path: Path) -> None:
 
     assert declared == destinations
     assert all(record["action"] == "install" for record in report["files"])
-    assert report["target_application_version"] == "1.5.0"
+    assert report["target_application_version"] == "1.6.2"
     assert report["target_sug_format_version"] == "0.3.0"
     assert not (target / ".karaoke-skill-backup").exists()
     assert not list(target.glob(".karaoke-skill-stage-*"))
@@ -201,19 +201,19 @@ def test_installer_rejects_wrong_application_version(tmp_path: Path) -> None:
     installer = _load_installer()
     target = _fake_target(tmp_path)
     (target / "src" / "strange_uta_game" / "__version__.py").write_text(
-        '__version__ = "1.4.5"\n', encoding="utf-8"
+        '__version__ = "1.5.0"\n', encoding="utf-8"
     )
 
-    with pytest.raises(SystemExit, match=r"1\.4\.5; expected 1\.5\.0"):
+    with pytest.raises(SystemExit, match=r"1\.5\.0; expected 1\.6\.2"):
         installer.install(target, force=False, dry_run=True)
 
 
 @pytest.mark.parametrize(
     "source",
     [
-        '__version__ = "1.5.0"\n__version__ = "1.5.0"\n',
+        '__version__ = "1.6.2"\n__version__ = "1.6.2"\n',
         "__version__ = detect_version()\n",
-        'APPLICATION_VERSION = "1.5.0"\n',
+        'APPLICATION_VERSION = "1.6.2"\n',
     ],
 )
 def test_installer_rejects_invalid_application_version(

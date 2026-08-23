@@ -4,6 +4,8 @@
 
 本参考说明兼容StrangeUtaGame工作区的安装、环境准备、生产入口、工作区依赖和验证流程。
 
+`main`分支对应StrangeUtaGame 1.6.2与SUG格式0.3.0。StrangeUtaGame 1.5.0或1.4.5工作区应分别使用版本分支`sug-1.5.0`或`sug-1.4.5`。
+
 ## 安装
 
 从上游仓库

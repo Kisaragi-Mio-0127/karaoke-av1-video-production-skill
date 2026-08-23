@@ -946,10 +946,10 @@ def validate_renderer_report(
             spectrum_checks.update(
                 {
                     "spectrum_line_mode": video.get("spectrum_mode")
-                    == "glowing-line-filled-to-baseline",
-                    "spectrum_line_points": video.get("spectrum_line_points") == 1040,
-                    "spectrum_fill_to_zero": video.get(
-                        "spectrum_fill_to_zero_baseline"
+                    == "glowing-40-point-stem-line",
+                    "spectrum_line_points": video.get("spectrum_line_points") == 40,
+                    "spectrum_stems_to_zero": video.get(
+                        "spectrum_stems_to_zero_baseline"
                     )
                     is True,
                     "spectrum_baseline": video.get("spectrum_baseline_y") == 516,
@@ -957,10 +957,8 @@ def validate_renderer_report(
                         "spectrum_baseline_visible"
                     )
                     is False,
-                    "spectrum_line_floor_hidden": video.get(
-                        "spectrum_line_floor_threshold_px"
-                    )
-                    == 4,
+                    "spectrum_stem_width": video.get("spectrum_stem_width_px") == 2,
+                    "spectrum_stem_alpha": video.get("spectrum_stem_alpha") == 0.55,
                 }
             )
         else:

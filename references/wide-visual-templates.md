@@ -73,15 +73,13 @@ when the renderer or canvas changes.
 
 - Spectrum drawing rectangle: `(x,y,width,height)=(800,290,1040,220)`.
 - Line-spectrum drawing rectangle: `(x,y,width,height)=(800,296,1040,220)`.
-- Spectrum zero-amplitude baseline: `y=516`. `spectrum-line` uses it only as
-  the fill boundary and does not draw a visible horizontal baseline. Suppress
-  contour samples in the bottom 4 px so zero-level data cannot form a line.
-- `spectrum-line` uses a continuous bright contour and a translucent area that
-  closes vertically to the baseline. The baseline represents normalized
-  amplitude `Y=0`; the area below the contour has no bar gaps. Adjacent
-  full-width spectrum samples are joined by straight segments. Core-line
-  scaling, smoothing, and dilation are forbidden; blur applies only to the
-  separate glow layers.
+- Spectrum zero-amplitude coordinate: `y=516`. `spectrum-line` does not draw a
+  horizontal baseline.
+- `spectrum-line` contains exactly 40 frequency points. Adjacent points are
+  joined by straight segments, and every visible point has a 2 px vertical
+  stem at the same `x` down to normalized amplitude `Y=0`. Stems use 55%
+  opacity. Zero-level points remain hidden so they cannot form a bottom line;
+  blur applies only to separate glow layers.
 - Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
 - Horizontal glow padding: `64 px`.
 - Top and bottom glow padding: `56 px` each.

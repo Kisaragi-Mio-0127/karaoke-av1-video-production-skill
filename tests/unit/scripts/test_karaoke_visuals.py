@@ -19,25 +19,21 @@ def _graph(style: str) -> str:
     )
 
 
-def test_spectrum_line_graph_draws_contour_and_fills_to_zero_baseline():
+def test_spectrum_line_graph_draws_40_point_polyline_and_vertical_stems():
     graph = _graph("spectrum-line")
 
-    assert "asplit=3[a][fillaudio][lineaudio]" in graph
-    assert "showfreqs=s=1040x220:r=30:mode=line" in graph
-    assert "showfreqs=s=1040x220:r=30:mode=bar" in graph
-    fill_mask = graph.split(";[fillaudio]", 1)[1].split("[fillmask]", 1)[0]
-    assert fill_mask.count("erosion=coordinates=90") == 2
-    assert fill_mask.count("dilation=coordinates=90") == 2
-    assert "drawbox=x=0:y=216:w=1040:h=4:color=black:t=fill" in fill_mask
-    line_mask = graph.split(";[lineaudio]", 1)[1].split("[linecoremask]", 1)[0]
-    assert "gblur=" not in line_mask
-    assert "dilation=" not in line_mask
-    assert ",scale=" not in line_mask
-    assert "drawbox=x=0:y=216:w=1040:h=4:color=black:t=fill" in line_mask
+    assert "asplit=2[a][specaudio]" in graph
+    assert "showfreqs=s=40x220:r=30:mode=bar" in graph
+    assert "scale=40:1:flags=area" in graph
+    assert "scale=1040:220:flags=bilinear" in graph
+    assert "lte(abs(Y-(235-p(X\\,Y)))\\,1.2)" in graph
+    assert "lte(mod(X+13\\,26)\\,1)" in graph
+    assert "gte(Y\\,235-p(X\\,Y))" in graph
     assert graph.count(
         "drawbox=x=0:y=286:w=1168:h=74:color=black:t=fill"
     ) == 2
-    assert "[bgclip][areafill]overlay=800:296" in graph
+    assert "[areafill]" not in graph
+    assert "[bgclip][lineouter]overlay=736:226" in graph
     assert "[lineglow][linecore]overlay=800:296" in graph
     assert "drawbox=x=800:y=516:w=1040:h=3" not in graph
     assert "drawgrid=" not in graph

@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - direct script execution
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("standard", "wide")
-VISUAL_STYLES = ("vinyl", "spectrum")
+VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line")
 FONT_FAMILY = "HarmonyOS Sans SC"
 SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
 PROFILE_LAYOUTS = {
@@ -220,10 +220,13 @@ def select_visual_styles(value: str | None) -> tuple[str, ...]:
 
     selected = value or "vinyl"
     if selected == "both":
+        return ("vinyl", "spectrum")
+    if selected == "all":
         return VISUAL_STYLES
     if selected not in VISUAL_STYLES:
         raise ValueError(
-            f"unknown --visual-style value: {selected}; expected vinyl, spectrum, or both"
+            "unknown --visual-style value: "
+            f"{selected}; expected vinyl, spectrum, spectrum-line, both, or all"
         )
     return (selected,)
 
@@ -364,13 +367,14 @@ def _artwork_paths(
         if profile == "wide"
         else track_artwork
     )
-    if visual_style == "spectrum":
+    if visual_style in {"spectrum", "spectrum-line"}:
+        suffix = "spectrum" if visual_style == "spectrum" else "spectrum-line"
         preferred = (
-            artwork_root / "wide-spectrum" / track.artifact_slug / "composition.png"
+            artwork_root / f"wide-{suffix}" / track.artifact_slug / "composition.png"
             if profile == "wide"
-            else artwork_root / "spectrum" / track.artifact_slug / "composition.png"
+            else artwork_root / suffix / track.artifact_slug / "composition.png"
         )
-        fallback = profile_artwork / "composition_spectrum.png"
+        fallback = profile_artwork / f"composition_{suffix.replace('-', '_')}.png"
         composition = preferred if preferred.is_file() else fallback
         return composition.resolve(), None
     if visual_style != "vinyl":

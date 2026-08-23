@@ -270,8 +270,9 @@ def validate_current_wide_compositions(
     sleeve_by_style = {
         "vinyl": {"x": 40, "y": 30, "width": 340, "height": 402},
         "spectrum": {"x": 40, "y": 30, "width": 460, "height": 522},
+        "spectrum-line": {"x": 40, "y": 30, "width": 460, "height": 522},
     }
-    title_block_x_by_style = {"vinyl": 430, "spectrum": 800}
+    title_block_x_by_style = {"vinyl": 430, "spectrum": 800, "spectrum-line": 800}
     title_block_y = {"label": 120, "title": 155, "artist": 220}
     secondary_safe_bounds = [0, 0, 1920, 96]
     secondary_reserved_bounds = [0, 0, 1920, 107]
@@ -1074,7 +1075,7 @@ def validate_direct_source_command(command: Sequence[str]) -> None:
         if "--visual-style" in command
         else "vinyl"
     )
-    if visual_style not in {"vinyl", "spectrum"}:
+    if visual_style not in render_core.VISUAL_STYLES:
         raise DirectAV1420RenderError(f"unsupported visual style: {visual_style!r}")
     expected_suffixes = {
         "--sug": ".sug",
@@ -1083,7 +1084,7 @@ def validate_direct_source_command(command: Sequence[str]) -> None:
     if visual_style == "vinyl":
         expected_suffixes["--vinyl"] = ".png"
     elif "--vinyl" in command:
-        raise DirectAV1420RenderError("spectrum task must not receive --vinyl")
+        raise DirectAV1420RenderError("non-vinyl task must not receive --vinyl")
     for flag, suffix in expected_suffixes.items():
         source = Path(_flag_value(command, flag))
         if source.suffix.casefold() != suffix:
@@ -1186,7 +1187,7 @@ def validate_track_render_report(
         and bool(color_plan_sha256)
         and video.get("color_plan_sha256") == color_plan_sha256,
     }
-    if video.get("visual_style") == "spectrum":
+    if video.get("visual_style") in {"spectrum", "spectrum-line"}:
         visual_colors = color_plan.get("visual") if isinstance(color_plan, Mapping) else None
         progress_bar = video.get("progress_bar")
         color_checks.update(
@@ -2939,9 +2940,9 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--visual-style",
-        choices=("vinyl", "spectrum", "both"),
+        choices=("vinyl", "spectrum", "spectrum-line", "both", "all"),
         default="vinyl",
-        help="render vinyl (default), spectrum, or both as isolated artifacts",
+        help="render one visual style, legacy both, or all styles as isolated artifacts",
     )
     parser.add_argument(
         "--singer-color",

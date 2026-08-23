@@ -8,9 +8,9 @@
 
 ## 模板选择
 
-- 只选择一个`--visual-style`：`vinyl`或`spectrum`。
+- 只选择一个`--visual-style`：`vinyl`、`spectrum`或`spectrum-line`。
 - `vinyl`保持唱片旋转，并在当前运行的输出目录内生成唱片资源。
-- `spectrum`省略`--vinyl`，且不得探测、生成、传递或报告vinyl资源。
+- 两种频谱样式均省略`--vinyl`，且不得探测、生成、传递或报告vinyl资源。
 - 绝不要在一个输出中合并两种效果。AV1批量入口的`both`选项会创建两个独立输出，而不是合并帧。
 - `--output-mode subtitle-overlay`属于输出模式覆盖项，独立于两种美术样式。编码画面省略构图、封面、标题、面板、黑胶和频谱，同时保留相同的宽屏ASS几何；提供`--background-video`后，视频素材成为画面源。
 
@@ -47,7 +47,9 @@
 ## 频谱几何
 
 - 频谱绘制矩形：`(x,y,width,height)=(800,290,1040,220)`。
+- 折线频谱绘制矩形：`(x,y,width,height)=(800,296,1040,220)`。
 - 频谱基线：`y=516`。
+- `spectrum-line`显示连续高亮轮廓，并用半透明区域向基线闭合。该基线表示归一化幅值`Y=0`，轮廓下方的填充区域不包含柱间空隙。
 - 裁剪安全矩形：`(x,y,width,height)=(736,226,1168,348)`。
 - 水平辉光内边距：`64 px`。
 - 顶部和底部辉光内边距：各`56 px`。
@@ -71,7 +73,7 @@ uv run --no-sync python scripts/build_karaoke_wide_artwork.py `
   --font-regular <regular-font> --font-bold <bold-font> `
   --title <title> --artist <artist> `
   --album-title <album-title> --album-artist <album-artist> `
-  --visual-style <vinyl-or-spectrum> --output <composition-png>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line> --output <composition-png>
 ```
 
 使用匹配样式渲染代表性预览：
@@ -83,7 +85,7 @@ uv run --no-sync python scripts/render_karaoke_track.py `
   --font-file <main-font> --output <new-output-mp4> `
   --ass-output <new-output-ass> --report-output <new-report-json> `
   --start <seconds> --duration <seconds> --layout wide `
-  --visual-style <vinyl-or-spectrum>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line>
 ```
 
 对于低层`vinyl`渲染器检查，加入同一图稿运行生成的vinyl资源并记录其身份。对于`spectrum`，省略它。每次审核运行都使用新的输出、ASS和报告路径；将已接受产物与回滚副本分开保留。

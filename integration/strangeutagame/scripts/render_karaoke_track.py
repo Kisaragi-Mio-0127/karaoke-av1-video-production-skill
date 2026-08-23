@@ -4227,7 +4227,8 @@ def render_karaoke_video(
         raise ValueError(f"unsupported vinyl motion: {vinyl_motion}")
     if visual_style == "vinyl" and vinyl_path is None:
         raise ValueError("vinyl visual style requires a vinyl image")
-    if visual_style == "spectrum" and output_path.exists():
+    is_spectrum_style = visual_style != "vinyl"
+    if is_spectrum_style and output_path.exists():
         raise FileExistsError(f"spectrum render already exists: {output_path}")
     color = normalize_rgb_hex(spectrum_color, name="spectrum color")
     progress = normalize_rgb_hex(
@@ -4565,13 +4566,22 @@ def render_karaoke_video(
         "visual_style": visual_style,
         "vinyl_motion": vinyl_motion if visual_style == "vinyl" else None,
         "vinyl_asset": vinyl_asset,
-        "spectrum_color": f"#{color}" if visual_style == "spectrum" else None,
+        "spectrum_color": f"#{color}" if is_spectrum_style else None,
         "spectrum_geometry": (
-            {"x": 800, "y": 290, "width": 1040, "height": 220}
-            if visual_style == "spectrum"
+            {
+                "x": 800,
+                "y": 296 if visual_style == "spectrum-line" else 290,
+                "width": 1040,
+                "height": 220,
+            }
+            if is_spectrum_style
             else None
         ),
-        "spectrum_mode": "glowing-bars" if visual_style == "spectrum" else None,
+        "spectrum_mode": (
+            "glowing-line-filled-to-baseline"
+            if visual_style == "spectrum-line"
+            else "glowing-bars" if visual_style == "spectrum" else None
+        ),
         "spectrum_bar_count": 80 if visual_style == "spectrum" else None,
         "spectrum_bar_corner_radius_px": 3 if visual_style == "spectrum" else None,
         "spectrum_bar_soft_edge_sigma": 0.8 if visual_style == "spectrum" else None,
@@ -4583,18 +4593,28 @@ def render_karaoke_video(
         "spectrum_glow_top_padding_px": 56 if visual_style == "spectrum" else None,
         "spectrum_glow_bottom_padding_px": 56 if visual_style == "spectrum" else None,
         "spectrum_clip_safe_geometry": (
-            {"x": 736, "y": 226, "width": 1168, "height": 348}
-            if visual_style == "spectrum"
+            {
+                "x": 736,
+                "y": 226,
+                "width": 1168,
+                "height": 360 if visual_style == "spectrum-line" else 348,
+            }
+            if is_spectrum_style
             else None
         ),
-        "spectrum_baseline_y": 516 if visual_style == "spectrum" else None,
+        "spectrum_baseline_y": 516 if is_spectrum_style else None,
+        "spectrum_line_points": 520 if visual_style == "spectrum-line" else None,
+        "spectrum_fill_to_zero_baseline": (
+            True if visual_style == "spectrum-line" else None
+        ),
+        "spectrum_fill_alpha": 0.34 if visual_style == "spectrum-line" else None,
         "peak_hold": (
             {"enabled": True, "decay": 0.975, "half_life_seconds": 0.91}
             if visual_style == "spectrum"
             else None
         ),
         "program_duration_seconds": (
-            program_duration if visual_style == "spectrum" else None
+            program_duration if is_spectrum_style else None
         ),
         "progress_bar": (
             {
@@ -4609,7 +4629,7 @@ def render_karaoke_video(
                 "show_time": False,
                 "indicator": {"shape": "circle", "diameter": 20},
             }
-            if visual_style == "spectrum"
+            if is_spectrum_style
             else None
         ),
     }
@@ -4780,7 +4800,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--song-id")
     parser.add_argument(
         "--visual-style",
-        choices=("vinyl", "spectrum"),
+        choices=VISUAL_STYLES,
         default="vinyl",
         help="mutually exclusive right-side visual effect",
     )
@@ -4859,7 +4879,7 @@ def main(argv: list[str] | None = None) -> int:
         if lossless_output == output:
             raise ValueError("lossless output must be different from MP4 output")
         lossless_audio_codec = probe_lossless_audio_codec(args.audio.resolve())
-    if args.visual_style == "spectrum":
+    if args.visual_style != "vinyl":
         ensure_spectrum_targets_are_new(
             output_path=output,
             ass_path=ass_path,
@@ -4969,7 +4989,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         program_duration_seconds=(
             probe_audio_duration_seconds(args.audio.resolve())
-            if args.visual_style == "spectrum"
+            if args.visual_style != "vinyl"
             else None
         ),
         **lossless_render_options,

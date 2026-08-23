@@ -256,7 +256,8 @@ the default; full-auto does not require this sidecar.
 ## Layout and delivery
 
 The full-auto route prepares the current wide layout automatically. Choose
-`spectrum` for the default spectrum presentation or `vinyl` for a record
+`spectrum` for glowing bars, `spectrum-line` for a continuous filled line
+spectrum, or `vinyl` for a record
 visual. Geometry belongs to the single source of truth in
 [wide-visual-templates.md](references/wide-visual-templates.md).
 

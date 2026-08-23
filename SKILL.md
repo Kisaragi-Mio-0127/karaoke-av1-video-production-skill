@@ -154,7 +154,10 @@ uv run --no-sync python scripts/run_karaoke_japanese_workflow.py `
 ```
 
 The wrapper generates the current composition inside the output directory.
-Choose `vinyl` when a new record asset is wanted; `spectrum` creates no vinyl.
+Choose `vinyl` when a new record asset is wanted. `spectrum` renders glowing
+bars, while `spectrum-line` renders a continuous contour with a translucent
+area closed to the zero-amplitude baseline. Both spectrum styles create no
+vinyl.
 Use optional `--album-title` and `--album-artist` only as explicit overrides.
 
 For an editor-ready subtitle layer, add `--output-mode subtitle-overlay`. It

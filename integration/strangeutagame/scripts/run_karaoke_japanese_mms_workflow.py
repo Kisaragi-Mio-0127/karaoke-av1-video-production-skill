@@ -194,7 +194,7 @@ def preflight(args: argparse.Namespace) -> Preflight:
             required_paths.append(optional_artwork)
     for path in required_paths:
         _identity(path)
-    if args.visual_style == "spectrum" and args.canonical_vinyl is not None:
+    if args.visual_style != "vinyl" and args.canonical_vinyl is not None:
         raise KaraokeWorkflowError("spectrum rendering must not receive --vinyl")
     if not args.fonts_dir.expanduser().resolve().is_dir():
         raise KaraokeWorkflowError(f"fonts directory does not exist: {args.fonts_dir}")
@@ -772,7 +772,11 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--cover", type=Path)
     parser.add_argument("--background", type=Path)
-    parser.add_argument("--visual-style", choices=("vinyl", "spectrum"), default="vinyl")
+    parser.add_argument(
+        "--visual-style",
+        choices=("vinyl", "spectrum", "spectrum-line"),
+        default="vinyl",
+    )
     parser.add_argument(
         "--output-mode",
         choices=("standard", "subtitle-overlay"),

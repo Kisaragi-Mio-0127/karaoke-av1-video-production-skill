@@ -6,7 +6,7 @@ import re
 
 from scripts.karaoke_common.layout import SubtitleLayout
 
-VISUAL_STYLES = ("vinyl", "spectrum")
+VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line")
 VINYL_MOTIONS = ("rotate", "static")
 
 
@@ -63,7 +63,46 @@ def build_visual_filter_graph(
             "asetpts=PTS-STARTPTS[a]"
         )
 
-    return (
+    if visual_style == "spectrum-line":
+        spectrum_scene = (
+            f"[0:v]format=rgba,trim=start={start:.3f}:end={end:.3f},"
+            "setpts=PTS-STARTPTS[bgclip];"
+            f"[1:a]atrim=start={start:.3f}:end={end:.3f},"
+            "asetpts=PTS-STARTPTS,asplit=3[a][fillaudio][lineaudio];"
+            "[fillaudio]aformat=channel_layouts=mono,"
+            "showfreqs=s=520x220:r=30:mode=bar:ascale=log:fscale=log:"
+            f"win_size=4096:overlap=0.80:averaging=4:colors=0x{color},"
+            "scale=1040:220:flags=bilinear,format=rgba,"
+            "colorkey=0x000000:0.06:0.08,alphaextract,"
+            "gblur=sigma=1.2:steps=1,lut=y='val*0.34'[fillmask];"
+            "[lineaudio]aformat=channel_layouts=mono,"
+            "showfreqs=s=520x220:r=30:mode=line:ascale=log:fscale=log:"
+            f"win_size=4096:overlap=0.80:averaging=4:colors=0x{color},"
+            "scale=1040:220:flags=bilinear,format=rgba,"
+            "colorkey=0x000000:0.06:0.08,alphaextract,"
+            "dilation=coordinates=90,gblur=sigma=0.7:steps=1,"
+            "split=3[linecoremask][lineinnermask][lineoutermask];"
+            "[lineinnermask]pad=1168:360:64:70:color=black,"
+            "gblur=sigma=5:steps=2,lut=y='val*1.8'[innerlinemask];"
+            "[lineoutermask]pad=1168:360:64:70:color=black,"
+            "gblur=sigma=14:steps=2,lut=y='val*1.5'[outerlinemask];"
+            f"color=c=0x{color}:s=1040x220:r=30:d={duration:.3f},format=rgba[fillcolor];"
+            f"color=c=0x{color}:s=1040x220:r=30:d={duration:.3f},format=rgba[linecorecolor];"
+            f"color=c=0x{color}:s=1168x360:r=30:d={duration:.3f},format=rgba[lineinnercolor];"
+            f"color=c=0x{color}:s=1168x360:r=30:d={duration:.3f},format=rgba[lineoutercolor];"
+            "[fillcolor][fillmask]alphamerge[areafill];"
+            "[linecorecolor][linecoremask]alphamerge[linecore];"
+            "[lineinnercolor][innerlinemask]alphamerge[lineinner];"
+            "[lineoutercolor][outerlinemask]alphamerge[lineouter];"
+            "[bgclip][areafill]overlay=800:296:format=auto[filled];"
+            "[filled][lineouter]overlay=736:226:format=auto[linewide];"
+            "[linewide][lineinner]overlay=736:226:format=auto[lineglow];"
+            "[lineglow][linecore]overlay=800:296:format=auto[spectrumline];"
+            f"[spectrumline]drawbox=x=800:y=516:w=1040:h=3:"
+            f"color=0x{color}@0.85:t=fill[spectrumscene];"
+        )
+    else:
+        spectrum_scene = (
         f"[0:v]format=rgba,trim=start={start:.3f}:end={end:.3f},"
         "setpts=PTS-STARTPTS[bgclip];"
         f"[1:a]atrim=start={start:.3f}:end={end:.3f},"
@@ -111,6 +150,11 @@ def build_visual_filter_graph(
         "[inner][core]overlay=800:282:format=auto[spectrumbars];"
         f"[spectrumbars]drawbox=x=800:y=516:w=1040:h=3:"
         f"color=0x{color}@0.85:t=fill[spectrumscene];"
+        )
+
+    return (
+        spectrum_scene
+        +
         f"color=c=black@0.0:s=1040x28:r=30:d={duration:.3f},"
         "format=rgba[progressbase];"
         f"color=c=0x{progress}@0.98:s=1040x6:r=30:d={duration:.3f},"

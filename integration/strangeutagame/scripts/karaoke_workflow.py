@@ -83,7 +83,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TRACK_RENDERER_SCRIPT = REPO_ROOT / "scripts" / "render_karaoke_track.py"
 WORKFLOW_REPORT_NAME = "workflow-report.json"
 TEST_ROOT_MARKER = ".karaoke-workflow-test-root"
-VISUAL_STYLES = ("vinyl", "spectrum")
+VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line")
 OUTPUT_MODES = ("standard", "subtitle-overlay")
 
 
@@ -235,7 +235,7 @@ def validate_visual_contract(config: WorkflowConfig) -> None:
         config.spectrum_color is not None or config.progress_color is not None
     ):
         raise KaraokeWorkflowError(
-            "--spectrum-color/--progress-color require --visual-style=spectrum"
+            "--spectrum-color/--progress-color require a spectrum visual style"
         )
 
 
@@ -395,10 +395,10 @@ def build_ass_command(
             ["--vinyl", str(generated_vinyl.resolve()), "--vinyl-motion", "rotate"]
         )
     elif generated_vinyl is not None:
-        raise KaraokeWorkflowError("spectrum workflow must not receive vinyl artwork")
+        raise KaraokeWorkflowError("non-vinyl workflow must not receive vinyl artwork")
     for singer_color in config.singer_colors:
         command.extend(["--singer-color", singer_color])
-    if renderer_visual_style == "spectrum" and config.output_mode == "standard":
+    if renderer_visual_style != "vinyl" and config.output_mode == "standard":
         if config.spectrum_color is not None:
             command.extend(["--spectrum-color", config.spectrum_color])
         if config.progress_color is not None:
@@ -907,35 +907,25 @@ def validate_renderer_report(
         )
     else:
         progress_bar = video.get("progress_bar")
-        checks.update(
-            {
+        spectrum_checks = {
                 "vinyl_motion_absent": video.get("vinyl_motion") is None,
                 "vinyl_asset_absent": video.get("vinyl_asset") is None,
                 "spectrum_geometry": video.get("spectrum_geometry")
-                == {"x": 800, "y": 290, "width": 1040, "height": 220},
-                "spectrum_bar_count": video.get("spectrum_bar_count") == 80,
+                == {
+                    "x": 800,
+                    "y": 296 if config.visual_style == "spectrum-line" else 290,
+                    "width": 1040,
+                    "height": 220,
+                },
                 "spectrum_clip_safe_geometry": video.get(
                     "spectrum_clip_safe_geometry"
                 )
-                == {"x": 736, "y": 226, "width": 1168, "height": 348},
-                "spectrum_bar_top_clearance": video.get(
-                    "spectrum_bar_top_clearance_px"
-                )
-                == 8,
-                "spectrum_bar_bottom_clearance": video.get(
-                    "spectrum_bar_bottom_clearance_px"
-                )
-                == 8,
-                "spectrum_glow_top_padding": video.get(
-                    "spectrum_glow_top_padding_px"
-                )
-                == 56,
-                "spectrum_glow_bottom_padding": video.get(
-                    "spectrum_glow_bottom_padding_px"
-                )
-                == 56,
-                "peak_hold": isinstance(video.get("peak_hold"), dict)
-                and video["peak_hold"].get("enabled") is True,
+                == {
+                    "x": 736,
+                    "y": 226,
+                    "width": 1168,
+                    "height": 360 if config.visual_style == "spectrum-line" else 348,
+                },
                 "progress_time_hidden": isinstance(video.get("progress_bar"), dict)
                 and video["progress_bar"].get("show_time") is False,
                 "spectrum_color_plan": not requires_color_plan
@@ -952,7 +942,44 @@ def validate_renderer_report(
                     == visual_colors.get("progress_color")
                 ),
             }
-        )
+        if config.visual_style == "spectrum-line":
+            spectrum_checks.update(
+                {
+                    "spectrum_line_mode": video.get("spectrum_mode")
+                    == "glowing-line-filled-to-baseline",
+                    "spectrum_line_points": video.get("spectrum_line_points") == 520,
+                    "spectrum_fill_to_zero": video.get(
+                        "spectrum_fill_to_zero_baseline"
+                    )
+                    is True,
+                    "spectrum_baseline": video.get("spectrum_baseline_y") == 516,
+                }
+            )
+        else:
+            spectrum_checks.update(
+                {
+                    "spectrum_bar_count": video.get("spectrum_bar_count") == 80,
+                    "spectrum_bar_top_clearance": video.get(
+                        "spectrum_bar_top_clearance_px"
+                    )
+                    == 8,
+                    "spectrum_bar_bottom_clearance": video.get(
+                        "spectrum_bar_bottom_clearance_px"
+                    )
+                    == 8,
+                    "spectrum_glow_top_padding": video.get(
+                        "spectrum_glow_top_padding_px"
+                    )
+                    == 56,
+                    "spectrum_glow_bottom_padding": video.get(
+                        "spectrum_glow_bottom_padding_px"
+                    )
+                    == 56,
+                    "peak_hold": isinstance(video.get("peak_hold"), dict)
+                    and video["peak_hold"].get("enabled") is True,
+                }
+            )
+        checks.update(spectrum_checks)
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
         raise KaraokeWorkflowError(

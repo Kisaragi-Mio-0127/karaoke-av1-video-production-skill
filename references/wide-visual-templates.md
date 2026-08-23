@@ -13,10 +13,10 @@ when the renderer or canvas changes.
 
 ## Template selection
 
-- Select exactly one `--visual-style`: `vinyl` or `spectrum`.
+- Select exactly one `--visual-style`: `vinyl`, `spectrum`, or `spectrum-line`.
 - `vinyl` keeps the record rotating and generates its record asset inside the
   current run's output directory.
-- `spectrum` omits `--vinyl` and must not probe, generate, pass, or report a
+- Spectrum styles omit `--vinyl` and must not probe, generate, pass, or report a
   vinyl asset.
 - Never combine both effects in one output. The AV1 batch entry's `both`
   option creates two independent outputs, not a combined frame.
@@ -72,7 +72,11 @@ when the renderer or canvas changes.
 ## Spectrum geometry
 
 - Spectrum drawing rectangle: `(x,y,width,height)=(800,290,1040,220)`.
+- Line-spectrum drawing rectangle: `(x,y,width,height)=(800,296,1040,220)`.
 - Spectrum baseline: `y=516`.
+- `spectrum-line` uses a continuous bright contour and a translucent area that
+  closes vertically to the baseline. The baseline represents normalized
+  amplitude `Y=0`; the area below the contour has no bar gaps.
 - Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
 - Horizontal glow padding: `64 px`.
 - Top and bottom glow padding: `56 px` each.
@@ -103,7 +107,7 @@ uv run --no-sync python scripts/build_karaoke_wide_artwork.py `
   --font-regular <regular-font> --font-bold <bold-font> `
   --title <title> --artist <artist> `
   --album-title <album-title> --album-artist <album-artist> `
-  --visual-style <vinyl-or-spectrum> --output <composition-png>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line> --output <composition-png>
 ```
 
 Render a representative preview with the matching style:
@@ -115,7 +119,7 @@ uv run --no-sync python scripts/render_karaoke_track.py `
   --font-file <main-font> --output <new-output-mp4> `
   --ass-output <new-output-ass> --report-output <new-report-json> `
   --start <seconds> --duration <seconds> --layout wide `
-  --visual-style <vinyl-or-spectrum>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line>
 ```
 
 For a low-level `vinyl` renderer check, add the vinyl produced by the same

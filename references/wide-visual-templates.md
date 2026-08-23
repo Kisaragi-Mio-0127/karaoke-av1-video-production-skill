@@ -75,13 +75,16 @@ when the renderer or canvas changes.
 - Line-spectrum drawing rectangle: `(x,y,width,height)=(800,296,1040,220)`.
 - Spectrum zero-amplitude coordinate: `y=516`. `spectrum-line` does not draw a
   horizontal baseline.
-- `spectrum-line` contains exactly 40 frequency points. Adjacent points are
-  joined by straight segments, and every visible point has a 2 px vertical
+- `spectrum-line` contains exactly 40 frequency points plus two fixed `Y=0`
+  boundary anchors, for 42 polyline vertices total. Adjacent points are joined
+  by straight segments, and every visible frequency point has a 2 px vertical
   stem at the same `x` down to normalized amplitude `Y=0`. Stems use 55%
   opacity. Zero-level points remain hidden so they cannot form a bottom line;
-  the polyline core uses analytic pixel-coverage antialiasing with a 1.25 px
-  radius. Stem colour and glow both reach `Y=0`, while glow is clipped below
-  that coordinate to keep the progress area clear.
+  the height channel stays 16-bit through interpolation. The polyline and
+  stems are rasterized at `4160x880` (4x SSAA) and reduced to `1040x220` with
+  Lanczos, yielding a 1.25 px antialiased line. Stem colour and glow both reach
+  `Y=0`, while glow is clipped below that coordinate to keep the progress area
+  clear.
 - Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
 - Horizontal glow padding: `64 px`.
 - Top and bottom glow padding: `56 px` each.

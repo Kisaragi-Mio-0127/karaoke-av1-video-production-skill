@@ -24,12 +24,17 @@ def test_spectrum_line_graph_draws_40_point_polyline_and_vertical_stems():
 
     assert "asplit=2[a][specaudio]" in graph
     assert "showfreqs=s=40x220:r=30:mode=bar" in graph
-    assert "scale=40:1:flags=area" in graph
-    assert "scale=1040:220:flags=bilinear" in graph
-    assert "clip(1.25-abs(Y-(235-p(X\\,Y)))\\,0\\,1)" in graph
-    assert "lte(abs(Y-(235-p(X\\,Y)))" not in graph
-    assert "lte(mod(X+13\\,26)\\,1)" in graph
-    assert "gte(Y\\,235-p(X\\,Y))" in graph
+    assert "format=gray16le,scale=40:1:flags=area" in graph
+    assert "scale=4160:880:flags=bilinear,format=gray16le" in graph
+    assert "st(0\\,940-p(X\\,Y)/64.25)" in graph
+    assert "if(lt(X\\,52)\\,879+(ld(0)-879)*X/52" in graph
+    assert "if(gt(X\\,4108)" in graph
+    assert "(879-ld(0))*(X-4108)/51" in graph
+    assert "clip(5-abs(Y-ld(1))\\,0\\,1)" in graph
+    assert "lte(mod(X+52\\,104)\\,7)" in graph
+    assert "gte(Y\\,ld(0))" in graph
+    assert "scale=1040:220:flags=lanczos,format=gray" in graph
+    assert "lut=y='if(lte(val\\,16)\\,0\\,val)'" in graph
     assert graph.count(
         "drawbox=x=0:y=290:w=1168:h=70:color=black:t=fill"
     ) == 2

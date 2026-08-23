@@ -948,14 +948,37 @@ def validate_renderer_report(
                     "spectrum_line_mode": video.get("spectrum_mode")
                     == "glowing-40-point-stem-line",
                     "spectrum_line_points": video.get("spectrum_line_points") == 40,
+                    "spectrum_polyline_points": video.get(
+                        "spectrum_polyline_points"
+                    )
+                    == 42,
+                    "spectrum_zero_boundary_points": video.get(
+                        "spectrum_zero_boundary_points"
+                    )
+                    == 2,
+                    "spectrum_zero_boundary_anchors": video.get(
+                        "spectrum_zero_boundary_anchors"
+                    )
+                    == {
+                        "left": {"x": 800, "y": 516},
+                        "right": {"x": 1840, "y": 516},
+                    },
                     "spectrum_line_antialias": video.get(
                         "spectrum_line_antialias"
                     )
-                    == "analytic-coverage",
+                    == "4x-ssaa-lanczos",
                     "spectrum_line_antialias_radius": video.get(
                         "spectrum_line_antialias_radius_px"
                     )
                     == 1.25,
+                    "spectrum_line_height_depth": video.get(
+                        "spectrum_line_height_depth_bits"
+                    )
+                    == 16,
+                    "spectrum_line_supersample": video.get(
+                        "spectrum_line_supersample_factor"
+                    )
+                    == 4,
                     "spectrum_stems_to_zero": video.get(
                         "spectrum_stems_to_zero_baseline"
                     )

@@ -946,12 +946,16 @@ def validate_renderer_report(
             spectrum_checks.update(
                 {
                     "spectrum_line_mode": video.get("spectrum_mode")
-                    == "glowing-40-point-stem-line",
+                    == "glowing-40-point-zero-ended-stem-line",
                     "spectrum_line_points": video.get("spectrum_line_points") == 40,
+                    "spectrum_frequency_points": video.get(
+                        "spectrum_frequency_points"
+                    )
+                    == 38,
                     "spectrum_polyline_points": video.get(
                         "spectrum_polyline_points"
                     )
-                    == 42,
+                    == 40,
                     "spectrum_zero_boundary_points": video.get(
                         "spectrum_zero_boundary_points"
                     )

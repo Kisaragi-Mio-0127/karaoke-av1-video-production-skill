@@ -75,9 +75,10 @@ when the renderer or canvas changes.
 - Line-spectrum drawing rectangle: `(x,y,width,height)=(800,296,1040,220)`.
 - Spectrum zero-amplitude coordinate: `y=516`. `spectrum-line` does not draw a
   horizontal baseline.
-- `spectrum-line` contains exactly 40 frequency points plus two fixed `Y=0`
-  boundary anchors, for 42 polyline vertices total. Adjacent points are joined
-  by straight segments, and every visible frequency point has a 2 px vertical
+- `spectrum-line` contains exactly 40 equally spaced total points. The first
+  and last points stay at `Y=0`; the 38 interior points carry frequency data.
+  Adjacent points are joined by straight segments, and every visible frequency
+  point has a 2 px vertical
   stem at the same `x` down to normalized amplitude `Y=0`. Stems use 55%
   opacity. Zero-level points remain hidden so they cannot form a bottom line;
   the height channel stays 16-bit through interpolation. The polyline and

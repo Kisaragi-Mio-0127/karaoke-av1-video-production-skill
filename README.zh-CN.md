@@ -161,7 +161,7 @@ uv run --no-sync python scripts/render_karaoke_direct_av1_420_album.py `
 
 ## 布局与交付
 
-full-auto入口会自动准备当前宽屏布局。柱状频谱使用`spectrum`；`spectrum-line`使用40个频谱点，相邻点以直线段连接，每个可见点用竖线连接到同一横坐标的零幅值位置；黑胶视觉使用`vinyl`。几何参数只在单一事实源[宽屏视觉模板](references/wide-visual-templates.zh-CN.md)中维护。
+full-auto入口会自动准备当前宽屏布局。柱状频谱使用`spectrum`；`spectrum-line`总计使用40个等间距点，首尾两点固定为零，中间38个点来自频谱，相邻点以直线段连接，每个可见频谱点用竖线连接到同一横坐标的零幅值位置；黑胶视觉使用`vinyl`。几何参数只在单一事实源[宽屏视觉模板](references/wide-visual-templates.zh-CN.md)中维护。
 
 存在标准交付封面或音频内嵌封面时，美术图会自动生成。需要显式图片时使用`--cover`；构图、背景和封面源音频覆盖项仍然是可选参数。
 

@@ -4578,7 +4578,7 @@ def render_karaoke_video(
             else None
         ),
         "spectrum_mode": (
-            "glowing-40-point-stem-line"
+            "glowing-40-point-zero-ended-stem-line"
             if visual_style == "spectrum-line"
             else "glowing-bars" if visual_style == "spectrum" else None
         ),
@@ -4607,7 +4607,8 @@ def render_karaoke_video(
             False if visual_style == "spectrum-line" else None
         ),
         "spectrum_line_points": 40 if visual_style == "spectrum-line" else None,
-        "spectrum_polyline_points": 42 if visual_style == "spectrum-line" else None,
+        "spectrum_frequency_points": 38 if visual_style == "spectrum-line" else None,
+        "spectrum_polyline_points": 40 if visual_style == "spectrum-line" else None,
         "spectrum_zero_boundary_points": (
             2 if visual_style == "spectrum-line" else None
         ),

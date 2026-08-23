@@ -23,16 +23,17 @@ def test_spectrum_line_graph_draws_40_point_polyline_and_vertical_stems():
     graph = _graph("spectrum-line")
 
     assert "asplit=2[a][specaudio]" in graph
-    assert "showfreqs=s=40x220:r=30:mode=bar" in graph
-    assert "format=gray16le,scale=40:1:flags=area" in graph
-    assert "scale=4160:880:flags=bilinear,format=gray16le" in graph
+    assert "showfreqs=s=38x220:r=30:mode=bar" in graph
+    assert "format=gray16le,scale=38:1:flags=area" in graph
+    assert "pad=40:1:1:0:color=black" in graph
+    assert "scale=4266:880:flags=bilinear,crop=4160:880:53:0" in graph
     assert "st(0\\,940-p(X\\,Y)/64.25)" in graph
-    assert "abs((ld(0)-879)*X-52*(Y-879))" in graph
-    assert "sqrt((ld(0)-879)*(ld(0)-879)+2704)" in graph
-    assert "abs((879-ld(0))*(X-4108)-51*(Y-ld(0)))" in graph
-    assert "sqrt((879-ld(0))*(879-ld(0))+2601)" in graph
-    assert "ld(1)*max(gt(p(X\\,Y)\\,5140)" in graph
-    assert "lte(mod(X+52\\,104)\\,7)" in graph
+    assert "st(1\\,940-p(107\\,Y)/64.25)" in graph
+    assert "st(2\\,940-p(4052\\,Y)/64.25)" in graph
+    assert "abs((ld(1)-876)*X-107*(Y-876))" in graph
+    assert "abs((876-ld(2))*(X-4052)-107*(Y-ld(2)))" in graph
+    assert "lte(abs(X-round(X*39/4159)*4159/39)\\,7)" in graph
+    assert "gt(X\\,7)*lt(X\\,4152)" in graph
     assert "gte(Y\\,ld(0))" in graph
     assert "scale=1040:220:flags=lanczos,format=gray" in graph
     assert "lut=y='if(lte(val\\,16)\\,0\\,val)'" in graph

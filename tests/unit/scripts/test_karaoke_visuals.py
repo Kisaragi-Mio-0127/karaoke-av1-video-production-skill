@@ -31,7 +31,7 @@ def test_spectrum_line_graph_draws_40_point_polyline_and_vertical_stems():
     assert "lte(mod(X+13\\,26)\\,1)" in graph
     assert "gte(Y\\,235-p(X\\,Y))" in graph
     assert graph.count(
-        "drawbox=x=0:y=286:w=1168:h=74:color=black:t=fill"
+        "drawbox=x=0:y=290:w=1168:h=70:color=black:t=fill"
     ) == 2
     assert "[areafill]" not in graph
     assert "[bgclip][lineouter]overlay=736:226" in graph

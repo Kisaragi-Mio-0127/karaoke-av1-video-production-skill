@@ -960,6 +960,10 @@ def validate_renderer_report(
                         "spectrum_stems_to_zero_baseline"
                     )
                     is True,
+                    "spectrum_stem_glow_to_zero": video.get(
+                        "spectrum_stem_glow_to_zero_baseline"
+                    )
+                    is True,
                     "spectrum_baseline": video.get("spectrum_baseline_y") == 516,
                     "spectrum_baseline_hidden": video.get(
                         "spectrum_baseline_visible"

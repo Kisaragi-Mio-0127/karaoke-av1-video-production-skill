@@ -76,7 +76,10 @@ when the renderer or canvas changes.
 - Spectrum baseline: `y=516`.
 - `spectrum-line` uses a continuous bright contour and a translucent area that
   closes vertically to the baseline. The baseline represents normalized
-  amplitude `Y=0`; the area below the contour has no bar gaps.
+  amplitude `Y=0`; the area below the contour has no bar gaps. Adjacent
+  full-width spectrum samples are joined by straight segments. Core-line
+  scaling, smoothing, and dilation are forbidden; blur applies only to the
+  separate glow layers.
 - Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
 - Horizontal glow padding: `64 px`.
 - Top and bottom glow padding: `56 px` each.

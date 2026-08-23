@@ -23,8 +23,12 @@ def test_spectrum_line_graph_draws_contour_and_fills_to_zero_baseline():
     graph = _graph("spectrum-line")
 
     assert "asplit=3[a][fillaudio][lineaudio]" in graph
-    assert "showfreqs=s=520x220:r=30:mode=line" in graph
-    assert "showfreqs=s=520x220:r=30:mode=bar" in graph
+    assert "showfreqs=s=1040x220:r=30:mode=line" in graph
+    assert "showfreqs=s=1040x220:r=30:mode=bar" in graph
+    line_mask = graph.split(";[lineaudio]", 1)[1].split("[linecoremask]", 1)[0]
+    assert "gblur=" not in line_mask
+    assert "dilation=" not in line_mask
+    assert ",scale=" not in line_mask
     assert "[bgclip][areafill]overlay=800:296" in graph
     assert "[lineglow][linecore]overlay=800:296" in graph
     assert "drawbox=x=800:y=516:w=1040:h=3" in graph

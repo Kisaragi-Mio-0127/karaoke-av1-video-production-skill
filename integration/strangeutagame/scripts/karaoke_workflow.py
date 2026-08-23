@@ -947,7 +947,7 @@ def validate_renderer_report(
                 {
                     "spectrum_line_mode": video.get("spectrum_mode")
                     == "glowing-line-filled-to-baseline",
-                    "spectrum_line_points": video.get("spectrum_line_points") == 520,
+                    "spectrum_line_points": video.get("spectrum_line_points") == 1040,
                     "spectrum_fill_to_zero": video.get(
                         "spectrum_fill_to_zero_baseline"
                     )

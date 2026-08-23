@@ -953,6 +953,14 @@ def validate_renderer_report(
                     )
                     is True,
                     "spectrum_baseline": video.get("spectrum_baseline_y") == 516,
+                    "spectrum_baseline_hidden": video.get(
+                        "spectrum_baseline_visible"
+                    )
+                    is False,
+                    "spectrum_line_floor_hidden": video.get(
+                        "spectrum_line_floor_threshold_px"
+                    )
+                    == 4,
                 }
             )
         else:

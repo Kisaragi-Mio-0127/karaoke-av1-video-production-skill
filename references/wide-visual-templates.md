@@ -73,7 +73,9 @@ when the renderer or canvas changes.
 
 - Spectrum drawing rectangle: `(x,y,width,height)=(800,290,1040,220)`.
 - Line-spectrum drawing rectangle: `(x,y,width,height)=(800,296,1040,220)`.
-- Spectrum baseline: `y=516`.
+- Spectrum zero-amplitude baseline: `y=516`. `spectrum-line` uses it only as
+  the fill boundary and does not draw a visible horizontal baseline. Suppress
+  contour samples in the bottom 4 px so zero-level data cannot form a line.
 - `spectrum-line` uses a continuous bright contour and a translucent area that
   closes vertically to the baseline. The baseline represents normalized
   amplitude `Y=0`; the area below the contour has no bar gaps. Adjacent

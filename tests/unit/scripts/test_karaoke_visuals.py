@@ -27,10 +27,11 @@ def test_spectrum_line_graph_draws_40_point_polyline_and_vertical_stems():
     assert "format=gray16le,scale=40:1:flags=area" in graph
     assert "scale=4160:880:flags=bilinear,format=gray16le" in graph
     assert "st(0\\,940-p(X\\,Y)/64.25)" in graph
-    assert "if(lt(X\\,52)\\,879+(ld(0)-879)*X/52" in graph
-    assert "if(gt(X\\,4108)" in graph
-    assert "(879-ld(0))*(X-4108)/51" in graph
-    assert "clip(5-abs(Y-ld(1))\\,0\\,1)" in graph
+    assert "abs((ld(0)-879)*X-52*(Y-879))" in graph
+    assert "sqrt((ld(0)-879)*(ld(0)-879)+2704)" in graph
+    assert "abs((879-ld(0))*(X-4108)-51*(Y-ld(0)))" in graph
+    assert "sqrt((879-ld(0))*(879-ld(0))+2601)" in graph
+    assert "ld(1)*max(gt(p(X\\,Y)\\,5140)" in graph
     assert "lte(mod(X+52\\,104)\\,7)" in graph
     assert "gte(Y\\,ld(0))" in graph
     assert "scale=1040:220:flags=lanczos,format=gray" in graph

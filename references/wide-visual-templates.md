@@ -84,7 +84,8 @@ when the renderer or canvas changes.
   stems are rasterized at `4160x880` (4x SSAA) and reduced to `1040x220` with
   Lanczos, yielding a 1.25 px antialiased line. Stem colour and glow both reach
   `Y=0`, while glow is clipped below that coordinate to keep the progress area
-  clear.
+  clear. The two steep zero-anchor segments use perpendicular point-to-line
+  distance coverage so they remain continuous at every slope.
 - Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
 - Horizontal glow padding: `64 px`.
 - Top and bottom glow padding: `56 px` each.

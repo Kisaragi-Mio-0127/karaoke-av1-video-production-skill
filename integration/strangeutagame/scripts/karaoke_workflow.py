@@ -948,6 +948,14 @@ def validate_renderer_report(
                     "spectrum_line_mode": video.get("spectrum_mode")
                     == "glowing-40-point-stem-line",
                     "spectrum_line_points": video.get("spectrum_line_points") == 40,
+                    "spectrum_line_antialias": video.get(
+                        "spectrum_line_antialias"
+                    )
+                    == "analytic-coverage",
+                    "spectrum_line_antialias_radius": video.get(
+                        "spectrum_line_antialias_radius_px"
+                    )
+                    == 1.25,
                     "spectrum_stems_to_zero": video.get(
                         "spectrum_stems_to_zero_baseline"
                     )

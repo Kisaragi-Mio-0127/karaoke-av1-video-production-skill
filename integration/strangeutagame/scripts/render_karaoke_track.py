@@ -4607,6 +4607,12 @@ def render_karaoke_video(
             False if visual_style == "spectrum-line" else None
         ),
         "spectrum_line_points": 40 if visual_style == "spectrum-line" else None,
+        "spectrum_line_antialias": (
+            "analytic-coverage" if visual_style == "spectrum-line" else None
+        ),
+        "spectrum_line_antialias_radius_px": (
+            1.25 if visual_style == "spectrum-line" else None
+        ),
         "spectrum_stems_to_zero_baseline": (
             True if visual_style == "spectrum-line" else None
         ),

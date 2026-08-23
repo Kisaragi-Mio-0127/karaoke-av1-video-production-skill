@@ -79,7 +79,8 @@ when the renderer or canvas changes.
   joined by straight segments, and every visible point has a 2 px vertical
   stem at the same `x` down to normalized amplitude `Y=0`. Stems use 55%
   opacity. Zero-level points remain hidden so they cannot form a bottom line;
-  blur applies only to separate glow layers.
+  the polyline core uses analytic pixel-coverage antialiasing with a 1.25 px
+  radius, and blur applies only to separate glow layers.
 - Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
 - Horizontal glow padding: `64 px`.
 - Top and bottom glow padding: `56 px` each.

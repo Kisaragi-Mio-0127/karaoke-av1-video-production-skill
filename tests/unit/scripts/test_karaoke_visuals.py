@@ -26,7 +26,8 @@ def test_spectrum_line_graph_draws_40_point_polyline_and_vertical_stems():
     assert "showfreqs=s=40x220:r=30:mode=bar" in graph
     assert "scale=40:1:flags=area" in graph
     assert "scale=1040:220:flags=bilinear" in graph
-    assert "lte(abs(Y-(235-p(X\\,Y)))\\,1.2)" in graph
+    assert "clip(1.25-abs(Y-(235-p(X\\,Y)))\\,0\\,1)" in graph
+    assert "lte(abs(Y-(235-p(X\\,Y)))" not in graph
     assert "lte(mod(X+13\\,26)\\,1)" in graph
     assert "gte(Y\\,235-p(X\\,Y))" in graph
     assert graph.count(

@@ -1018,7 +1018,7 @@ def validate_renderer_report(
                     "spectrum_mirror_center_gap": video.get(
                         "spectrum_mirror_center_gap_px"
                     )
-                    == 4,
+                    == 0,
                     "spectrum_mirror_exact_symmetry": video.get(
                         "spectrum_mirror_exact_symmetry"
                     )

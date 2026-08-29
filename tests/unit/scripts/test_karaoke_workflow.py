@@ -149,7 +149,7 @@ def _renderer_report(
             "spectrum_mirror_points": 40,
             "spectrum_mirror_frequency_points": 38,
             "spectrum_mirror_center_y": 400,
-            "spectrum_mirror_center_gap_px": 4,
+            "spectrum_mirror_center_gap_px": 0,
             "spectrum_mirror_exact_symmetry": True,
             "spectrum_mirror_antialias": "4x-ssaa-lanczos",
             "spectrum_mirror_height_depth_bits": 16,

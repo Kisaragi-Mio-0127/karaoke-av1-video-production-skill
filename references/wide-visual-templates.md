@@ -92,10 +92,10 @@ when the renderer or canvas changes.
   rectangle and separate a boundary anchor.
 - `spectrum-mirror` contains the same 40 equally spaced frequency points, draws
   a straight upper ripple, and creates the lower ripple by an exact vertical
-  mirror. The visual centre is `y=400` with a `4 px` dark gap. It uses a 16-bit
-  height mask and 4x SSAA with Lanczos downsampling. Each of the 38 frequency
-  points has a 2 px, 55% opacity vertical stem to the centre. It draws no area
-  fill or static centre line.
+  mirror. The visual centre is `y=400` with no gap. It uses a 16-bit height mask
+  and 4x SSAA with Lanczos downsampling. Each of the 38 frequency points has a
+  2 px, 55% opacity vertical stem continuous through the centre. It draws no
+  area fill or separately generated static centre line.
 - Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
 - Horizontal glow padding: `64 px`.
 - Top and bottom glow padding: `56 px` each.
@@ -154,5 +154,6 @@ active spectrum, progress, and ending frames. For vinyl inspect at least four
 rotation phases and reject seams or sweeping partial arcs. For spectrum verify
 real-time response, peak decay, rounded bars, unclipped glow, aligned title and
 progress boundaries, and safe endpoint behavior. For `spectrum-mirror`, verify
-exact upper/lower symmetry, the centre gap, active motion, and zero-ended edges.
-Verify that all visible frequency points retain their mirrored centre stems.
+exact upper/lower symmetry, the continuous centre, active motion, and zero-ended
+edges. Verify that all visible frequency points retain their mirrored centre
+stems.

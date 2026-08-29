@@ -4653,7 +4653,7 @@ def render_karaoke_video(
             400 if visual_style == "spectrum-mirror" else None
         ),
         "spectrum_mirror_center_gap_px": (
-            4 if visual_style == "spectrum-mirror" else None
+            0 if visual_style == "spectrum-mirror" else None
         ),
         "spectrum_mirror_exact_symmetry": (
             True if visual_style == "spectrum-mirror" else None

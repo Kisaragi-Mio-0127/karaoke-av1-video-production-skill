@@ -163,6 +163,58 @@ def _renderer_report(
                 "color": color_plan["visual"]["progress_color"],
             },
         }
+    elif config.visual_style == "spectrum-dots":
+        video = {
+            "visual_style": "spectrum-dots",
+            "vinyl_motion": None,
+            "vinyl_asset": None,
+            "spectrum_geometry": {"x": 800, "y": 290, "width": 1040, "height": 220},
+            "spectrum_clip_safe_geometry": {
+                "x": 736,
+                "y": 226,
+                "width": 1168,
+                "height": 348,
+            },
+            "spectrum_mode": "glowing-52-column-dot-matrix",
+            "spectrum_dot_columns": 52,
+            "spectrum_dot_rows": 10,
+            "spectrum_dot_cell_size_px": 20,
+            "spectrum_dot_gap_px": 8,
+            "spectrum_dot_vertical_padding_px": 10,
+            "spectrum_dot_trail_decay": 0.93,
+            "spectrum_color": color_plan["visual"]["spectrum_color"],
+            "color_plan_sha256": color_plan["color_plan_sha256"],
+            "progress_bar": {
+                "show_time": False,
+                "color": color_plan["visual"]["progress_color"],
+            },
+        }
+    elif config.visual_style == "spectrum-waterfall":
+        video = {
+            "visual_style": "spectrum-waterfall",
+            "vinyl_motion": None,
+            "vinyl_asset": None,
+            "spectrum_geometry": {"x": 800, "y": 290, "width": 1040, "height": 220},
+            "spectrum_clip_safe_geometry": {
+                "x": 736,
+                "y": 226,
+                "width": 1168,
+                "height": 348,
+            },
+            "spectrum_mode": "scrolling-log-frequency-contour-waterfall",
+            "spectrum_waterfall_slide": "right-to-left",
+            "spectrum_waterfall_frequency_scale": "log",
+            "spectrum_waterfall_amplitude_scale": "log",
+            "spectrum_waterfall_dynamic_range_db": 90,
+            "spectrum_waterfall_gain": 3,
+            "spectrum_waterfall_color_source": "configured-spectrum-color",
+            "spectrum_color": color_plan["visual"]["spectrum_color"],
+            "color_plan_sha256": color_plan["color_plan_sha256"],
+            "progress_bar": {
+                "show_time": False,
+                "color": color_plan["visual"]["progress_color"],
+            },
+        }
     else:
         video = {
             "visual_style": "spectrum",
@@ -586,6 +638,40 @@ def test_spectrum_mirror_renderer_report_accepts_current_contract(tmp_path: Path
     assert checks["spectrum_mirror_mode"] is True
     assert checks["spectrum_mirror_exact_symmetry"] is True
     assert checks["spectrum_mirror_stems_to_center"] is True
+
+
+def test_spectrum_dots_renderer_report_accepts_current_contract(tmp_path: Path):
+    config, report, generated_vinyl = _renderer_report_case(
+        tmp_path,
+        visual_style="spectrum-dots",
+        color_policy="cover",
+    )
+
+    checks = _validate_renderer_report_case(
+        tmp_path, config, report, generated_vinyl
+    )
+
+    assert checks["spectrum_dot_mode"] is True
+    assert checks["spectrum_dot_columns"] is True
+    assert checks["spectrum_dot_trail_decay"] is True
+
+
+def test_spectrum_waterfall_renderer_report_accepts_current_contract(
+    tmp_path: Path,
+):
+    config, report, generated_vinyl = _renderer_report_case(
+        tmp_path,
+        visual_style="spectrum-waterfall",
+        color_policy="cover",
+    )
+
+    checks = _validate_renderer_report_case(
+        tmp_path, config, report, generated_vinyl
+    )
+
+    assert checks["spectrum_waterfall_mode"] is True
+    assert checks["spectrum_waterfall_slide"] is True
+    assert checks["spectrum_waterfall_color_source"] is True
 
 
 @pytest.mark.parametrize("visual_style", ["vinyl", "spectrum"])

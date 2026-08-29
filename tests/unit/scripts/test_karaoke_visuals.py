@@ -72,14 +72,40 @@ def test_spectrum_mirror_graph_draws_exact_symmetric_zero_ended_ripples():
     assert "drawgrid=" not in graph
 
 
+def test_spectrum_dots_graph_draws_glowing_led_matrix_with_afterglow():
+    graph = _graph("spectrum-dots")
+
+    assert "showfreqs=s=52x200:r=30:mode=bar" in graph
+    assert "scale=1040:200:flags=neighbor" in graph
+    assert "drawgrid=width=20:height=20:thickness=8" in graph
+    assert "pad=1040:220:0:10:color=black" in graph
+    assert "lagfun=decay=0.93" in graph
+    assert "[dotglow][dotcore]overlay=800:290" in graph
+
+
+def test_spectrum_waterfall_graph_scrolls_log_frequency_history():
+    graph = _graph("spectrum-waterfall")
+
+    assert "showspectrum=s=1040x220:slide=scroll:mode=combined" in graph
+    assert "color=intensity:scale=log:fscale=log" in graph
+    assert "orientation=vertical:overlap=0.85:gain=3" in graph
+    assert "fps=30:legend=0:drange=90" in graph
+    assert "edgedetect=low=0.035:high=0.11:mode=wires" in graph
+    assert "[waterglow][watercore]overlay=800:290" in graph
+
+
 def test_visual_style_batch_selectors_preserve_both_and_offer_all():
     assert VISUAL_STYLES == (
         "vinyl",
         "spectrum",
         "spectrum-line",
         "spectrum-mirror",
+        "spectrum-dots",
+        "spectrum-waterfall",
     )
     assert select_visual_styles("both") == ("vinyl", "spectrum")
     assert select_visual_styles("all") == VISUAL_STYLES
     assert select_visual_styles("spectrum-line") == ("spectrum-line",)
     assert select_visual_styles("spectrum-mirror") == ("spectrum-mirror",)
+    assert select_visual_styles("spectrum-dots") == ("spectrum-dots",)
+    assert select_visual_styles("spectrum-waterfall") == ("spectrum-waterfall",)

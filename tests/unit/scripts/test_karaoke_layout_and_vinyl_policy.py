@@ -10,8 +10,8 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from scripts import render_karaoke_track as renderer
 from scripts import render_karaoke_direct_av1_420_album as direct
+from scripts import render_karaoke_track as renderer
 from scripts import render_vinyl_karaoke as vinyl_renderer
 from scripts.karaoke_common.layout import STANDARD_LAYOUT, Lane, SubtitleLayout
 from scripts.karaoke_japanese import layout as japanese_layout
@@ -39,6 +39,16 @@ def test_japanese_layout_does_not_import_local_zh_en_extension():
         ("spectrum-line", {"x": 40, "y": 30, "width": 460, "height": 522}, 800),
         (
             "spectrum-mirror",
+            {"x": 40, "y": 30, "width": 460, "height": 522},
+            800,
+        ),
+        (
+            "spectrum-dots",
+            {"x": 40, "y": 30, "width": 460, "height": 522},
+            800,
+        ),
+        (
+            "spectrum-waterfall",
             {"x": 40, "y": 30, "width": 460, "height": 522},
             800,
         ),

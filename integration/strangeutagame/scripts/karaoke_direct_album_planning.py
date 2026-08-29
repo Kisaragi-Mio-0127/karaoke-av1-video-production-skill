@@ -25,7 +25,14 @@ except ImportError:  # pragma: no cover - direct script execution
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ("standard", "wide")
-VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line", "spectrum-mirror")
+VISUAL_STYLES = (
+    "vinyl",
+    "spectrum",
+    "spectrum-line",
+    "spectrum-mirror",
+    "spectrum-dots",
+    "spectrum-waterfall",
+)
 FONT_FAMILY = "HarmonyOS Sans SC"
 SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
 PROFILE_LAYOUTS = {
@@ -227,7 +234,7 @@ def select_visual_styles(value: str | None) -> tuple[str, ...]:
         raise ValueError(
             "unknown --visual-style value: "
             f"{selected}; expected vinyl, spectrum, spectrum-line, "
-            "spectrum-mirror, both, or all"
+            "spectrum-mirror, spectrum-dots, spectrum-waterfall, both, or all"
         )
     return (selected,)
 
@@ -368,7 +375,13 @@ def _artwork_paths(
         if profile == "wide"
         else track_artwork
     )
-    if visual_style in {"spectrum", "spectrum-line", "spectrum-mirror"}:
+    if visual_style in {
+        "spectrum",
+        "spectrum-line",
+        "spectrum-mirror",
+        "spectrum-dots",
+        "spectrum-waterfall",
+    }:
         suffix = visual_style
         preferred = (
             artwork_root / f"wide-{suffix}" / track.artifact_slug / "composition.png"

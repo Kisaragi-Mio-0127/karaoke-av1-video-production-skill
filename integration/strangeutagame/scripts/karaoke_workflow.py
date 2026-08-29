@@ -83,7 +83,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TRACK_RENDERER_SCRIPT = REPO_ROOT / "scripts" / "render_karaoke_track.py"
 WORKFLOW_REPORT_NAME = "workflow-report.json"
 TEST_ROOT_MARKER = ".karaoke-workflow-test-root"
-VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line", "spectrum-mirror")
+VISUAL_STYLES = (
+    "vinyl",
+    "spectrum",
+    "spectrum-line",
+    "spectrum-mirror",
+    "spectrum-dots",
+    "spectrum-waterfall",
+)
 OUTPUT_MODES = ("standard", "subtitle-overlay")
 
 
@@ -1043,6 +1050,60 @@ def validate_renderer_report(
                         "spectrum_mirror_stem_alpha"
                     )
                     == 0.55,
+                }
+            )
+        elif config.visual_style == "spectrum-dots":
+            spectrum_checks.update(
+                {
+                    "spectrum_dot_mode": video.get("spectrum_mode")
+                    == "glowing-52-column-dot-matrix",
+                    "spectrum_dot_columns": video.get("spectrum_dot_columns")
+                    == 52,
+                    "spectrum_dot_rows": video.get("spectrum_dot_rows") == 10,
+                    "spectrum_dot_cell_size": video.get(
+                        "spectrum_dot_cell_size_px"
+                    )
+                    == 20,
+                    "spectrum_dot_gap": video.get("spectrum_dot_gap_px") == 8,
+                    "spectrum_dot_vertical_padding": video.get(
+                        "spectrum_dot_vertical_padding_px"
+                    )
+                    == 10,
+                    "spectrum_dot_trail_decay": video.get(
+                        "spectrum_dot_trail_decay"
+                    )
+                    == 0.93,
+                }
+            )
+        elif config.visual_style == "spectrum-waterfall":
+            spectrum_checks.update(
+                {
+                    "spectrum_waterfall_mode": video.get("spectrum_mode")
+                    == "scrolling-log-frequency-contour-waterfall",
+                    "spectrum_waterfall_slide": video.get(
+                        "spectrum_waterfall_slide"
+                    )
+                    == "right-to-left",
+                    "spectrum_waterfall_frequency_scale": video.get(
+                        "spectrum_waterfall_frequency_scale"
+                    )
+                    == "log",
+                    "spectrum_waterfall_amplitude_scale": video.get(
+                        "spectrum_waterfall_amplitude_scale"
+                    )
+                    == "log",
+                    "spectrum_waterfall_dynamic_range": video.get(
+                        "spectrum_waterfall_dynamic_range_db"
+                    )
+                    == 90,
+                    "spectrum_waterfall_gain": video.get(
+                        "spectrum_waterfall_gain"
+                    )
+                    == 3,
+                    "spectrum_waterfall_color_source": video.get(
+                        "spectrum_waterfall_color_source"
+                    )
+                    == "configured-spectrum-color",
                 }
             )
         else:

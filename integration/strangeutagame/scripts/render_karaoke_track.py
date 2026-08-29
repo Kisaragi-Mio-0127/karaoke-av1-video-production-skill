@@ -4583,7 +4583,15 @@ def render_karaoke_video(
             else (
                 "glowing-symmetric-40-point-ripple"
                 if visual_style == "spectrum-mirror"
-                else "glowing-bars" if visual_style == "spectrum" else None
+                else (
+                    "glowing-52-column-dot-matrix"
+                    if visual_style == "spectrum-dots"
+                    else (
+                        "scrolling-log-frequency-contour-waterfall"
+                        if visual_style == "spectrum-waterfall"
+                        else "glowing-bars" if visual_style == "spectrum" else None
+                    )
+                )
             )
         ),
         "spectrum_bar_count": 80 if visual_style == "spectrum" else None,
@@ -4672,6 +4680,40 @@ def render_karaoke_video(
         ),
         "spectrum_mirror_stem_alpha": (
             0.55 if visual_style == "spectrum-mirror" else None
+        ),
+        "spectrum_dot_columns": (
+            52 if visual_style == "spectrum-dots" else None
+        ),
+        "spectrum_dot_rows": 10 if visual_style == "spectrum-dots" else None,
+        "spectrum_dot_cell_size_px": (
+            20 if visual_style == "spectrum-dots" else None
+        ),
+        "spectrum_dot_gap_px": 8 if visual_style == "spectrum-dots" else None,
+        "spectrum_dot_vertical_padding_px": (
+            10 if visual_style == "spectrum-dots" else None
+        ),
+        "spectrum_dot_trail_decay": (
+            0.93 if visual_style == "spectrum-dots" else None
+        ),
+        "spectrum_waterfall_slide": (
+            "right-to-left" if visual_style == "spectrum-waterfall" else None
+        ),
+        "spectrum_waterfall_frequency_scale": (
+            "log" if visual_style == "spectrum-waterfall" else None
+        ),
+        "spectrum_waterfall_amplitude_scale": (
+            "log" if visual_style == "spectrum-waterfall" else None
+        ),
+        "spectrum_waterfall_dynamic_range_db": (
+            90 if visual_style == "spectrum-waterfall" else None
+        ),
+        "spectrum_waterfall_gain": (
+            3 if visual_style == "spectrum-waterfall" else None
+        ),
+        "spectrum_waterfall_color_source": (
+            "configured-spectrum-color"
+            if visual_style == "spectrum-waterfall"
+            else None
         ),
         "peak_hold": (
             {"enabled": True, "decay": 0.975, "half_life_seconds": 0.91}

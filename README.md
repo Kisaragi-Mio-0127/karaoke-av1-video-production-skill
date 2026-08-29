@@ -258,8 +258,10 @@ the default; full-auto does not require this sidecar.
 The full-auto route prepares the current wide layout automatically. Choose
 `spectrum` for glowing bars, `spectrum-line` for a 40-point stem-and-line chart,
 `spectrum-mirror` for an exactly mirrored 40-point ripple with vertical stems
-continuous through its centre, or `vinyl` for a record visual. Geometry belongs
-to the single source of truth in
+continuous through its centre, `spectrum-dots` for a 52-column LED matrix with
+short afterglow, `spectrum-waterfall` for a right-to-left logarithmic contour
+spectrogram history, or `vinyl` for a record visual. Geometry belongs to the
+single source of truth in
 [wide-visual-templates.md](references/wide-visual-templates.md).
 
 Artwork is automatic when a standard deliverable cover or embedded audio cover

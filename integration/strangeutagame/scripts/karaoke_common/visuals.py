@@ -6,7 +6,14 @@ import re
 
 from scripts.karaoke_common.layout import SubtitleLayout
 
-VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line", "spectrum-mirror")
+VISUAL_STYLES = (
+    "vinyl",
+    "spectrum",
+    "spectrum-line",
+    "spectrum-mirror",
+    "spectrum-dots",
+    "spectrum-waterfall",
+)
 VINYL_MOTIONS = ("rotate", "static")
 
 
@@ -166,6 +173,78 @@ def build_visual_filter_graph(
             "[bgclip][mirrorouter]overlay=736:226:format=auto[mirrorwide];"
             "[mirrorwide][mirrorinner]overlay=736:226:format=auto[mirrorglow];"
             "[mirrorglow][mirrorcore]overlay=800:290:format=auto[spectrumscene];"
+        )
+    elif visual_style == "spectrum-dots":
+        spectrum_scene = (
+            f"[0:v]format=rgba,trim=start={start:.3f}:end={end:.3f},"
+            "setpts=PTS-STARTPTS[bgclip];"
+            f"[1:a]atrim=start={start:.3f}:end={end:.3f},"
+            "asetpts=PTS-STARTPTS,asplit=2[a][specaudio];"
+            "[specaudio]aformat=channel_layouts=mono,"
+            "showfreqs=s=52x200:r=30:mode=bar:ascale=log:fscale=log:"
+            "win_size=4096:overlap=0.80:averaging=4:colors=white,"
+            "scale=1040:200:flags=neighbor,"
+            "drawgrid=width=20:height=20:thickness=8:color=black@1,"
+            "format=rgba,colorkey=0x000000:0.06:0.08,alphaextract,"
+            "pad=1040:220:0:10:color=black,"
+            "gblur=sigma=0.65:steps=1,"
+            "lut=y='if(lte(val\\,18)\\,0\\,val)',"
+            "split=4[dotcoremask][dotinnermask][dotoutermask][dottrailmask];"
+            "[dotinnermask]pad=1168:348:64:64:color=black,"
+            "gblur=sigma=4:steps=2,lut=y='val*1.8'[dotinner];"
+            "[dotoutermask]pad=1168:348:64:64:color=black,"
+            "gblur=sigma=14:steps=2,lut=y='val*2.2'[dotouter];"
+            "[dottrailmask]pad=1168:348:64:64:color=black,"
+            "lagfun=decay=0.93,gblur=sigma=2.2:steps=2,"
+            "lut=y='val*0.42'[dottrail];"
+            f"color=c=0x{color}:s=1040x220:r=30:d={duration:.3f},"
+            "format=rgba[dotcorecolor];"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
+            "format=rgba[dotinnercolor];"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
+            "format=rgba[dotoutercolor];"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
+            "format=rgba[dottrailcolor];"
+            "[dotcorecolor][dotcoremask]alphamerge[dotcore];"
+            "[dotinnercolor][dotinner]alphamerge[dotinnerglow];"
+            "[dotoutercolor][dotouter]alphamerge[dotouterglow];"
+            "[dottrailcolor][dottrail]alphamerge[dotafterglow];"
+            "[bgclip][dotouterglow]overlay=736:226:format=auto[dotwide];"
+            "[dotwide][dotafterglow]overlay=736:226:format=auto[dotheld];"
+            "[dotheld][dotinnerglow]overlay=736:226:format=auto[dotglow];"
+            "[dotglow][dotcore]overlay=800:290:format=auto[spectrumscene];"
+        )
+    elif visual_style == "spectrum-waterfall":
+        spectrum_scene = (
+            f"[0:v]format=rgba,trim=start={start:.3f}:end={end:.3f},"
+            "setpts=PTS-STARTPTS[bgclip];"
+            f"[1:a]atrim=start={start:.3f}:end={end:.3f},"
+            "asetpts=PTS-STARTPTS,asplit=2[a][specaudio];"
+            "[specaudio]aformat=channel_layouts=mono,"
+            "showspectrum=s=1040x220:slide=scroll:mode=combined:"
+            "color=intensity:scale=log:fscale=log:win_func=blackman:"
+            "orientation=vertical:overlap=0.85:gain=3:data=magnitude:"
+            "fps=30:legend=0:drange=90:limit=0:opacity=1,"
+            "format=gray,edgedetect=low=0.035:high=0.11:mode=wires,"
+            "gblur=sigma=0.35:steps=1,"
+            "lut=y='if(lte(val\\,18)\\,0\\,min(230\\,val*1.5))',"
+            "split=3[watercoremask][waterinnermask][wateroutermask];"
+            "[waterinnermask]pad=1168:348:64:64:color=black,"
+            "gblur=sigma=2.5:steps=2,lut=y='val*1.2'[waterinner];"
+            "[wateroutermask]pad=1168:348:64:64:color=black,"
+            "gblur=sigma=8:steps=2,lut=y='val*0.8'[waterouter];"
+            f"color=c=0x{color}:s=1040x220:r=30:d={duration:.3f},"
+            "format=rgba[watercorecolor];"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
+            "format=rgba[waterinnercolor];"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
+            "format=rgba[wateroutercolor];"
+            "[watercorecolor][watercoremask]alphamerge[watercore];"
+            "[waterinnercolor][waterinner]alphamerge[waterinnerglow];"
+            "[wateroutercolor][waterouter]alphamerge[waterouterglow];"
+            "[bgclip][waterouterglow]overlay=736:226:format=auto[waterhalo];"
+            "[waterhalo][waterinnerglow]overlay=736:226:format=auto[waterglow];"
+            "[waterglow][watercore]overlay=800:290:format=auto[spectrumscene];"
         )
     else:
         spectrum_scene = (

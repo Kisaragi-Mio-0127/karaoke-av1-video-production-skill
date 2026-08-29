@@ -595,7 +595,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--visual-style",
-        choices=("vinyl", "spectrum", "spectrum-line", "spectrum-mirror"),
+        choices=(
+            "vinyl",
+            "spectrum",
+            "spectrum-line",
+            "spectrum-mirror",
+            "spectrum-dots",
+            "spectrum-waterfall",
+        ),
         default="spectrum",
     )
     parser.add_argument(

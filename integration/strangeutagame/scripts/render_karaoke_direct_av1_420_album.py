@@ -272,12 +272,16 @@ def validate_current_wide_compositions(
         "spectrum": {"x": 40, "y": 30, "width": 460, "height": 522},
         "spectrum-line": {"x": 40, "y": 30, "width": 460, "height": 522},
         "spectrum-mirror": {"x": 40, "y": 30, "width": 460, "height": 522},
+        "spectrum-dots": {"x": 40, "y": 30, "width": 460, "height": 522},
+        "spectrum-waterfall": {"x": 40, "y": 30, "width": 460, "height": 522},
     }
     title_block_x_by_style = {
         "vinyl": 430,
         "spectrum": 800,
         "spectrum-line": 800,
         "spectrum-mirror": 800,
+        "spectrum-dots": 800,
+        "spectrum-waterfall": 800,
     }
     title_block_y = {"label": 120, "title": 155, "artist": 220}
     secondary_safe_bounds = [0, 0, 1920, 96]
@@ -1197,6 +1201,8 @@ def validate_track_render_report(
         "spectrum",
         "spectrum-line",
         "spectrum-mirror",
+        "spectrum-dots",
+        "spectrum-waterfall",
     }:
         visual_colors = color_plan.get("visual") if isinstance(color_plan, Mapping) else None
         progress_bar = video.get("progress_bar")
@@ -2955,6 +2961,8 @@ def make_parser() -> argparse.ArgumentParser:
             "spectrum",
             "spectrum-line",
             "spectrum-mirror",
+            "spectrum-dots",
+            "spectrum-waterfall",
             "both",
             "all",
         ),

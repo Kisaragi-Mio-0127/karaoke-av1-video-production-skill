@@ -65,6 +65,8 @@ def test_spectrum_mirror_graph_draws_exact_symmetric_zero_ended_ripples():
     assert "pad=1040:220:0:4:color=black" in graph
     assert "[mirrorflipsrc]vflip[mirrorlower]" in graph
     assert "blend=all_mode=lighten" in graph
+    assert "lte(abs(X-round(X*39/4159)*4159/39)\\,7)" in graph
+    assert "gt(X\\,7)*lt(X\\,4152)*gte(Y\\,ld(0))*lte(Y\\,412)" in graph
     assert graph.count("drawbox=x=0:y=170:w=1168:h=8:color=black:t=fill") == 2
     assert "[mirrorglow][mirrorcore]overlay=800:290" in graph
     assert "drawgrid=" not in graph

@@ -159,7 +159,8 @@ bars, while `spectrum-line` renders 40 equally spaced total points joined by
 straight segments. Its first and last points stay at zero amplitude, and each
 of the 38 visible frequency points has a vertical stem to the zero-amplitude
 coordinate. `spectrum-mirror` renders an exactly mirrored 40-point glowing
-ripple around a narrow centre gap. All spectrum styles create no vinyl.
+ripple around a narrow centre gap, with each of its 38 frequency points using
+a vertical stem to the centre. All spectrum styles create no vinyl.
 Use optional `--album-title` and `--album-artist` only as explicit overrides.
 
 For an editor-ready subtitle layer, add `--output-mode subtitle-overlay`. It

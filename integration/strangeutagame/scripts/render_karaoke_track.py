@@ -4664,6 +4664,15 @@ def render_karaoke_video(
         "spectrum_mirror_height_depth_bits": (
             16 if visual_style == "spectrum-mirror" else None
         ),
+        "spectrum_mirror_stems_to_center": (
+            True if visual_style == "spectrum-mirror" else None
+        ),
+        "spectrum_mirror_stem_width_px": (
+            2 if visual_style == "spectrum-mirror" else None
+        ),
+        "spectrum_mirror_stem_alpha": (
+            0.55 if visual_style == "spectrum-mirror" else None
+        ),
         "peak_hold": (
             {"enabled": True, "decay": 0.975, "half_life_seconds": 0.91}
             if visual_style == "spectrum"

@@ -1031,6 +1031,18 @@ def validate_renderer_report(
                         "spectrum_mirror_height_depth_bits"
                     )
                     == 16,
+                    "spectrum_mirror_stems_to_center": video.get(
+                        "spectrum_mirror_stems_to_center"
+                    )
+                    is True,
+                    "spectrum_mirror_stem_width": video.get(
+                        "spectrum_mirror_stem_width_px"
+                    )
+                    == 2,
+                    "spectrum_mirror_stem_alpha": video.get(
+                        "spectrum_mirror_stem_alpha"
+                    )
+                    == 0.55,
                 }
             )
         else:

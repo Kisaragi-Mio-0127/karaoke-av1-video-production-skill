@@ -153,6 +153,9 @@ def _renderer_report(
             "spectrum_mirror_exact_symmetry": True,
             "spectrum_mirror_antialias": "4x-ssaa-lanczos",
             "spectrum_mirror_height_depth_bits": 16,
+            "spectrum_mirror_stems_to_center": True,
+            "spectrum_mirror_stem_width_px": 2,
+            "spectrum_mirror_stem_alpha": 0.55,
             "spectrum_color": color_plan["visual"]["spectrum_color"],
             "color_plan_sha256": color_plan["color_plan_sha256"],
             "progress_bar": {
@@ -582,6 +585,7 @@ def test_spectrum_mirror_renderer_report_accepts_current_contract(tmp_path: Path
 
     assert checks["spectrum_mirror_mode"] is True
     assert checks["spectrum_mirror_exact_symmetry"] is True
+    assert checks["spectrum_mirror_stems_to_center"] is True
 
 
 @pytest.mark.parametrize("visual_style", ["vinyl", "spectrum"])

@@ -8,5 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "integration" / "strangeutagame"
-if str(BUNDLE) not in sys.path:
-    sys.path.insert(0, str(BUNDLE))
+bundle_path = str(BUNDLE)
+if bundle_path in sys.path:
+    sys.path.remove(bundle_path)
+sys.path.insert(0, bundle_path)

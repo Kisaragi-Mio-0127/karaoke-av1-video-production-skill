@@ -5,6 +5,13 @@ from pathlib import Path
 from scripts import pitch_shift_audio
 
 
+def test_imports_bundled_pitch_shift_module() -> None:
+    root = Path(__file__).resolve().parents[3]
+    expected = root / "integration" / "strangeutagame" / "scripts" / "pitch_shift_audio.py"
+
+    assert Path(pitch_shift_audio.__file__).resolve() == expected.resolve()
+
+
 def test_formal_lossless_source_accepts_flac_and_pcm() -> None:
     assert pitch_shift_audio.is_formal_lossless_source({"codec_name": "flac"})
     assert pitch_shift_audio.is_formal_lossless_source({"codec_name": "pcm_f32le"})

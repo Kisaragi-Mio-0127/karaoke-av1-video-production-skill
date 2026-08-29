@@ -601,7 +601,7 @@ def build_parser() -> argparse.ArgumentParser:
             "spectrum-line",
             "spectrum-mirror",
             "spectrum-dots",
-            "spectrum-waterfall",
+            "spectrum-ribbon",
         ),
         default="spectrum",
     )

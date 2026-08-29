@@ -48,7 +48,7 @@ def test_japanese_layout_does_not_import_local_zh_en_extension():
             800,
         ),
         (
-            "spectrum-waterfall",
+            "spectrum-ribbon",
             {"x": 40, "y": 30, "width": 460, "height": 522},
             800,
         ),

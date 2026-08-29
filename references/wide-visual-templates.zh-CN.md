@@ -8,7 +8,7 @@
 
 ## 模板选择
 
-- 只选择一个`--visual-style`：`vinyl`、`spectrum`、`spectrum-line`、`spectrum-mirror`、`spectrum-dots`或`spectrum-waterfall`。
+- 只选择一个`--visual-style`：`vinyl`、`spectrum`、`spectrum-line`、`spectrum-mirror`、`spectrum-dots`或`spectrum-ribbon`。
 - `vinyl`保持唱片旋转，并在当前运行的输出目录内生成唱片资源。
 - 五种频谱样式均省略`--vinyl`，且不得探测、生成、传递或报告vinyl资源。
 - 一个输出中不合并多种效果。AV1批量入口的`both`选项会创建两个独立输出，而不是合并帧。
@@ -52,8 +52,8 @@
 - `spectrum-line`总计固定包含40个等间距点。第1点和第40点固定为`Y=0`，中间38点承载频谱数据。相邻点使用直线段连接；每个可见频谱点在相同`x`位置使用2像素宽、55%不透明度的竖线连接到归一化幅值`Y=0`。零值频谱点保持隐藏，避免形成底部横线。高度通道在插值期间保持16位；折线和竖线以`4160x880`绘制（4倍SSAA），再用Lanczos缩小到`1040x220`，得到半径1.25像素的抗锯齿线条。竖线颜色和辉光均延伸到`Y=0`，辉光在该坐标下方裁掉，避免进入进度条区域。两条高斜率边界段使用像素到线段的垂直距离计算覆盖率，确保任意斜率下保持连续。低能量点的高度限制在`Y=0`，避免中间点越出可视区域后与边界锚点分离。
 - `spectrum-mirror`使用相同的40个等间距频谱点绘制上半部直线波纹，下半部由上半部垂直镜像生成。视觉中心位于`y=400`且无暗缝；高度蒙版保持16位，并采用4倍SSAA与Lanczos缩小。38个频谱点各自使用2像素宽、55%不透明度的竖线连续贯穿中心。该主题不绘制面积填充或额外的静态中心线。
 - `spectrum-dots`使用52个频率列和10行LED。每个单元为`20x20 px`，网格间隙为`8 px`，点阵上下各保留`10 px`。时间衰减为`0.93`，形成短暂残影且不添加静态基线。
-- `spectrum-waterfall`显示从右向左滚动的频谱轮廓历史。频率和振幅均使用对数刻度；FFT采用Blackman窗、`0.85`重叠、`90 dB`显示范围和`3`倍增益。边缘提取避免密集音乐形成实心色块，轮廓强度统一映射到当前频谱配色，使主题跟随封面色板。
-- 两个现代主题仅使用FFmpeg内置的`showfreqs`、`showspectrum`、辉光和合成滤镜。设计方向参考[projectM](https://github.com/projectM-visualizer/projectm)与[Butterchurn](https://github.com/jberg/butterchurn)的音频响应层次，项目内没有复制外部预设、纹理、着色器或运行时依赖。
+- `spectrum-ribbon`使用40个等间距点，其中两端为零幅值锚点，中间38点承载实时频率。直线段按4倍SSAA绘制并用Lanczos缩小。当前线使用频谱色，七帧短时间轨迹使用进度色。该主题不绘制竖线、填充或水平基线，并在`y=510`下方裁掉辉光。
+- 两个现代主题仅使用FFmpeg内置的`showfreqs`、`tmix`、辉光和合成滤镜。丝带主题参考[Codrops线式音频视觉](https://tympanus.net/codrops/2018/03/06/creative-audio-visualizers/)的低密度线条语言，并依据[Stripe色彩系统研究](https://stripe.com/blog/accessible-color-systems)让两种色板颜色保持不同视觉权重。项目内没有复制外部预设、纹理、着色器或运行时依赖。
 - 裁剪安全矩形：`(x,y,width,height)=(736,226,1168,348)`。
 - 水平辉光内边距：`64 px`。
 - 顶部和底部辉光内边距：各`56 px`。
@@ -77,7 +77,7 @@ uv run --no-sync python scripts/build_karaoke_wide_artwork.py `
   --font-regular <regular-font> --font-bold <bold-font> `
   --title <title> --artist <artist> `
   --album-title <album-title> --album-artist <album-artist> `
-  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror-or-spectrum-dots-or-spectrum-waterfall> --output <composition-png>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror-or-spectrum-dots-or-spectrum-ribbon> --output <composition-png>
 ```
 
 使用匹配样式渲染代表性预览：
@@ -89,11 +89,11 @@ uv run --no-sync python scripts/render_karaoke_track.py `
   --font-file <main-font> --output <new-output-mp4> `
   --ass-output <new-output-ass> --report-output <new-report-json> `
   --start <seconds> --duration <seconds> --layout wide `
-  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror-or-spectrum-dots-or-spectrum-waterfall>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror-or-spectrum-dots-or-spectrum-ribbon>
 ```
 
 对于低层`vinyl`渲染器检查，加入同一图稿运行生成的vinyl资源并记录其身份。所有频谱主题均省略该资源。每次审核运行都使用新的输出、ASS和报告路径；将已接受产物与回滚副本分开保留。
 
 ## 验收证据
 
-要求构图/报告布局标识与本契约匹配。检查标题、第一行歌词、最长行、密集时间、次级叠加层、活动频谱、进度和结尾帧。对于vinyl至少检查四个旋转阶段，拒绝接缝或扫过式残缺弧段。对于spectrum验证实时响应、峰值衰减、圆角条、未裁剪辉光、对齐的标题和进度边界，以及安全终点行为。对于`spectrum-mirror`验证上下严格镜像、中心连续、动态响应、两侧零值边缘，以及所有可见频谱点的中心竖线。对于`spectrum-dots`验证离散点阵、52列响应、短暂残影和上下留白。对于`spectrum-waterfall`验证新能量从右侧进入、历史向左移动、对数频率细节可见，以及配置颜色在背景上保持清晰。
+要求构图/报告布局标识与本契约匹配。检查标题、第一行歌词、最长行、密集时间、次级叠加层、活动频谱、进度和结尾帧。对于vinyl至少检查四个旋转阶段，拒绝接缝或扫过式残缺弧段。对于spectrum验证实时响应、峰值衰减、圆角条、未裁剪辉光、对齐的标题和进度边界，以及安全终点行为。对于`spectrum-mirror`验证上下严格镜像、中心连续、动态响应、两侧零值边缘，以及所有可见频谱点的中心竖线。对于`spectrum-dots`验证离散点阵、52列响应、短暂残影和上下留白。对于`spectrum-ribbon`验证40点直线段、两端零值锚点、七帧双色短轨迹、隐藏竖线与基线，以及进度区域上方的辉光裁剪。

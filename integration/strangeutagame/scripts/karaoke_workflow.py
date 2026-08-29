@@ -89,7 +89,7 @@ VISUAL_STYLES = (
     "spectrum-line",
     "spectrum-mirror",
     "spectrum-dots",
-    "spectrum-waterfall",
+    "spectrum-ribbon",
 )
 OUTPUT_MODES = ("standard", "subtitle-overlay")
 
@@ -1075,35 +1075,47 @@ def validate_renderer_report(
                     == 0.93,
                 }
             )
-        elif config.visual_style == "spectrum-waterfall":
+        elif config.visual_style == "spectrum-ribbon":
             spectrum_checks.update(
                 {
-                    "spectrum_waterfall_mode": video.get("spectrum_mode")
-                    == "scrolling-log-frequency-contour-waterfall",
-                    "spectrum_waterfall_slide": video.get(
-                        "spectrum_waterfall_slide"
+                    "spectrum_ribbon_mode": video.get("spectrum_mode")
+                    == "dual-color-40-point-neon-ribbon-trails",
+                    "spectrum_ribbon_points": video.get(
+                        "spectrum_ribbon_points"
                     )
-                    == "right-to-left",
-                    "spectrum_waterfall_frequency_scale": video.get(
-                        "spectrum_waterfall_frequency_scale"
+                    == 40,
+                    "spectrum_ribbon_frequency_points": video.get(
+                        "spectrum_ribbon_frequency_points"
                     )
-                    == "log",
-                    "spectrum_waterfall_amplitude_scale": video.get(
-                        "spectrum_waterfall_amplitude_scale"
+                    == 38,
+                    "spectrum_ribbon_zero_boundary_points": video.get(
+                        "spectrum_ribbon_zero_boundary_points"
                     )
-                    == "log",
-                    "spectrum_waterfall_dynamic_range": video.get(
-                        "spectrum_waterfall_dynamic_range_db"
+                    == 2,
+                    "spectrum_ribbon_antialias": video.get(
+                        "spectrum_ribbon_antialias"
                     )
-                    == 90,
-                    "spectrum_waterfall_gain": video.get(
-                        "spectrum_waterfall_gain"
+                    == "4x-ssaa-lanczos",
+                    "spectrum_ribbon_trail_frames": video.get(
+                        "spectrum_ribbon_trail_frames"
                     )
-                    == 3,
-                    "spectrum_waterfall_color_source": video.get(
-                        "spectrum_waterfall_color_source"
+                    == 7,
+                    "spectrum_ribbon_trail_color_source": video.get(
+                        "spectrum_ribbon_trail_color_source"
                     )
-                    == "configured-spectrum-color",
+                    == "progress-color",
+                    "spectrum_ribbon_baseline": video.get(
+                        "spectrum_baseline_y"
+                    )
+                    == 510,
+                    "spectrum_ribbon_baseline_hidden": video.get(
+                        "spectrum_baseline_visible"
+                    )
+                    is False,
+                    "spectrum_ribbon_stems_hidden": video.get(
+                        "spectrum_ribbon_stems_visible"
+                    )
+                    is False,
                 }
             )
         else:

@@ -83,15 +83,19 @@ def test_spectrum_dots_graph_draws_glowing_led_matrix_with_afterglow():
     assert "[dotglow][dotcore]overlay=800:290" in graph
 
 
-def test_spectrum_waterfall_graph_scrolls_log_frequency_history():
-    graph = _graph("spectrum-waterfall")
+def test_spectrum_ribbon_graph_draws_dual_color_antialiased_trails():
+    graph = _graph("spectrum-ribbon")
 
-    assert "showspectrum=s=1040x220:slide=scroll:mode=combined" in graph
-    assert "color=intensity:scale=log:fscale=log" in graph
-    assert "orientation=vertical:overlap=0.85:gain=3" in graph
-    assert "fps=30:legend=0:drange=90" in graph
-    assert "edgedetect=low=0.035:high=0.11:mode=wires" in graph
-    assert "[waterglow][watercore]overlay=800:290" in graph
+    assert "showfreqs=s=38x220:r=30:mode=bar" in graph
+    assert "pad=40:1:1:0:color=black" in graph
+    assert "scale=4266:880:flags=bilinear,crop=4160:880:53:0" in graph
+    assert "scale=1040:220:flags=lanczos,format=gray" in graph
+    assert "tmix=frames=7" in graph
+    assert "weights='1 0.80 0.62 0.45 0.30 0.18 0.10'" in graph
+    assert "color=c=0x84C7E1:s=1040x220" in graph
+    assert "[ribbonglow][ribboncore]overlay=800:290" in graph
+    assert "showspectrum=" not in graph
+    assert "lte(abs(X-round(X*39/4159)*4159/39)" not in graph
 
 
 def test_visual_style_batch_selectors_preserve_both_and_offer_all():
@@ -101,11 +105,11 @@ def test_visual_style_batch_selectors_preserve_both_and_offer_all():
         "spectrum-line",
         "spectrum-mirror",
         "spectrum-dots",
-        "spectrum-waterfall",
+        "spectrum-ribbon",
     )
     assert select_visual_styles("both") == ("vinyl", "spectrum")
     assert select_visual_styles("all") == VISUAL_STYLES
     assert select_visual_styles("spectrum-line") == ("spectrum-line",)
     assert select_visual_styles("spectrum-mirror") == ("spectrum-mirror",)
     assert select_visual_styles("spectrum-dots") == ("spectrum-dots",)
-    assert select_visual_styles("spectrum-waterfall") == ("spectrum-waterfall",)
+    assert select_visual_styles("spectrum-ribbon") == ("spectrum-ribbon",)

@@ -189,9 +189,9 @@ def _renderer_report(
                 "color": color_plan["visual"]["progress_color"],
             },
         }
-    elif config.visual_style == "spectrum-waterfall":
+    elif config.visual_style == "spectrum-ribbon":
         video = {
-            "visual_style": "spectrum-waterfall",
+            "visual_style": "spectrum-ribbon",
             "vinyl_motion": None,
             "vinyl_asset": None,
             "spectrum_geometry": {"x": 800, "y": 290, "width": 1040, "height": 220},
@@ -201,13 +201,16 @@ def _renderer_report(
                 "width": 1168,
                 "height": 348,
             },
-            "spectrum_mode": "scrolling-log-frequency-contour-waterfall",
-            "spectrum_waterfall_slide": "right-to-left",
-            "spectrum_waterfall_frequency_scale": "log",
-            "spectrum_waterfall_amplitude_scale": "log",
-            "spectrum_waterfall_dynamic_range_db": 90,
-            "spectrum_waterfall_gain": 3,
-            "spectrum_waterfall_color_source": "configured-spectrum-color",
+            "spectrum_mode": "dual-color-40-point-neon-ribbon-trails",
+            "spectrum_baseline_y": 510,
+            "spectrum_baseline_visible": False,
+            "spectrum_ribbon_points": 40,
+            "spectrum_ribbon_frequency_points": 38,
+            "spectrum_ribbon_zero_boundary_points": 2,
+            "spectrum_ribbon_antialias": "4x-ssaa-lanczos",
+            "spectrum_ribbon_trail_frames": 7,
+            "spectrum_ribbon_trail_color_source": "progress-color",
+            "spectrum_ribbon_stems_visible": False,
             "spectrum_color": color_plan["visual"]["spectrum_color"],
             "color_plan_sha256": color_plan["color_plan_sha256"],
             "progress_bar": {
@@ -656,12 +659,12 @@ def test_spectrum_dots_renderer_report_accepts_current_contract(tmp_path: Path):
     assert checks["spectrum_dot_trail_decay"] is True
 
 
-def test_spectrum_waterfall_renderer_report_accepts_current_contract(
+def test_spectrum_ribbon_renderer_report_accepts_current_contract(
     tmp_path: Path,
 ):
     config, report, generated_vinyl = _renderer_report_case(
         tmp_path,
-        visual_style="spectrum-waterfall",
+        visual_style="spectrum-ribbon",
         color_policy="cover",
     )
 
@@ -669,9 +672,9 @@ def test_spectrum_waterfall_renderer_report_accepts_current_contract(
         tmp_path, config, report, generated_vinyl
     )
 
-    assert checks["spectrum_waterfall_mode"] is True
-    assert checks["spectrum_waterfall_slide"] is True
-    assert checks["spectrum_waterfall_color_source"] is True
+    assert checks["spectrum_ribbon_mode"] is True
+    assert checks["spectrum_ribbon_trail_frames"] is True
+    assert checks["spectrum_ribbon_stems_hidden"] is True
 
 
 @pytest.mark.parametrize("visual_style", ["vinyl", "spectrum"])

@@ -4587,8 +4587,8 @@ def render_karaoke_video(
                     "glowing-52-column-dot-matrix"
                     if visual_style == "spectrum-dots"
                     else (
-                        "scrolling-log-frequency-contour-waterfall"
-                        if visual_style == "spectrum-waterfall"
+                        "dual-color-40-point-neon-ribbon-trails"
+                        if visual_style == "spectrum-ribbon"
                         else "glowing-bars" if visual_style == "spectrum" else None
                     )
                 )
@@ -4615,10 +4615,14 @@ def render_karaoke_video(
             else None
         ),
         "spectrum_baseline_y": (
-            516 if visual_style in {"spectrum", "spectrum-line"} else None
+            516
+            if visual_style in {"spectrum", "spectrum-line"}
+            else 510 if visual_style == "spectrum-ribbon" else None
         ),
         "spectrum_baseline_visible": (
-            False if visual_style == "spectrum-line" else None
+            False
+            if visual_style in {"spectrum-line", "spectrum-ribbon"}
+            else None
         ),
         "spectrum_line_points": 40 if visual_style == "spectrum-line" else None,
         "spectrum_frequency_points": 38 if visual_style == "spectrum-line" else None,
@@ -4695,25 +4699,26 @@ def render_karaoke_video(
         "spectrum_dot_trail_decay": (
             0.93 if visual_style == "spectrum-dots" else None
         ),
-        "spectrum_waterfall_slide": (
-            "right-to-left" if visual_style == "spectrum-waterfall" else None
+        "spectrum_ribbon_points": (
+            40 if visual_style == "spectrum-ribbon" else None
         ),
-        "spectrum_waterfall_frequency_scale": (
-            "log" if visual_style == "spectrum-waterfall" else None
+        "spectrum_ribbon_frequency_points": (
+            38 if visual_style == "spectrum-ribbon" else None
         ),
-        "spectrum_waterfall_amplitude_scale": (
-            "log" if visual_style == "spectrum-waterfall" else None
+        "spectrum_ribbon_zero_boundary_points": (
+            2 if visual_style == "spectrum-ribbon" else None
         ),
-        "spectrum_waterfall_dynamic_range_db": (
-            90 if visual_style == "spectrum-waterfall" else None
+        "spectrum_ribbon_antialias": (
+            "4x-ssaa-lanczos" if visual_style == "spectrum-ribbon" else None
         ),
-        "spectrum_waterfall_gain": (
-            3 if visual_style == "spectrum-waterfall" else None
+        "spectrum_ribbon_trail_frames": (
+            7 if visual_style == "spectrum-ribbon" else None
         ),
-        "spectrum_waterfall_color_source": (
-            "configured-spectrum-color"
-            if visual_style == "spectrum-waterfall"
-            else None
+        "spectrum_ribbon_trail_color_source": (
+            "progress-color" if visual_style == "spectrum-ribbon" else None
+        ),
+        "spectrum_ribbon_stems_visible": (
+            False if visual_style == "spectrum-ribbon" else None
         ),
         "peak_hold": (
             {"enabled": True, "decay": 0.975, "half_life_seconds": 0.91}

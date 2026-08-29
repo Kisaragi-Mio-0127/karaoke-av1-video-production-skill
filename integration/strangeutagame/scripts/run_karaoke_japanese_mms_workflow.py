@@ -780,7 +780,7 @@ def make_parser() -> argparse.ArgumentParser:
             "spectrum-line",
             "spectrum-mirror",
             "spectrum-dots",
-            "spectrum-waterfall",
+            "spectrum-ribbon",
         ),
         default="vinyl",
     )

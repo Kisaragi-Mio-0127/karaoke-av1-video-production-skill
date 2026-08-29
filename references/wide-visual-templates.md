@@ -14,7 +14,7 @@ when the renderer or canvas changes.
 ## Template selection
 
 - Select exactly one `--visual-style`: `vinyl`, `spectrum`, `spectrum-line`,
-  `spectrum-mirror`, `spectrum-dots`, or `spectrum-waterfall`.
+  `spectrum-mirror`, `spectrum-dots`, or `spectrum-ribbon`.
 - `vinyl` keeps the record rotating and generates its record asset inside the
   current run's output directory.
 - Spectrum styles omit `--vinyl` and must not probe, generate, pass, or report a
@@ -100,17 +100,18 @@ when the renderer or canvas changes.
   `20x20 px` with an `8 px` grid gap, leaving `10 px` clear above and below the
   matrix. A `0.93` temporal decay creates a short afterglow without adding a
   static baseline.
-- `spectrum-waterfall` shows a right-to-left contour spectrogram history. Frequency and
-  amplitude both use logarithmic scaling; the FFT uses a Blackman window,
-  `0.85` overlap, `90 dB` display range, and gain `3`. Edge extraction keeps
-  dense music from becoming a solid block, then the contour intensity is
-  recoloured with the configured spectrum colour so the theme follows the
-  cover palette.
-- The two modern themes use FFmpeg's built-in `showfreqs`, `showspectrum`, glow,
-  and compositing filters. Their design direction draws from audio-reactive
-  layering seen in [projectM](https://github.com/projectM-visualizer/projectm)
-  and [Butterchurn](https://github.com/jberg/butterchurn), with no external
-  preset, texture, shader, or runtime dependency copied into this project.
+- `spectrum-ribbon` uses 40 equally spaced points with two zero-amplitude edge
+  anchors and 38 live frequency points. Straight segments are rendered at 4x
+  SSAA and reduced with Lanczos. The current line uses the configured spectrum
+  colour; seven short temporal samples use the progress colour. It draws no
+  stems, fill, or horizontal baseline, and clips glow below `y=510`.
+- The two modern themes use FFmpeg's built-in `showfreqs`, `tmix`, glow, and
+  compositing filters. The ribbon adopts the low-density line language from
+  [Codrops' line-style audio visualizers](https://tympanus.net/codrops/2018/03/06/creative-audio-visualizers/)
+  and keeps the two palette colours at distinct visual weights following the
+  contrast principles in [Stripe's colour-system study](https://stripe.com/blog/accessible-color-systems).
+  No external preset, texture, shader, or runtime dependency is copied into
+  this project.
 - Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
 - Horizontal glow padding: `64 px`.
 - Top and bottom glow padding: `56 px` each.
@@ -141,7 +142,7 @@ uv run --no-sync python scripts/build_karaoke_wide_artwork.py `
   --font-regular <regular-font> --font-bold <bold-font> `
   --title <title> --artist <artist> `
   --album-title <album-title> --album-artist <album-artist> `
-  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror-or-spectrum-dots-or-spectrum-waterfall> --output <composition-png>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror-or-spectrum-dots-or-spectrum-ribbon> --output <composition-png>
 ```
 
 Render a representative preview with the matching style:
@@ -153,7 +154,7 @@ uv run --no-sync python scripts/render_karaoke_track.py `
   --font-file <main-font> --output <new-output-mp4> `
   --ass-output <new-output-ass> --report-output <new-report-json> `
   --start <seconds> --duration <seconds> --layout wide `
-  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror-or-spectrum-dots-or-spectrum-waterfall>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror-or-spectrum-dots-or-spectrum-ribbon>
 ```
 
 For a low-level `vinyl` renderer check, add the vinyl produced by the same
@@ -172,7 +173,6 @@ progress boundaries, and safe endpoint behavior. For `spectrum-mirror`, verify
 exact upper/lower symmetry, the continuous centre, active motion, and zero-ended
 edges. Verify that all visible frequency points retain their mirrored centre
 stems. For `spectrum-dots`, verify discrete cells, the 52-column response, short
-afterglow, and clear top/bottom margins. For `spectrum-waterfall`, verify the
-newest energy enters at the right, history travels left, logarithmic frequency
-detail stays visible, and the configured colour remains legible over the
-background.
+afterglow, and clear top/bottom margins. For `spectrum-ribbon`, verify 40-point
+straight segments, two zero-level edge anchors, seven short dual-colour trails,
+hidden stems/baseline, and glow clipped above the progress area.

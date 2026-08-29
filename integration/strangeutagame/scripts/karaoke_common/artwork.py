@@ -107,7 +107,7 @@ def prepare_auto_artwork(
         "spectrum-line",
         "spectrum-mirror",
         "spectrum-dots",
-        "spectrum-waterfall",
+        "spectrum-ribbon",
     }:
         raise ValueError(f"unsupported visual style: {visual_style}")
 

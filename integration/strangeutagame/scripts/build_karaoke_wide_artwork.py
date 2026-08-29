@@ -27,7 +27,7 @@ SLEEVE_BOXES = {
     "spectrum-line": (40, 30, 460, 522),
     "spectrum-mirror": (40, 30, 460, 522),
     "spectrum-dots": (40, 30, 460, 522),
-    "spectrum-waterfall": (40, 30, 460, 522),
+    "spectrum-ribbon": (40, 30, 460, 522),
 }
 BOTTOM_PANEL = (20, 576, 1900, 1050)
 BOTTOM_PANEL_FILL = (3, 5, 10, 92)
@@ -40,7 +40,7 @@ TITLE_BLOCK_X = {
     "spectrum-line": 800,
     "spectrum-mirror": 800,
     "spectrum-dots": 800,
-    "spectrum-waterfall": 800,
+    "spectrum-ribbon": 800,
 }
 TITLE_BLOCK_Y = {"label": 120, "title": 155, "artist": 220}
 SECONDARY_OVERLAY_SAFE_BOUNDS = (0, 0, 1920, 96)

@@ -161,8 +161,8 @@ of the 38 visible frequency points has a vertical stem to the zero-amplitude
 coordinate. `spectrum-mirror` renders an exactly mirrored 40-point glowing
 ripple with each of its 38 frequency points using a vertical stem continuous
 through the centre. `spectrum-dots` renders a 52-column LED matrix with short
-afterglow. `spectrum-waterfall` renders a right-to-left logarithmic frequency
-contour history. All spectrum styles create no vinyl.
+afterglow. `spectrum-ribbon` renders a dual-colour 40-point line with short
+motion trails, no stems, and no baseline. All spectrum styles create no vinyl.
 Use optional `--album-title` and `--album-artist` only as explicit overrides.
 
 For an editor-ready subtitle layer, add `--output-mode subtitle-overlay`. It

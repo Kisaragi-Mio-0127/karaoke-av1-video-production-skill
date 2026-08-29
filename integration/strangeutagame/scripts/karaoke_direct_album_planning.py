@@ -31,7 +31,7 @@ VISUAL_STYLES = (
     "spectrum-line",
     "spectrum-mirror",
     "spectrum-dots",
-    "spectrum-waterfall",
+    "spectrum-ribbon",
 )
 FONT_FAMILY = "HarmonyOS Sans SC"
 SHARED_FONT_DIR = REPO_ROOT / "assets" / "fonts" / "HarmonyOS-Sans"
@@ -234,7 +234,7 @@ def select_visual_styles(value: str | None) -> tuple[str, ...]:
         raise ValueError(
             "unknown --visual-style value: "
             f"{selected}; expected vinyl, spectrum, spectrum-line, "
-            "spectrum-mirror, spectrum-dots, spectrum-waterfall, both, or all"
+            "spectrum-mirror, spectrum-dots, spectrum-ribbon, both, or all"
         )
     return (selected,)
 
@@ -380,7 +380,7 @@ def _artwork_paths(
         "spectrum-line",
         "spectrum-mirror",
         "spectrum-dots",
-        "spectrum-waterfall",
+        "spectrum-ribbon",
     }:
         suffix = visual_style
         preferred = (

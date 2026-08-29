@@ -83,7 +83,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TRACK_RENDERER_SCRIPT = REPO_ROOT / "scripts" / "render_karaoke_track.py"
 WORKFLOW_REPORT_NAME = "workflow-report.json"
 TEST_ROOT_MARKER = ".karaoke-workflow-test-root"
-VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line")
+VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line", "spectrum-mirror")
 OUTPUT_MODES = ("standard", "subtitle-overlay")
 
 
@@ -998,6 +998,39 @@ def validate_renderer_report(
                     is False,
                     "spectrum_stem_width": video.get("spectrum_stem_width_px") == 2,
                     "spectrum_stem_alpha": video.get("spectrum_stem_alpha") == 0.55,
+                }
+            )
+        elif config.visual_style == "spectrum-mirror":
+            spectrum_checks.update(
+                {
+                    "spectrum_mirror_mode": video.get("spectrum_mode")
+                    == "glowing-symmetric-40-point-ripple",
+                    "spectrum_mirror_points": video.get("spectrum_mirror_points")
+                    == 40,
+                    "spectrum_mirror_frequency_points": video.get(
+                        "spectrum_mirror_frequency_points"
+                    )
+                    == 38,
+                    "spectrum_mirror_center": video.get(
+                        "spectrum_mirror_center_y"
+                    )
+                    == 400,
+                    "spectrum_mirror_center_gap": video.get(
+                        "spectrum_mirror_center_gap_px"
+                    )
+                    == 4,
+                    "spectrum_mirror_exact_symmetry": video.get(
+                        "spectrum_mirror_exact_symmetry"
+                    )
+                    is True,
+                    "spectrum_mirror_antialias": video.get(
+                        "spectrum_mirror_antialias"
+                    )
+                    == "4x-ssaa-lanczos",
+                    "spectrum_mirror_height_depth": video.get(
+                        "spectrum_mirror_height_depth_bits"
+                    )
+                    == 16,
                 }
             )
         else:

@@ -37,6 +37,11 @@ def test_japanese_layout_does_not_import_local_zh_en_extension():
         ("vinyl", {"x": 40, "y": 30, "width": 340, "height": 402}, 430),
         ("spectrum", {"x": 40, "y": 30, "width": 460, "height": 522}, 800),
         ("spectrum-line", {"x": 40, "y": 30, "width": 460, "height": 522}, 800),
+        (
+            "spectrum-mirror",
+            {"x": 40, "y": 30, "width": 460, "height": 522},
+            800,
+        ),
     ),
 )
 def test_wide_composition_gate_requires_current_style_specific_layout(

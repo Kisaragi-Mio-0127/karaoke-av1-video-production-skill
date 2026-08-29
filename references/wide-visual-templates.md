@@ -13,15 +13,16 @@ when the renderer or canvas changes.
 
 ## Template selection
 
-- Select exactly one `--visual-style`: `vinyl`, `spectrum`, or `spectrum-line`.
+- Select exactly one `--visual-style`: `vinyl`, `spectrum`, `spectrum-line`, or
+  `spectrum-mirror`.
 - `vinyl` keeps the record rotating and generates its record asset inside the
   current run's output directory.
 - Spectrum styles omit `--vinyl` and must not probe, generate, pass, or report a
   vinyl asset.
-- Never combine both effects in one output. The AV1 batch entry's `both`
+- Never combine multiple effects in one output. The AV1 batch entry's `both`
   option creates two independent outputs, not a combined frame.
-- `--output-mode subtitle-overlay` is an output-mode override rather than a
-  third artwork style. It skips the composition, cover, title, panel, vinyl,
+- `--output-mode subtitle-overlay` is an output-mode override rather than an
+  artwork style. It skips the composition, cover, title, panel, vinyl,
   and spectrum in the encoded picture while retaining the same wide ASS
   geometry. A supplied `--background-video` becomes the picture source.
 
@@ -86,7 +87,14 @@ when the renderer or canvas changes.
   Lanczos, yielding a 1.25 px antialiased line. Stem colour and glow both reach
   `Y=0`, while glow is clipped below that coordinate to keep the progress area
   clear. The two steep zero-anchor segments use perpendicular point-to-line
-  distance coverage so they remain continuous at every slope.
+  distance coverage so they remain continuous at every slope. Low-energy
+  heights clamp to `Y=0` so an interior point cannot fall outside the visible
+  rectangle and separate a boundary anchor.
+- `spectrum-mirror` contains the same 40 equally spaced frequency points, draws
+  a straight upper ripple, and creates the lower ripple by an exact vertical
+  mirror. The visual centre is `y=400` with a `4 px` dark gap. It uses a 16-bit
+  height mask and 4x SSAA with Lanczos downsampling. It draws no stems, area
+  fill, or static centre line.
 - Clip-safe rectangle: `(x,y,width,height)=(736,226,1168,348)`.
 - Horizontal glow padding: `64 px`.
 - Top and bottom glow padding: `56 px` each.
@@ -117,7 +125,7 @@ uv run --no-sync python scripts/build_karaoke_wide_artwork.py `
   --font-regular <regular-font> --font-bold <bold-font> `
   --title <title> --artist <artist> `
   --album-title <album-title> --album-artist <album-artist> `
-  --visual-style <vinyl-or-spectrum-or-spectrum-line> --output <composition-png>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror> --output <composition-png>
 ```
 
 Render a representative preview with the matching style:
@@ -129,12 +137,12 @@ uv run --no-sync python scripts/render_karaoke_track.py `
   --font-file <main-font> --output <new-output-mp4> `
   --ass-output <new-output-ass> --report-output <new-report-json> `
   --start <seconds> --duration <seconds> --layout wide `
-  --visual-style <vinyl-or-spectrum-or-spectrum-line>
+  --visual-style <vinyl-or-spectrum-or-spectrum-line-or-spectrum-mirror>
 ```
 
 For a low-level `vinyl` renderer check, add the vinyl produced by the same
-artwork run and record its identity. For `spectrum`, omit it. Use new output,
-ASS, and report paths for every review run; keep accepted artifacts and
+artwork run and record its identity. For every spectrum style, omit it. Use new
+output, ASS, and report paths for every review run; keep accepted artifacts and
 rollback copies separate.
 
 ## Acceptance evidence
@@ -144,4 +152,5 @@ Inspect title, first lyric, longest line, dense timing, secondary overlay,
 active spectrum, progress, and ending frames. For vinyl inspect at least four
 rotation phases and reject seams or sweeping partial arcs. For spectrum verify
 real-time response, peak decay, rounded bars, unclipped glow, aligned title and
-progress boundaries, and safe endpoint behavior.
+progress boundaries, and safe endpoint behavior. For `spectrum-mirror`, verify
+exact upper/lower symmetry, the centre gap, active motion, and zero-ended edges.

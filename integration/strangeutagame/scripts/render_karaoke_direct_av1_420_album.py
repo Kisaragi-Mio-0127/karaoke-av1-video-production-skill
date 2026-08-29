@@ -271,8 +271,14 @@ def validate_current_wide_compositions(
         "vinyl": {"x": 40, "y": 30, "width": 340, "height": 402},
         "spectrum": {"x": 40, "y": 30, "width": 460, "height": 522},
         "spectrum-line": {"x": 40, "y": 30, "width": 460, "height": 522},
+        "spectrum-mirror": {"x": 40, "y": 30, "width": 460, "height": 522},
     }
-    title_block_x_by_style = {"vinyl": 430, "spectrum": 800, "spectrum-line": 800}
+    title_block_x_by_style = {
+        "vinyl": 430,
+        "spectrum": 800,
+        "spectrum-line": 800,
+        "spectrum-mirror": 800,
+    }
     title_block_y = {"label": 120, "title": 155, "artist": 220}
     secondary_safe_bounds = [0, 0, 1920, 96]
     secondary_reserved_bounds = [0, 0, 1920, 107]
@@ -1187,7 +1193,11 @@ def validate_track_render_report(
         and bool(color_plan_sha256)
         and video.get("color_plan_sha256") == color_plan_sha256,
     }
-    if video.get("visual_style") in {"spectrum", "spectrum-line"}:
+    if video.get("visual_style") in {
+        "spectrum",
+        "spectrum-line",
+        "spectrum-mirror",
+    }:
         visual_colors = color_plan.get("visual") if isinstance(color_plan, Mapping) else None
         progress_bar = video.get("progress_bar")
         color_checks.update(
@@ -2940,7 +2950,14 @@ def make_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--visual-style",
-        choices=("vinyl", "spectrum", "spectrum-line", "both", "all"),
+        choices=(
+            "vinyl",
+            "spectrum",
+            "spectrum-line",
+            "spectrum-mirror",
+            "both",
+            "all",
+        ),
         default="vinyl",
         help="render one visual style, legacy both, or all styles as isolated artifacts",
     )

@@ -27,9 +27,9 @@ def test_spectrum_line_graph_draws_40_point_polyline_and_vertical_stems():
     assert "format=gray16le,scale=38:1:flags=area" in graph
     assert "pad=40:1:1:0:color=black" in graph
     assert "scale=4266:880:flags=bilinear,crop=4160:880:53:0" in graph
-    assert "st(0\\,940-p(X\\,Y)/64.25)" in graph
-    assert "st(1\\,940-p(107\\,Y)/64.25)" in graph
-    assert "st(2\\,940-p(4052\\,Y)/64.25)" in graph
+    assert "st(0\\,min(876\\,940-p(X\\,Y)/64.25))" in graph
+    assert "st(1\\,min(876\\,940-p(107\\,Y)/64.25))" in graph
+    assert "st(2\\,min(876\\,940-p(4052\\,Y)/64.25))" in graph
     assert "abs((ld(1)-876)*X-107*(Y-876))" in graph
     assert "abs((876-ld(2))*(X-4052)-107*(Y-ld(2)))" in graph
     assert "lte(abs(X-round(X*39/4159)*4159/39)\\,7)" in graph
@@ -56,8 +56,28 @@ def test_existing_bar_spectrum_graph_remains_discrete():
     assert "mode=line" not in graph
 
 
+def test_spectrum_mirror_graph_draws_exact_symmetric_zero_ended_ripples():
+    graph = _graph("spectrum-mirror")
+
+    assert "showfreqs=s=38x104:r=30:mode=bar" in graph
+    assert "pad=40:1:1:0:color=black" in graph
+    assert "st(0\\,min(412\\,420-p(X\\,Y)/158.0))" in graph
+    assert "pad=1040:220:0:4:color=black" in graph
+    assert "[mirrorflipsrc]vflip[mirrorlower]" in graph
+    assert "blend=all_mode=lighten" in graph
+    assert graph.count("drawbox=x=0:y=170:w=1168:h=8:color=black:t=fill") == 2
+    assert "[mirrorglow][mirrorcore]overlay=800:290" in graph
+    assert "drawgrid=" not in graph
+
+
 def test_visual_style_batch_selectors_preserve_both_and_offer_all():
-    assert VISUAL_STYLES == ("vinyl", "spectrum", "spectrum-line")
+    assert VISUAL_STYLES == (
+        "vinyl",
+        "spectrum",
+        "spectrum-line",
+        "spectrum-mirror",
+    )
     assert select_visual_styles("both") == ("vinyl", "spectrum")
     assert select_visual_styles("all") == VISUAL_STYLES
     assert select_visual_styles("spectrum-line") == ("spectrum-line",)
+    assert select_visual_styles("spectrum-mirror") == ("spectrum-mirror",)

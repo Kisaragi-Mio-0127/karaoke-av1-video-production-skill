@@ -133,6 +133,33 @@ def _renderer_report(
             },
             "color_plan_sha256": color_plan["color_plan_sha256"],
         }
+    elif config.visual_style == "spectrum-mirror":
+        video = {
+            "visual_style": "spectrum-mirror",
+            "vinyl_motion": None,
+            "vinyl_asset": None,
+            "spectrum_geometry": {"x": 800, "y": 290, "width": 1040, "height": 220},
+            "spectrum_clip_safe_geometry": {
+                "x": 736,
+                "y": 226,
+                "width": 1168,
+                "height": 348,
+            },
+            "spectrum_mode": "glowing-symmetric-40-point-ripple",
+            "spectrum_mirror_points": 40,
+            "spectrum_mirror_frequency_points": 38,
+            "spectrum_mirror_center_y": 400,
+            "spectrum_mirror_center_gap_px": 4,
+            "spectrum_mirror_exact_symmetry": True,
+            "spectrum_mirror_antialias": "4x-ssaa-lanczos",
+            "spectrum_mirror_height_depth_bits": 16,
+            "spectrum_color": color_plan["visual"]["spectrum_color"],
+            "color_plan_sha256": color_plan["color_plan_sha256"],
+            "progress_bar": {
+                "show_time": False,
+                "color": color_plan["visual"]["progress_color"],
+            },
+        }
     else:
         video = {
             "visual_style": "spectrum",
@@ -540,6 +567,21 @@ def _validate_renderer_report_case(
         generated_vinyl=generated_vinyl,
     )
     return result["checks"]
+
+
+def test_spectrum_mirror_renderer_report_accepts_current_contract(tmp_path: Path):
+    config, report, generated_vinyl = _renderer_report_case(
+        tmp_path,
+        visual_style="spectrum-mirror",
+        color_policy="cover",
+    )
+
+    checks = _validate_renderer_report_case(
+        tmp_path, config, report, generated_vinyl
+    )
+
+    assert checks["spectrum_mirror_mode"] is True
+    assert checks["spectrum_mirror_exact_symmetry"] is True
 
 
 @pytest.mark.parametrize("visual_style", ["vinyl", "spectrum"])

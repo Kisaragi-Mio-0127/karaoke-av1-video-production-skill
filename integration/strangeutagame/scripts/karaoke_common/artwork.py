@@ -101,7 +101,12 @@ def prepare_auto_artwork(
 ) -> dict[str, Any]:
     """Resolve or build a gated composition and optionally a fresh vinyl."""
 
-    if visual_style not in {"vinyl", "spectrum", "spectrum-line"}:
+    if visual_style not in {
+        "vinyl",
+        "spectrum",
+        "spectrum-line",
+        "spectrum-mirror",
+    }:
         raise ValueError(f"unsupported visual style: {visual_style}")
 
     artwork_dir = output_dir.resolve() / "artwork-current"

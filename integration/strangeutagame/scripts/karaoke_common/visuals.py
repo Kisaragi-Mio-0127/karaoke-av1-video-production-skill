@@ -6,7 +6,7 @@ import re
 
 from scripts.karaoke_common.layout import SubtitleLayout
 
-VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line")
+VISUAL_STYLES = ("vinyl", "spectrum", "spectrum-line", "spectrum-mirror")
 VINYL_MOTIONS = ("rotate", "static")
 
 
@@ -76,9 +76,9 @@ def build_visual_filter_graph(
             "pad=40:1:1:0:color=black,"
             "scale=4266:880:flags=bilinear,crop=4160:880:53:0,"
             "format=gray16le,"
-            "geq=lum='st(0\\,940-p(X\\,Y)/64.25);"
-            "st(1\\,940-p(107\\,Y)/64.25);"
-            "st(2\\,940-p(4052\\,Y)/64.25);"
+            "geq=lum='st(0\\,min(876\\,940-p(X\\,Y)/64.25));"
+            "st(1\\,min(876\\,940-p(107\\,Y)/64.25));"
+            "st(2\\,min(876\\,940-p(4052\\,Y)/64.25));"
             "st(3\\,if(lt(X\\,107)\\,"
             "clip(5-abs((ld(1)-876)*X-107*(Y-876))/"
             "sqrt((ld(1)-876)*(ld(1)-876)+11449)\\,0\\,1)\\,"
@@ -111,6 +111,60 @@ def build_visual_filter_graph(
             "[bgclip][lineouter]overlay=736:226:format=auto[linewide];"
             "[linewide][lineinner]overlay=736:226:format=auto[lineglow];"
             "[lineglow][linecore]overlay=800:296:format=auto[spectrumscene];"
+        )
+    elif visual_style == "spectrum-mirror":
+        spectrum_scene = (
+            f"[0:v]format=rgba,trim=start={start:.3f}:end={end:.3f},"
+            "setpts=PTS-STARTPTS[bgclip];"
+            f"[1:a]atrim=start={start:.3f}:end={end:.3f},"
+            "asetpts=PTS-STARTPTS,asplit=2[a][specaudio];"
+            "[specaudio]aformat=channel_layouts=mono,"
+            "showfreqs=s=38x104:r=30:mode=bar:ascale=log:fscale=log:"
+            "win_size=4096:overlap=0.80:averaging=4:colors=white,"
+            "format=gray16le,scale=38:1:flags=area,"
+            "pad=40:1:1:0:color=black,"
+            "scale=4266:416:flags=bilinear,crop=4160:416:53:0,"
+            "format=gray16le,"
+            "geq=lum='st(0\\,min(412\\,420-p(X\\,Y)/158.0));"
+            "st(1\\,min(412\\,420-p(107\\,Y)/158.0));"
+            "st(2\\,min(412\\,420-p(4052\\,Y)/158.0));"
+            "st(3\\,if(lt(X\\,107)\\,"
+            "clip(5-abs((ld(1)-412)*X-107*(Y-412))/"
+            "sqrt((ld(1)-412)*(ld(1)-412)+11449)\\,0\\,1)\\,"
+            "if(gt(X\\,4052)\\,"
+            "clip(5-abs((412-ld(2))*(X-4052)-107*(Y-ld(2)))/"
+            "sqrt((412-ld(2))*(412-ld(2))+11449)\\,0\\,1)\\,"
+            "clip(5-abs(Y-ld(0))\\,0\\,1))));"
+            "65535*ld(3)',"
+            "scale=1040:104:flags=lanczos,format=gray,"
+            "lut=y='if(lte(val\\,16)\\,0\\,val)',"
+            "pad=1040:220:0:4:color=black,"
+            "split=2[mirrorupper][mirrorflipsrc];"
+            "[mirrorflipsrc]vflip[mirrorlower];"
+            "[mirrorupper][mirrorlower]blend=all_mode=lighten,"
+            "split=3[mirrorcoremask][mirrorinnermask][mirroroutermask];"
+            "[mirrorinnermask]pad=1168:348:64:64:color=black,"
+            "gblur=sigma=5:steps=2,"
+            "drawbox=x=0:y=170:w=1168:h=8:color=black:t=fill,"
+            "drawbox=x=0:y=322:w=1168:h=26:color=black:t=fill,"
+            "lut=y='if(lte(val\\,16)\\,0\\,val*1.8)'[mirrormaskinner];"
+            "[mirroroutermask]pad=1168:348:64:64:color=black,"
+            "gblur=sigma=14:steps=2,"
+            "drawbox=x=0:y=170:w=1168:h=8:color=black:t=fill,"
+            "drawbox=x=0:y=322:w=1168:h=26:color=black:t=fill,"
+            "lut=y='if(lte(val\\,16)\\,0\\,val*1.5)'[mirrormaskouter];"
+            f"color=c=0x{color}:s=1040x220:r=30:d={duration:.3f},"
+            "format=rgba[mirrorcorecolor];"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
+            "format=rgba[mirrorinnercolor];"
+            f"color=c=0x{color}:s=1168x348:r=30:d={duration:.3f},"
+            "format=rgba[mirroroutercolor];"
+            "[mirrorcorecolor][mirrorcoremask]alphamerge[mirrorcore];"
+            "[mirrorinnercolor][mirrormaskinner]alphamerge[mirrorinner];"
+            "[mirroroutercolor][mirrormaskouter]alphamerge[mirrorouter];"
+            "[bgclip][mirrorouter]overlay=736:226:format=auto[mirrorwide];"
+            "[mirrorwide][mirrorinner]overlay=736:226:format=auto[mirrorglow];"
+            "[mirrorglow][mirrorcore]overlay=800:290:format=auto[spectrumscene];"
         )
     else:
         spectrum_scene = (

@@ -25,13 +25,19 @@ SLEEVE_BOXES = {
     "vinyl": (40, 30, 340, 402),
     "spectrum": (40, 30, 460, 522),
     "spectrum-line": (40, 30, 460, 522),
+    "spectrum-mirror": (40, 30, 460, 522),
 }
 BOTTOM_PANEL = (20, 576, 1900, 1050)
 BOTTOM_PANEL_FILL = (3, 5, 10, 92)
 SLEEVE_MARGIN = 20
 SLEEVE_FOOTER_HEIGHT = 70
 SLEEVE_BOTTOM_PADDING = 12
-TITLE_BLOCK_X = {"vinyl": 430, "spectrum": 800, "spectrum-line": 800}
+TITLE_BLOCK_X = {
+    "vinyl": 430,
+    "spectrum": 800,
+    "spectrum-line": 800,
+    "spectrum-mirror": 800,
+}
 TITLE_BLOCK_Y = {"label": 120, "title": 155, "artist": 220}
 SECONDARY_OVERLAY_SAFE_BOUNDS = (0, 0, 1920, 96)
 SECONDARY_OVERLAY_OUTLINE_PX = 3

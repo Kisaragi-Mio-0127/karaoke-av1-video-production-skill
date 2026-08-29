@@ -4580,7 +4580,11 @@ def render_karaoke_video(
         "spectrum_mode": (
             "glowing-40-point-zero-ended-stem-line"
             if visual_style == "spectrum-line"
-            else "glowing-bars" if visual_style == "spectrum" else None
+            else (
+                "glowing-symmetric-40-point-ripple"
+                if visual_style == "spectrum-mirror"
+                else "glowing-bars" if visual_style == "spectrum" else None
+            )
         ),
         "spectrum_bar_count": 80 if visual_style == "spectrum" else None,
         "spectrum_bar_corner_radius_px": 3 if visual_style == "spectrum" else None,
@@ -4602,7 +4606,9 @@ def render_karaoke_video(
             if is_spectrum_style
             else None
         ),
-        "spectrum_baseline_y": 516 if is_spectrum_style else None,
+        "spectrum_baseline_y": (
+            516 if visual_style in {"spectrum", "spectrum-line"} else None
+        ),
         "spectrum_baseline_visible": (
             False if visual_style == "spectrum-line" else None
         ),
@@ -4637,6 +4643,27 @@ def render_karaoke_video(
         ),
         "spectrum_stem_width_px": 2 if visual_style == "spectrum-line" else None,
         "spectrum_stem_alpha": 0.55 if visual_style == "spectrum-line" else None,
+        "spectrum_mirror_points": (
+            40 if visual_style == "spectrum-mirror" else None
+        ),
+        "spectrum_mirror_frequency_points": (
+            38 if visual_style == "spectrum-mirror" else None
+        ),
+        "spectrum_mirror_center_y": (
+            400 if visual_style == "spectrum-mirror" else None
+        ),
+        "spectrum_mirror_center_gap_px": (
+            4 if visual_style == "spectrum-mirror" else None
+        ),
+        "spectrum_mirror_exact_symmetry": (
+            True if visual_style == "spectrum-mirror" else None
+        ),
+        "spectrum_mirror_antialias": (
+            "4x-ssaa-lanczos" if visual_style == "spectrum-mirror" else None
+        ),
+        "spectrum_mirror_height_depth_bits": (
+            16 if visual_style == "spectrum-mirror" else None
+        ),
         "peak_hold": (
             {"enabled": True, "decay": 0.975, "half_life_seconds": 0.91}
             if visual_style == "spectrum"

@@ -594,7 +594,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
     )
     parser.add_argument(
-        "--visual-style", choices=("vinyl", "spectrum", "spectrum-line"), default="spectrum"
+        "--visual-style",
+        choices=("vinyl", "spectrum", "spectrum-line", "spectrum-mirror"),
+        default="spectrum",
     )
     parser.add_argument(
         "--output-mode",

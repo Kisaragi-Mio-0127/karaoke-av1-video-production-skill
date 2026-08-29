@@ -774,7 +774,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--background", type=Path)
     parser.add_argument(
         "--visual-style",
-        choices=("vinyl", "spectrum", "spectrum-line"),
+        choices=("vinyl", "spectrum", "spectrum-line", "spectrum-mirror"),
         default="vinyl",
     )
     parser.add_argument(

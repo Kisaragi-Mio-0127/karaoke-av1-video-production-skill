@@ -133,6 +133,49 @@ def _renderer_report(
             },
             "color_plan_sha256": color_plan["color_plan_sha256"],
         }
+    elif config.visual_style == "spectrum-line":
+        video = {
+            "visual_style": "spectrum-line",
+            "vinyl_motion": None,
+            "vinyl_asset": None,
+            "spectrum_geometry": {"x": 800, "y": 296, "width": 1040, "height": 220},
+            "spectrum_clip_safe_geometry": {
+                "x": 736,
+                "y": 226,
+                "width": 1168,
+                "height": 360,
+            },
+            "spectrum_mode": "glowing-40-point-damped-zero-ended-stem-line",
+            "spectrum_line_points": 40,
+            "spectrum_frequency_points": 38,
+            "spectrum_polyline_points": 40,
+            "spectrum_zero_boundary_points": 2,
+            "spectrum_zero_boundary_anchors": {
+                "left": {"x": 800, "y": 516},
+                "right": {"x": 1840, "y": 516},
+            },
+            "spectrum_line_antialias": "4x-ssaa-lanczos",
+            "spectrum_line_antialias_radius_px": 1.25,
+            "spectrum_line_height_depth_bits": 16,
+            "spectrum_line_supersample_factor": 4,
+            "spectrum_stems_to_zero_baseline": True,
+            "spectrum_stem_glow_to_zero_baseline": True,
+            "spectrum_baseline_y": 516,
+            "spectrum_baseline_visible": False,
+            "spectrum_stem_width_px": 2,
+            "spectrum_stem_alpha": 0.55,
+            "spectrum_line_temporal_smoothing": "5-frame-weighted-tmix",
+            "spectrum_line_temporal_weights": [0.34, 0.24, 0.18, 0.14, 0.10],
+            "spectrum_line_hysteresis_decay": 0.94,
+            "spectrum_line_hysteresis_half_life_seconds": 0.37,
+            "spectrum_line_reset_threshold_16bit": 1024,
+            "spectrum_color": color_plan["visual"]["spectrum_color"],
+            "color_plan_sha256": color_plan["color_plan_sha256"],
+            "progress_bar": {
+                "show_time": False,
+                "color": color_plan["visual"]["progress_color"],
+            },
+        }
     elif config.visual_style == "spectrum-mirror":
         video = {
             "visual_style": "spectrum-mirror",
@@ -641,6 +684,23 @@ def test_spectrum_mirror_renderer_report_accepts_current_contract(tmp_path: Path
     assert checks["spectrum_mirror_mode"] is True
     assert checks["spectrum_mirror_exact_symmetry"] is True
     assert checks["spectrum_mirror_stems_to_center"] is True
+
+
+def test_spectrum_line_renderer_report_accepts_damped_contract(tmp_path: Path):
+    config, report, generated_vinyl = _renderer_report_case(
+        tmp_path,
+        visual_style="spectrum-line",
+        color_policy="cover",
+    )
+
+    checks = _validate_renderer_report_case(
+        tmp_path, config, report, generated_vinyl
+    )
+
+    assert checks["spectrum_line_mode"] is True
+    assert checks["spectrum_line_temporal_smoothing"] is True
+    assert checks["spectrum_line_hysteresis_decay"] is True
+    assert checks["spectrum_line_reset_threshold"] is True
 
 
 def test_spectrum_dots_renderer_report_accepts_current_contract(tmp_path: Path):

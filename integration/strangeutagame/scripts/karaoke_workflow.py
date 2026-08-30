@@ -953,7 +953,7 @@ def validate_renderer_report(
             spectrum_checks.update(
                 {
                     "spectrum_line_mode": video.get("spectrum_mode")
-                    == "glowing-40-point-zero-ended-stem-line",
+                    == "glowing-40-point-damped-zero-ended-stem-line",
                     "spectrum_line_points": video.get("spectrum_line_points") == 40,
                     "spectrum_frequency_points": video.get(
                         "spectrum_frequency_points"
@@ -1005,6 +1005,26 @@ def validate_renderer_report(
                     is False,
                     "spectrum_stem_width": video.get("spectrum_stem_width_px") == 2,
                     "spectrum_stem_alpha": video.get("spectrum_stem_alpha") == 0.55,
+                    "spectrum_line_temporal_smoothing": video.get(
+                        "spectrum_line_temporal_smoothing"
+                    )
+                    == "5-frame-weighted-tmix",
+                    "spectrum_line_temporal_weights": video.get(
+                        "spectrum_line_temporal_weights"
+                    )
+                    == [0.34, 0.24, 0.18, 0.14, 0.10],
+                    "spectrum_line_hysteresis_decay": video.get(
+                        "spectrum_line_hysteresis_decay"
+                    )
+                    == 0.94,
+                    "spectrum_line_hysteresis_half_life": video.get(
+                        "spectrum_line_hysteresis_half_life_seconds"
+                    )
+                    == 0.37,
+                    "spectrum_line_reset_threshold": video.get(
+                        "spectrum_line_reset_threshold_16bit"
+                    )
+                    == 1024,
                 }
             )
         elif config.visual_style == "spectrum-mirror":

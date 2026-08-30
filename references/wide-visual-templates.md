@@ -89,7 +89,10 @@ when the renderer or canvas changes.
   clear. The two steep zero-anchor segments use perpendicular point-to-line
   distance coverage so they remain continuous at every slope. Low-energy
   heights clamp to `Y=0` so an interior point cannot fall outside the visible
-  rectangle and separate a boundary anchor.
+  rectangle and separate a boundary anchor. Across frames, a five-frame causal
+  weighted mix (`0.34/0.24/0.18/0.14/0.10`) limits abrupt upward movement;
+  `lagfun` decay `0.94` adds about `0.37 s` of hysteresis, and values below
+  `1024/65535` reset to zero so silence clears fully.
 - `spectrum-mirror` contains the same 40 equally spaced frequency points, draws
   a straight upper ripple, and creates the lower ripple by an exact vertical
   mirror. The visual centre is `y=400` with no gap. It uses a 16-bit height mask

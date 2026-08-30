@@ -25,6 +25,9 @@ def test_spectrum_line_graph_draws_40_point_polyline_and_vertical_stems():
     assert "asplit=2[a][specaudio]" in graph
     assert "showfreqs=s=38x220:r=30:mode=bar" in graph
     assert "format=gray16le,scale=38:1:flags=area" in graph
+    assert "tmix=frames=5:weights='0.34 0.24 0.18 0.14 0.10'" in graph
+    assert "lagfun=decay=0.94" in graph
+    assert "lut=y='if(lt(val\\,1024)\\,0\\,val)'" in graph
     assert "pad=40:1:1:0:color=black" in graph
     assert "scale=4266:880:flags=bilinear,crop=4160:880:53:0" in graph
     assert "st(0\\,min(876\\,940-p(X\\,Y)/64.25))" in graph

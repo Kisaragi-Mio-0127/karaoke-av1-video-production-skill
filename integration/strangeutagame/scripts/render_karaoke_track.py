@@ -4578,7 +4578,7 @@ def render_karaoke_video(
             else None
         ),
         "spectrum_mode": (
-            "glowing-40-point-zero-ended-stem-line"
+            "glowing-40-point-damped-zero-ended-stem-line"
             if visual_style == "spectrum-line"
             else (
                 "glowing-symmetric-40-point-ripple"
@@ -4655,6 +4655,23 @@ def render_karaoke_video(
         ),
         "spectrum_stem_width_px": 2 if visual_style == "spectrum-line" else None,
         "spectrum_stem_alpha": 0.55 if visual_style == "spectrum-line" else None,
+        "spectrum_line_temporal_smoothing": (
+            "5-frame-weighted-tmix" if visual_style == "spectrum-line" else None
+        ),
+        "spectrum_line_temporal_weights": (
+            [0.34, 0.24, 0.18, 0.14, 0.10]
+            if visual_style == "spectrum-line"
+            else None
+        ),
+        "spectrum_line_hysteresis_decay": (
+            0.94 if visual_style == "spectrum-line" else None
+        ),
+        "spectrum_line_hysteresis_half_life_seconds": (
+            0.37 if visual_style == "spectrum-line" else None
+        ),
+        "spectrum_line_reset_threshold_16bit": (
+            1024 if visual_style == "spectrum-line" else None
+        ),
         "spectrum_mirror_points": (
             40 if visual_style == "spectrum-mirror" else None
         ),

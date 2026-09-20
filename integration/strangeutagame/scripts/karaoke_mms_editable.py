@@ -447,8 +447,7 @@ def create_mms_editable_companion(
             handle.write(companion_bytes)
             handle.flush()
             os.fsync(handle.fileno())
-        SugProjectParser.load(str(temporary))
-        extras = SugProjectParser.load_extras(str(temporary))
+        _, extras = SugProjectParser.load_with_extras(str(temporary))
         if extras.get("media_path") != companion["media_path"]:
             raise MmsEditableError("editable MMS companion media_path did not round-trip")
         if companion_sidecar is not None:

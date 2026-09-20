@@ -16,9 +16,9 @@ load. A successful parser load does not bypass the installer's exact
 application-version and SUG-format checks; unsupported targets are reported
 before files are copied.
 
-The `main` branch targets StrangeUtaGame 1.6.2 with SUG format 0.3.0. Exact
-integrations for earlier application releases remain on `sug-1.5.0` and
-`sug-1.4.5`.
+The `main` branch targets StrangeUtaGame 1.6.8 with SUG format 0.3.0. Exact
+integrations for earlier application releases remain on `sug-1.6.2`,
+`sug-1.5.0`, and `sug-1.4.5`.
 
 ## What is automatic
 

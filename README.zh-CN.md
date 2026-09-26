@@ -138,6 +138,8 @@ uv run --no-sync python scripts/run_karaoke_japanese_mms_workflow.py `
 
 Full-auto、分阶段MMS和已有SUG重渲染命令都接受`--output-mode subtitle-overlay`。省略`--background-video`时输出无音频、带透明通道的ProRes 4444 MOV，供剪辑软件合成。提供`--background-video <视频素材>`时由FFmpeg直接生成常规AV1/AAC MP4：较长素材裁至歌曲区间，较短素材的剩余区间显示黑幕。编码会依次探测`av1_nvenc`和`libaom-av1`；NVENC不可用或渲染失败时自动改用软件AV1编码器。
 
+添加 `--subtitle-style jump` 可启用跳跃字幕：唱到的字变为演唱者颜色，向上弹起并落回原位；上方注音沿用对应歌词的起止时间和演唱者颜色进行扫色，并增加垂直间距。默认 `--subtitle-style sweep` 保留原有样式。全自动、分阶段 MMS、已有 SUG 重渲染和单曲渲染入口均支持该选项，可搭配透明字幕层和背景视频使用。
+
 从已有调整后SUG重新渲染日文视频：
 
 ```powershell

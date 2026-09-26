@@ -225,6 +225,13 @@ long footage is trimmed to the song interval, while short footage is followed
 by black through the remaining interval. Encoding probes `av1_nvenc` first and
 automatically retries `libaom-av1` when NVENC is unavailable or its render fails.
 
+Add `--subtitle-style jump` to make each sung glyph turn to its singer colour,
+bounce upward, and return to its original position. Ruby above it sweeps through
+the matching lyric interval in the same colour, with extra vertical clearance.
+The default `--subtitle-style sweep` preserves the existing effect. This option
+works with full-auto, staged MMS, existing-SUG rerenders, and the direct track
+renderer, including transparent subtitle layers and supplied background videos.
+
 Japanese video rerender from an existing adjusted SUG:
 
 ```powershell

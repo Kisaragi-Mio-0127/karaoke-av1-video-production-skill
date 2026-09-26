@@ -100,6 +100,11 @@
       "reason": "Builds transparent ProRes subtitle-layer and supplied-video FFmpeg commands without changing SUG timing."
     },
     {
+      "path": "karaoke_common/subtitle_styles.py",
+      "category": "package-file",
+      "reason": "Builds timed jumping subtitle events with synchronized singer colours for the karaoke renderer."
+    },
+    {
       "path": "karaoke_common/visuals.py",
       "category": "package-file",
       "reason": "Owns the vinyl and spectrum FFmpeg filter graphs used by the single-track renderer."

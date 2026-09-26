@@ -412,6 +412,8 @@ def _wrapper_args(plan: FullAutoPlan, args: argparse.Namespace) -> argparse.Name
         str(plan.vocals_root),
         "--visual-style",
         args.visual_style,
+        "--subtitle-style",
+        args.subtitle_style,
         "--output-mode",
         args.output_mode,
         "--device",
@@ -611,6 +613,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="standard",
     )
     parser.add_argument("--background-video", type=Path)
+    parser.add_argument(
+        "--subtitle-style", choices=("sweep", "jump"), default="sweep"
+    )
     parser.add_argument("--composition", type=Path)
     parser.add_argument("--cover", type=Path)
     parser.add_argument("--background", type=Path)

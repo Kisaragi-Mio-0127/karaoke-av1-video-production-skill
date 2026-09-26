@@ -1000,11 +1000,25 @@ def validate_ass_for_render(ass_path: Path, font_family: str) -> dict[str, Any]:
     position_pattern = re.compile(
         rf"\\pos\(({number_pattern}),\s*({number_pattern})\)"
     )
+    move_pattern = re.compile(
+        rf"\\move\(({number_pattern}),\s*({number_pattern}),\s*"
+        rf"({number_pattern}),\s*({number_pattern})(?:,|\))"
+    )
     positions: list[tuple[float, float]] = []
     position_records: list[dict[str, Any]] = []
     for dialogue in dialogues:
-        for match in position_pattern.finditer(dialogue["text"]):
-            x, y = float(match.group(1)), float(match.group(2))
+        coordinates = [
+            (float(match.group(1)), float(match.group(2)))
+            for match in position_pattern.finditer(dialogue["text"])
+        ]
+        for match in move_pattern.finditer(dialogue["text"]):
+            coordinates.extend(
+                [
+                    (float(match.group(1)), float(match.group(2))),
+                    (float(match.group(3)), float(match.group(4))),
+                ]
+            )
+        for x, y in coordinates:
             positions.append((x, y))
             position_records.append(
                 {"line": dialogue["line"], "style": dialogue["style"], "x": x, "y": y}

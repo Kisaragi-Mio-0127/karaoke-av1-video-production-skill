@@ -146,6 +146,7 @@ class WorkflowConfig:
     timing_override_song_id: str | None = None
     output_mode: str = "standard"
     background_video: Path | None = None
+    subtitle_style: str = "sweep"
 
 
 def sha256_file(path: Path) -> str:
@@ -221,6 +222,10 @@ def validate_output_mode_options(
 
 
 def validate_visual_contract(config: WorkflowConfig) -> None:
+    if config.subtitle_style not in ("sweep", "jump"):
+        raise KaraokeWorkflowError(
+            f"unsupported subtitle style: {config.subtitle_style!r}"
+        )
     if (config.timing_overrides is None) != (
         config.timing_override_song_id is None
     ):
@@ -383,6 +388,8 @@ def build_ass_command(
         config.layout,
         "--visual-style",
         renderer_visual_style,
+        "--subtitle-style",
+        config.subtitle_style,
         "--color-policy",
         config.color_policy,
     ]
@@ -1331,6 +1338,7 @@ def run_workflow(
         "output_mode": config.output_mode,
         "visual_style": config.visual_style,
         "vinyl_motion": "rotate" if is_vinyl else None,
+        "subtitle_style": config.subtitle_style,
         "full_decode": _full_decode_report(requested=config.full_decode),
         "lossless_companion": {
             "requested": config.lossless_companion,
@@ -1913,6 +1921,12 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--subtitle-style",
+        choices=("sweep", "jump"),
+        default="sweep",
+        help="sweep colouring or jumping glyphs with synchronized ruby colouring",
+    )
+    parser.add_argument(
         "--background-video",
         type=Path,
         help=(
@@ -2017,6 +2031,7 @@ def config_from_args(
         smoke_duration=args.smoke_duration,
         pronunciation_validation=pronunciation_validation,
         visual_style=args.visual_style,
+        subtitle_style=args.subtitle_style,
         color_policy=(
             args.color_policy
             or ("project" if args.output_mode == "subtitle-overlay" else "cover")

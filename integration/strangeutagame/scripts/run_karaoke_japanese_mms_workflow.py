@@ -664,6 +664,7 @@ def run_mms_workflow(
             smoke_duration=args.smoke_duration,
             pronunciation_validation=args.pronunciation_validation,
             visual_style=args.visual_style,
+            subtitle_style=args.subtitle_style,
             color_policy=(
                 args.color_policy
                 or ("project" if args.output_mode == "subtitle-overlay" else "cover")
@@ -790,6 +791,9 @@ def make_parser() -> argparse.ArgumentParser:
         default="standard",
     )
     parser.add_argument("--background-video", type=Path)
+    parser.add_argument(
+        "--subtitle-style", choices=("sweep", "jump"), default="sweep"
+    )
     parser.add_argument("--vinyl", dest="canonical_vinyl", type=Path)
     parser.add_argument("--color-policy", choices=("cover", "project"), default=None)
     parser.add_argument("--singer-color", action="append", default=[])

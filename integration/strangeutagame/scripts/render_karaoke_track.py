@@ -54,6 +54,11 @@ from scripts.karaoke_common.pronunciation import (  # noqa: E402
     load_pronunciation_sidecar,
     validate_pronunciation,
 )
+from scripts.karaoke_common.subtitle_styles import (  # noqa: E402
+    JUMP_HEIGHT_PX,
+    SUBTITLE_STYLES,
+    jump_glyph_events,
+)
 from scripts.karaoke_common.visuals import (  # noqa: E402
     VINYL_MOTIONS,
     VISUAL_STYLES,
@@ -1007,6 +1012,7 @@ def main_glyph_events(
     main_layer: int = 2,
     geometry: TextGeometry | None = None,
     character_colors: list[str] | None = None,
+    subtitle_style: str = "sweep",
 ) -> list[str]:
     """Render every base character at an explicit center shared with its ruby span."""
 
@@ -1048,6 +1054,27 @@ def main_glyph_events(
         lead_in_cs = max(0, onset - event_start_ms) // 10
         x = (geometry.glyph_starts[index] + geometry.glyph_ends[index]) / 2.0
         color = character_colors[index] if character_colors is not None else None
+        if subtitle_style == "jump":
+            result.extend(
+                jump_glyph_events(
+                    _escape_ass_text(character.char),
+                    x=int(round(x)),
+                    y=lane.main_y,
+                    onset_ms=onset,
+                    release_ms=releases[index],
+                    event_start_ms=event_start_ms,
+                    event_end_ms=event_end_ms,
+                    font_size=font_size,
+                    outline_px=outline_px,
+                    glow_blur=glow_blur,
+                    color_ass=_ass_bgr(color or DEFAULT_HIGHLIGHT_COLOR),
+                    glow_style=glow_style,
+                    main_style=main_style,
+                    glow_layer=glow_layer,
+                    main_layer=main_layer,
+                )
+            )
+            continue
         color_override = (
             f"\\1c{_ass_bgr(color)}\\2c&H00FFFFFF"
             if color is not None
@@ -1190,6 +1217,12 @@ def ruby_events(
     outline_px: int = RUBY_OUTLINE_PX,
     glow_blur: int = RUBY_GLOW_BLUR,
     geometry: TextGeometry | None = None,
+    subtitle_style: str = "sweep",
+    release_ms: int | None = None,
+    offset_ms: int = 0,
+    onset_overrides: dict[int, int] | None = None,
+    release_overrides: dict[int, int] | None = None,
+    character_colors: list[str] | None = None,
 ) -> list[str]:
     if not uses_ruby(language):
         return []
@@ -1199,6 +1232,23 @@ def ruby_events(
         )
     if not tokens:
         return []
+    onsets: list[int] = []
+    releases: list[int] = []
+    if subtitle_style == "jump":
+        if release_ms is None:
+            raise ValueError("jump ruby requires the lyric release time")
+        onsets = _character_onsets(
+            sentence,
+            offset_ms=offset_ms,
+            onset_overrides=onset_overrides,
+            release_ms=release_ms,
+        )
+        releases = _character_releases(
+            onsets,
+            release_ms=release_ms,
+            offset_ms=offset_ms,
+            release_overrides=release_overrides,
+        )
     if geometry is None:
         geometry = text_geometry(
             font_file,
@@ -1217,9 +1267,27 @@ def ruby_events(
             geometry.glyph_starts[token.start]
             + geometry.glyph_ends[token.end - 1]
         ) / 2.0
+        timing_override = ""
+        ruby_y = lane.ruby_y
+        if subtitle_style == "jump" and onsets:
+            # Reserve the base glyph's upward travel beneath the reading.
+            ruby_y -= min(JUMP_HEIGHT_PX, round(main_font_size * 0.18))
+            onset = onsets[token.start]
+            duration_cs = max(1, round((releases[token.end - 1] - onset) / 10))
+            lead_in_cs = max(0, onset - event_start_ms) // 10
+            color = (
+                character_colors[token.start]
+                if character_colors is not None
+                else DEFAULT_HIGHLIGHT_COLOR
+            )
+            timing_override = (
+                f"\\1c{_ass_bgr(color)}\\2c&H00FFFFFF"
+                f"\\k{lead_in_cs}\\kf{duration_cs}"
+            )
         common_override = (
-            f"{{\\an8\\pos({int(round(x))},{lane.ruby_y})"
-            f"\\fs{ruby_font_size}\\bord{outline_px}\\fad(80,120)}}"
+            f"{{\\an8\\pos({int(round(x))},{ruby_y})"
+            f"\\fs{ruby_font_size}\\bord{outline_px}\\fad(80,120)"
+            f"{timing_override}}}"
         )
         glow_override = common_override[:-1] + f"\\blur{glow_blur}}}"
         escaped = _escape_ass_text(token.reading)
@@ -2935,7 +3003,10 @@ def build_karaoke_ass(
     offset_ms: int = 0,
     ruby_sidecar: Mapping[str, Any] | None = None,
     pronunciation_validation: str = "optional",
+    subtitle_style: str = "sweep",
 ) -> dict:
+    if subtitle_style not in SUBTITLE_STYLES:
+        raise ValueError(f"unsupported subtitle style: {subtitle_style}")
     visual_release_overrides = visual_release_overrides or {}
     language = _project_language(project)
     canonical_spans = iter_sug_ruby_spans(project)
@@ -2971,6 +3042,7 @@ def build_karaoke_ass(
         "[Script Info]",
         "; Generator: StrangeUtaGame karaoke renderer",
         f"; Layout: {layout.name}",
+        f"; Subtitle style: {subtitle_style}",
         f"; Language: {identity['code']} ({identity['name']})",
         f"; Ruby policy: {identity['ruby_policy']}",
         f"; Pronunciation validation mode: {pronunciation_result.mode}",
@@ -3281,6 +3353,8 @@ def build_karaoke_ass(
             ],
             lane=target_lane,
         )
+        if subtitle_style == "jump" and uses_ruby(language):
+            cue_y -= min(JUMP_HEIGHT_PX, round(layout.main_font_size * 0.18))
         placement = VocalCuePlacement(
             cue=cue,
             x=cue_x,
@@ -3366,7 +3440,7 @@ def build_karaoke_ass(
             letter_spacing_em=layout.letter_spacing_em,
             word_gap_em=layout.word_gap_em,
         )
-        if language == "en":
+        if language == "en" and subtitle_style == "sweep":
             events.extend(
                 english_word_karaoke_events(
                     sentence,
@@ -3406,6 +3480,7 @@ def build_karaoke_ass(
                     glow_blur=layout.main_glow_blur,
                     geometry=geometry,
                     character_colors=item["singer_audit"]["character_colors"],
+                    subtitle_style=subtitle_style,
                 )
             )
         events.extend(
@@ -3427,6 +3502,12 @@ def build_karaoke_ass(
                 outline_px=layout.ruby_outline_px,
                 glow_blur=layout.ruby_glow_blur,
                 geometry=geometry,
+                subtitle_style=subtitle_style,
+                release_ms=release_ms,
+                offset_ms=offset_ms,
+                onset_overrides=item["visual_onset_overrides"],
+                release_overrides=item["visual_release_overrides"],
+                character_colors=item["singer_audit"]["character_colors"],
             )
         )
         visual_character_onsets = _character_onsets(
@@ -3601,6 +3682,7 @@ def build_karaoke_ass(
                 main_layer=8,
                 geometry=geometry,
                 character_colors=item["singer_audit"]["character_colors"],
+                subtitle_style=subtitle_style,
             )
         )
         secondary_diagnostics.append(
@@ -3734,6 +3816,7 @@ def build_karaoke_ass(
                 glow_blur=layout.main_glow_blur,
                 character_colors=[highlight_color]
                 * len(marker_sentence.characters),
+                subtitle_style=subtitle_style,
             )
         )
         marker_ruby = "お" if language == "ja" else None
@@ -3763,6 +3846,10 @@ def build_karaoke_ass(
                     language=language,
                     outline_px=layout.ruby_outline_px,
                     glow_blur=layout.ruby_glow_blur,
+                    subtitle_style=subtitle_style,
+                    release_ms=marker_end_ms,
+                    character_colors=[highlight_color]
+                    * len(marker_sentence.characters),
                 )
             )
         outro = {
@@ -3944,6 +4031,7 @@ def build_karaoke_ass(
     canonical_ruby_spans = [token.to_dict() for token in canonical_project_ruby_tokens]
     return {
         "ass": str(output_path),
+        "subtitle_style": subtitle_style,
         "language": language,
         "language_identity": identity,
         "ruby_enabled": uses_ruby(language),
@@ -4928,6 +5016,12 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timing-overrides", type=Path)
     parser.add_argument("--song-id")
     parser.add_argument(
+        "--subtitle-style",
+        choices=SUBTITLE_STYLES,
+        default="sweep",
+        help="sweep colouring or jumping glyphs with synchronized ruby colouring",
+    )
+    parser.add_argument(
         "--visual-style",
         choices=VISUAL_STYLES,
         default="vinyl",
@@ -5059,6 +5153,7 @@ def main(argv: list[str] | None = None) -> int:
         offset_ms=args.offset_ms,
         ruby_sidecar=ruby_sidecar,
         pronunciation_validation=args.pronunciation_validation,
+        subtitle_style=args.subtitle_style,
     )
     if color_plan is not None:
         ass_report["color_plan"] = color_plan
